@@ -1,0 +1,72 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "finmeta"
+version = "0.1.0"
+description = "Kometa-equivalent for Jellyfin (plan, apply, undo)"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "apscheduler>=3.10",
+    "bcrypt>=4.1",
+    "cryptography>=42.0",
+    "imageio-ffmpeg>=0.4.9",
+    "requests>=2.31",
+    "PyYAML>=6.0",
+    "httpx>=0.24",
+    "pydantic>=2.0",
+    "croniter>=1.4",
+    # >=13: 12.3.0 and earlier carry 24 CVEs in the image decoders, and every
+    # image Finmeta decodes is untrusted input (TMDb/fanart downloads,
+    # imported third-party packs). Raised 2026-10-22, see
+    # docs/SECURITY_REVIEW.md "H4".
+    "Pillow>=13.0.0",
+    # The CA bundle every outbound TLS call uses; <2026.10.19 is vulnerable.
+    "certifi>=2026.10.19",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7", "respx>=0.21", "jsonschema>=4.0",
+    # Static analysis + dependency audit (CLAUDE.md §5 asks for both).
+    "ruff>=0.5", "pip-audit>=2.7",
+]
+
+
+[project.scripts]
+finmeta = "finmeta.cli.main:main"
+
+[tool.setuptools.packages.find]
+where = ["backend"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "live: tests that hit the live Jellyfin test server",
+    "tmdb: tests that call the TMDb API",
+    # Was unregistered despite being the marker the documented fast-suite
+    # command filters on (`-m "not e2e and not live"`).
+    "e2e: end-to-end tests against the fixture tree + test Jellyfin",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+exclude = [".venv", ".tools", "backend/finmeta/web"]
+
+[tool.ruff.lint]
+# Correctness and security rules only -- deliberately NOT the pyupgrade /
+# import-sorting families, which would flag ~1200 purely stylistic items
+# across a working codebase and bury real findings. F = pyflakes (undefined
+# names, unused imports/variables, redefinitions), B = bugbear, S = bandit.
+select = ["F", "B", "S"]
+ignore = [
+    "S101",    # assert -- the test suite is built on it
+    "B008",    # function call in default arg -- this is how FastAPI Depends() works
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S105", "S106", "S107"]   # hardcoded test credentials are the point

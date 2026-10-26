@@ -1,0 +1,38 @@
+# Logo pack: Kometa overlay images (Kometa-Team/Kometa, MIT).
+# Maps Finmeta element keys to files in the upstream repo; downloaded on demand by
+# POST /api/assets/logo-packs/kometa/install into <config>/assets/logos/kometa/.
+# Never committed to this repo or shipped in the image (trademarks of their owners).
+name: kometa
+repo: Kometa-Team/Kometa
+ref: master
+base_url: https://raw.githubusercontent.com/{repo}/{ref}/
+files:
+  # rating logos (logo + value text side by side)
+  imdb: defaults/overlays/images/rating/IMDb.png
+  tmdb: defaults/overlays/images/rating/TMDb.png
+  metacritic: defaults/overlays/images/rating/Metacritic.png
+  letterboxd: defaults/overlays/images/rating/Letterboxd.png
+  trakt: defaults/overlays/images/rating/Trakt.png
+  # K10 step 2: RT critic state logos (>=60 fresh, <60 rotten; no Certified Fresh).
+  rt_fresh: defaults/overlays/images/rating/CriticFresh.png
+  rt_rotten: defaults/overlays/images/rating/CriticRotten.png
+  rt_audience_upright: defaults/overlays/images/rating/AudienceFresh.png
+  rt_audience_spilled: defaults/overlays/images/rating/AudienceSpilled.png
+  # resolution badges (image-only, no text)
+  res_4k: defaults/overlays/images/resolution/4k.png
+  res_1080p: defaults/overlays/images/resolution/1080p.png
+  res_720p: defaults/overlays/images/resolution/720p.png
+  res_480p: defaults/overlays/images/resolution/480p.png
+  # HDR / Dolby Vision badges (image-only)
+  hdr: defaults/overlays/images/resolution/hdr.png
+  hdr10plus: defaults/overlays/images/resolution/dvhdrplus.png
+  dv: defaults/overlays/images/resolution/dv.png
+  dv_hdr: defaults/overlays/images/resolution/dvhdr.png
+  # audio codec badges (image-only; compact variants keep poster space small)
+  atmos: defaults/overlays/images/audio_codec/compact/atmos.png
+  dtsx: defaults/overlays/images/audio_codec/compact/dtsx.png
+  truehd: defaults/overlays/images/audio_codec/compact/truehd.png
+  dtshd_ma: defaults/overlays/images/audio_codec/compact/ma.png
+  dd_plus: defaults/overlays/images/audio_codec/compact/plus.png
+  dd: defaults/overlays/images/audio_codec/compact/digital.png
+  aac: defaults/overlays/images/audio_codec/compact/aac.png

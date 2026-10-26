@@ -1,0 +1,71 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    name: Backend tests (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Generate the synthetic test library
+        run: python fixture/generate.py
+      - name: Fast suite (offline, no live Jellyfin/API calls)
+        run: python -m pytest -q -m "not e2e and not live"
+
+  frontend:
+    name: Frontend build (tsc + vite)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: ui/package-lock.json
+      - run: npm ci
+      - run: npm run build
+
+  docker:
+    name: Docker build + smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image
+        run: docker build -t finmeta:ci .
+      - name: Run it
+        run: docker run -d --name finmeta-ci -p 8765:8765 finmeta:ci
+      - name: Wait for /api/health
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8765/api/health >/dev/null; then exit 0; fi
+            sleep 2
+          done
+          echo "::error::/api/health never came up"
+          exit 1
+      - name: The web UI must actually be served, not just the API
+        # Regression check: a non-editable `pip install .` in the image
+        # copies the package into site-packages, which breaks app.py's
+        # __file__-relative lookup of the built UI directory -- /api/health
+        # alone stays green while every UI route silently 404s. Caught once
+        # by hand against a fresh clone of the public repo; this job is what
+        # catches it automatically from now on.
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8765/)
+          echo "GET / -> $code"
+          test "$code" = "200"
+      - name: Container logs
+        if: always()
+        run: docker logs finmeta-ci

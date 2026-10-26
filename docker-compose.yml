@@ -1,0 +1,30 @@
+# Example production compose file for Finmeta.
+# Copy, edit the paths/vars below, then: docker compose up -d
+services:
+  finmeta:
+    build: .
+    # Or, once published: image: ghcr.io/<you>/finmeta:latest
+    container_name: finmeta
+    # Match the uid:gid that owns your media/config paths on the host
+    # (e.g. 99:100 on Unraid). Omit to use the image default, 1000:1000.
+    user: "1000:1000"
+    environment:
+      - TZ=Etc/UTC
+      - FINMETA_PORT=8765
+      - JELLYFIN_API_KEY=${JELLYFIN_API_KEY}
+      - TMDB_KEY=${TMDB_KEY}
+      # Encrypts stored secrets (API keys) at rest. Generate one with:
+      #   python -c "import secrets; print(secrets.token_urlsafe(32))"
+      # - FINMETA_SECRET_KEY=
+      # Set to 1 once Finmeta is served behind HTTPS (reverse proxy).
+      # - FINMETA_COOKIE_SECURE=1
+    volumes:
+      - ./config:/config
+      # Must match a `path_mappings` entry in config.yml.
+      - /path/to/your/media:/media
+      # Optional, read-only: lets you import an existing Kometa config/packs
+      # from the UI without granting write access to it.
+      # - /path/to/kometa:/import/kometa:ro
+    ports:
+      - "8765:8765"
+    restart: unless-stopped

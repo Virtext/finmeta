@@ -1,0 +1,1398 @@
+{
+  "$defs": {
+    "ArtworkSelection": {
+      "additionalProperties": false,
+      "description": "Which candidate is picked automatically per artwork kind (S9d4a).",
+      "properties": {
+        "preset": {
+          "default": "best_rated",
+          "description": "How the automatic choice is made among candidates.",
+          "enum": [
+            "best_rated",
+            "random_top_n"
+          ],
+          "help": "`best_rated` picks the highest-rated candidate (TMDb `vote_average`, `vote_count` as tiebreak). `random_top_n` picks one of the top N candidates \u2014 deterministically: the same item, kind and reshuffle count always give the same image; use the Reshuffle button to change it.",
+          "title": "Preset",
+          "type": "string"
+        },
+        "top_n": {
+          "default": 3,
+          "description": "How many of the best candidates `random_top_n` may choose from.",
+          "help": "For the `random_top_n` preset: how many of the best-ranked candidates are eligible for the (deterministic) pick. Default 3.",
+          "maximum": 50,
+          "minimum": 1,
+          "title": "Top N",
+          "type": "integer"
+        }
+      },
+      "title": "ArtworkSelection",
+      "type": "object"
+    },
+    "FanartSource": {
+      "additionalProperties": false,
+      "properties": {
+        "api_key_env": {
+          "default": "FANART_KEY",
+          "description": "Name of the environment variable holding the fanart.tv API key.",
+          "help": "Env var name holding your fanart.tv key (not the key itself). Get one at https://www.fanart.tv/user/apikey. Optional.",
+          "title": "Api Key Env",
+          "type": "string"
+        },
+        "enabled": {
+          "default": false,
+          "description": "Enable fanart.tv as an artwork source.",
+          "help": "Turn fanart.tv on/off. Off by default; useful for extra logos and landscape art. Requires a fanart.tv key to be set.",
+          "title": "Enabled",
+          "type": "boolean"
+        }
+      },
+      "title": "FanartSource",
+      "type": "object"
+    },
+    "Filter": {
+      "additionalProperties": false,
+      "properties": {
+        "genres": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Restrict to these genres (match any).",
+          "help": "Only include items with any of these genres (case-insensitive, match any). Empty = any genre.",
+          "title": "Genres"
+        },
+        "min_rating": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum rating threshold (0-10 scale).",
+          "help": "Only include items rated at least this high (on a 0-10 scale, matching the rating Finmeta computes). Empty = no minimum.",
+          "title": "Min Rating"
+        },
+        "year_from": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum release year (inclusive).",
+          "help": "Only include items released in this year or later. Empty = no lower bound.",
+          "title": "Year From"
+        },
+        "year_to": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Maximum release year (inclusive).",
+          "help": "Only include items released in this year or earlier. Empty = no upper bound.",
+          "title": "Year To"
+        }
+      },
+      "title": "Filter",
+      "type": "object"
+    },
+    "FilterCollection": {
+      "additionalProperties": false,
+      "properties": {
+        "filter": {
+          "$ref": "#/$defs/Filter",
+          "description": "Filter that defines membership.",
+          "help": "The filter (year range, min rating, genres) that selects which library items belong to this collection. Required for `filter` collections."
+        },
+        "library": {
+          "description": "Library this collection is built from.",
+          "help": "The library (key from `libraries`) whose items are used to build this collection. Must reference a configured library.",
+          "title": "Library",
+          "type": "string"
+        },
+        "name": {
+          "description": "Display name of the collection.",
+          "help": "The name shown in Jellyfin for this collection. Must be unique among collections you define.",
+          "title": "Name",
+          "type": "string"
+        },
+        "type": {
+          "const": "filter",
+          "description": "Collection type discriminator (filter-based).",
+          "help": "Fixed value `filter`. Builds a collection from library items that match the `filter`. The `filter` is required for this type.",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "library",
+        "filter",
+        "type"
+      ],
+      "title": "FilterCollection",
+      "type": "object"
+    },
+    "ImdbDatasetsSource": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Enable IMDb bulk datasets as a ratings source.",
+          "help": "Turn the IMDb bulk dataset on/off. Off by default. Downloads IMDb's `title.ratings.tsv.gz` (at most once per 24h), indexes it by tconst and provides the IMDb rating + vote count with no API key. Note: this is the IMDb non-commercial dataset \u2014 see the IMDb datasets help in the External services tab for the licence.",
+          "title": "Enabled",
+          "type": "boolean"
+        }
+      },
+      "title": "ImdbDatasetsSource",
+      "type": "object"
+    },
+    "ListCollection": {
+      "additionalProperties": false,
+      "properties": {
+        "filter": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Filter"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional filter applied to the library items.",
+          "help": "Optional constraints (year range, min rating, genres) applied on top of the library. Required for `filter`-type collections; ignored for `tmdb_collection`."
+        },
+        "library": {
+          "description": "Library this collection is built from.",
+          "help": "The library (key from `libraries`) whose items are used to build this collection. Must reference a configured library.",
+          "title": "Library",
+          "type": "string"
+        },
+        "name": {
+          "description": "Display name of the collection.",
+          "help": "The name shown in Jellyfin for this collection. Must be unique among collections you define.",
+          "title": "Name",
+          "type": "string"
+        },
+        "tmdb_ids": {
+          "description": "List of TMDb item ids to include.",
+          "help": "Explicit TMDb numeric ids to include, e.g. `[27205, 157336, 155]`. Each is matched against library items; unmatched ids are skipped.",
+          "items": {
+            "type": "integer"
+          },
+          "title": "Tmdb Ids",
+          "type": "array"
+        },
+        "type": {
+          "const": "list",
+          "description": "Collection type discriminator (explicit TMDb id list).",
+          "help": "Fixed value `list`. Builds a collection from an explicit list of TMDb ids. Useful for curated, hand-picked collections.",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "library",
+        "type",
+        "tmdb_ids"
+      ],
+      "title": "ListCollection",
+      "type": "object"
+    },
+    "LocalSource": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Enable the local asset directory as an artwork source.",
+          "help": "Use artwork files you place on disk (e.g. hand-made overlays or theme songs). Off by default. See `path` for where to put them.",
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "path": {
+          "default": "/assets",
+          "description": "Local directory holding user-supplied artwork.",
+          "help": "Directory (in the local filesystem) where you drop your own artwork assets. Only used when the local source is enabled. In the shipped container this is typically `/config/assets`.",
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "title": "LocalSource",
+      "type": "object"
+    },
+    "MdblistSource": {
+      "additionalProperties": false,
+      "properties": {
+        "api_key_env": {
+          "default": "MDBLIST_KEY",
+          "description": "Name of the environment variable holding the MDBList API key.",
+          "help": "Env var name holding your MDBList API key (not the key itself). Set the key via that env var or in Settings. Get a key at https://api.mdblist.com. Free tier is 1,000 requests/day.",
+          "title": "Api Key Env",
+          "type": "string"
+        },
+        "enabled": {
+          "default": false,
+          "description": "Enable MDBList as a ratings source.",
+          "help": "Turn MDBList on/off. Off by default. Aggregates IMDb, Rotten Tomatoes (critic + audience), Metacritic, Trakt, Letterboxd and TMDb ratings in one call. Requires an API key (the `mdblist_key` secret or env var MDBLIST_KEY). Responses are cached with a 7 day TTL and the client is rate-limit aware.",
+          "title": "Enabled",
+          "type": "boolean"
+        }
+      },
+      "title": "MdblistSource",
+      "type": "object"
+    },
+    "MediaAppInstance": {
+      "additionalProperties": false,
+      "properties": {
+        "api_key": {
+          "description": "Name of the secret holding this instance's API key.",
+          "help": "The *name* of the secret that holds this instance's API key (e.g. `radarr_key`). The key value is set in Settings and never stored here \u2014 only this name lives in the config.",
+          "title": "Api Key",
+          "type": "string"
+        },
+        "enabled": {
+          "default": true,
+          "description": "Include this instance in Sonarr/Radarr operations.",
+          "help": "Turn this instance on/off without removing it. Disabled instances are skipped by the Sonarr/Radarr integration but still show up in Settings.",
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "name": {
+          "description": "Unique instance name (e.g. `Radarr`, `Sonarr4K`).",
+          "help": "A unique name for this Sonarr/Radarr instance, e.g. `Radarr` or `Sonarr4K`. Used to identify the instance and to look up the secret holding its API key.",
+          "title": "Name",
+          "type": "string"
+        },
+        "timeout": {
+          "default": 30.0,
+          "description": "Per-request timeout, in seconds.",
+          "exclusiveMinimum": 0,
+          "help": "How long to wait, in seconds, for each request to this instance before giving up (default 30).",
+          "title": "Timeout",
+          "type": "number"
+        },
+        "url": {
+          "description": "Instance URL (scheme + host + port).",
+          "help": "The address of this Sonarr/Radarr instance, e.g. `http://192.168.1.10:7878`. Same container/`localhost` caveat as the Jellyfin URL: inside a container use the LAN IP or the container name.",
+          "title": "Url",
+          "type": "string"
+        },
+        "verify_ssl": {
+          "default": true,
+          "description": "Verify TLS certificates for https connections.",
+          "help": "Verify the server's TLS certificate for `https` URLs (default on). Turn off only for a trusted self-signed cert.",
+          "title": "Verify Ssl",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "url",
+        "api_key"
+      ],
+      "title": "MediaAppInstance",
+      "type": "object"
+    },
+    "MediaAppsConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "radarr": {
+          "description": "Radarr instances.",
+          "help": "Your Radarr instances (e.g. `Radarr`, `Radarr4K`). Each has a url, the name of the secret holding its API key, timeout, verify_ssl and enabled.",
+          "items": {
+            "$ref": "#/$defs/MediaAppInstance"
+          },
+          "title": "Radarr",
+          "type": "array"
+        },
+        "sonarr": {
+          "description": "Sonarr instances.",
+          "help": "Your Sonarr instances (e.g. `Sonarr`, `Sonarr4K`). Each has a url, the name of the secret holding its API key, timeout, verify_ssl and enabled.",
+          "items": {
+            "$ref": "#/$defs/MediaAppInstance"
+          },
+          "title": "Sonarr",
+          "type": "array"
+        }
+      },
+      "title": "MediaAppsConfig",
+      "type": "object"
+    },
+    "Metadata": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Write a sidecar .nfo with metadata for this library.",
+          "help": "When on, Finmeta writes a metadata NFO (title, overview, rating, genres, etc.) next to each item. On by default. Disable to leave metadata untouched.",
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "fields": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Which metadata fields to write (None = the sensible default set).",
+          "help": "Restrict which metadata fields go into the NFO, e.g. `[title, overview, rating]`. Leave empty/null for the default set (title, originaltitle, overview, tagline, year, genres, studios, rating). Unknown field names are an error.",
+          "title": "Fields"
+        }
+      },
+      "title": "Metadata",
+      "type": "object"
+    },
+    "MovieArtwork": {
+      "additionalProperties": false,
+      "properties": {
+        "backdrop": {
+          "default": false,
+          "description": "Write a backdrop/landscape file.",
+          "help": "Write a `fanart.jpg`/backdrop (the 16:9 landscape artwork). Off by default.",
+          "title": "Backdrop",
+          "type": "boolean"
+        },
+        "landscape": {
+          "default": false,
+          "description": "Write a separate landscape image.",
+          "help": "Write a `landscape.jpg`. Distinct from `backdrop` on some layouts. Off by default.",
+          "title": "Landscape",
+          "type": "boolean"
+        },
+        "logo": {
+          "default": false,
+          "description": "Write a logo file.",
+          "help": "Write a `logo.png` (transparent title logo). Off by default. Mostly useful for TV; rarely available for movies.",
+          "title": "Logo",
+          "type": "boolean"
+        },
+        "poster": {
+          "default": false,
+          "description": "Write a poster file.",
+          "help": "Write a `poster.jpg` next to the movie (the 2:3 main artwork). Off by default; turn on to have Finmeta manage posters.",
+          "title": "Poster",
+          "type": "boolean"
+        }
+      },
+      "title": "MovieArtwork",
+      "type": "object"
+    },
+    "MovieLibrary": {
+      "additionalProperties": false,
+      "properties": {
+        "artwork": {
+          "$ref": "#/$defs/MovieArtwork",
+          "description": "Movie artwork settings.",
+          "help": "Movie artwork options (poster, backdrop, logo, landscape). See each option's help."
+        },
+        "artwork_selection": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ArtworkSelection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Per-library automatic artwork selection (None = inherit global).",
+          "help": "Override the global `artwork_selection` for this library. Leave unset to inherit the global preset/top_n."
+        },
+        "artwork_write_method": {
+          "anyOf": [
+            {
+              "enum": [
+                "sidecar",
+                "jellyfin_api"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Per-library artwork write method override (None = inherit global).",
+          "help": "Override the global `artwork_write_method` for this library. Leave unset to inherit the global setting.",
+          "title": "Artwork Write Method"
+        },
+        "enabled": {
+          "default": false,
+          "description": "Whether this library is managed at all.",
+          "help": "Turn this library on/off. Libraries that appear in Jellyfin but are not mentioned in config stay off and untouched (anime libraries included). Default `false` so a newly added Jellyfin library never gets written to until you explicitly enable it.",
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "metadata": {
+          "$ref": "#/$defs/Metadata",
+          "description": "Metadata (NFO) settings for this library.",
+          "help": "Controls whether and what metadata NFO is written for this library (enabled + which fields). See Metadata help."
+        },
+        "overlay_profile": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Name of the overlay profile applied to this library's items.",
+          "help": "Which named overlay profile (from `overlays.profiles`) is applied to this library's items during plan/apply. A profile supplies the overlay element list plus per-element style/format-rule overrides. Leave unset for no overlays at all. Unknown names are a config error.",
+          "title": "Overlay Profile"
+        },
+        "overlays": {
+          "deprecated": true,
+          "description": "Deprecated: overlay element names (use overlay_profile instead).",
+          "help": "Deprecated (S9d4c). Kept only so older configs keep loading: at config-load time, a non-empty list here with no profile (or a profile with no `elements`) is migrated into an auto-generated profile `<library>-auto` holding this list, assigned via `overlay_profile`. From then on only the profile is read. Set `overlay_profile` + `overlays.profiles` directly instead of this list in new configs.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Overlays",
+          "type": "array"
+        },
+        "poster_rotation": {
+          "$ref": "#/$defs/PosterRotation",
+          "description": "Scheduled poster reshuffle for this library's top-rated items.",
+          "help": "Off by default. See PosterRotation help."
+        },
+        "theme_song": {
+          "default": false,
+          "description": "Copy the show's theme song from the local asset dir.",
+          "help": "Place a theme song for each show, sourced from the local asset directory only (v1 does not download from YouTube \u2014 see SPEC override O2). Off by default.",
+          "title": "Theme Song",
+          "type": "boolean"
+        },
+        "type": {
+          "const": "movies",
+          "description": "Library type discriminator (must be `movies`).",
+          "help": "Fixed value `movies`. Tells Finmeta this library is a movie library and selects the movie artwork options.",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "MovieLibrary",
+      "type": "object"
+    },
+    "OmdbSource": {
+      "additionalProperties": false,
+      "properties": {
+        "api_key_env": {
+          "default": "OMDB_KEY",
+          "description": "Name of the environment variable holding the OMDb API key.",
+          "help": "Env var name holding your OMDb API key (not the key itself). Set the key via that env var or in Settings. Get a free key at https://www.omdbapi.com/apikey.aspx.",
+          "title": "Api Key Env",
+          "type": "string"
+        },
+        "enabled": {
+          "default": false,
+          "description": "Enable OMDb as a ratings source.",
+          "help": "Turn OMDb on/off. Off by default. Provides IMDb rating, Rotten Tomatoes critic score and Metacritic score. Requires an API key (the `omdb_key` secret or env var OMDB_KEY). Responses are cached with a 7 day TTL. Get a key at https://www.omdbapi.com/apikey.aspx.",
+          "title": "Enabled",
+          "type": "boolean"
+        }
+      },
+      "title": "OmdbSource",
+      "type": "object"
+    },
+    "OverlayStyle": {
+      "additionalProperties": false,
+      "properties": {
+        "bg": {
+          "default": "#000000B0",
+          "description": "Backdrop color (hex, with optional alpha).",
+          "help": "Background/plate color behind overlay text, hex with 8 digits for alpha (`#RRGGBBAA`). Default `#000000B0` = 69% opaque black.",
+          "title": "Bg",
+          "type": "string"
+        },
+        "fg": {
+          "default": "#FFFFFF",
+          "description": "Foreground/text color (hex).",
+          "help": "Text color for overlays, hex `#RRGGBB`. Default `#FFFFFF` (white).",
+          "title": "Fg",
+          "type": "string"
+        },
+        "font_size": {
+          "default": 42,
+          "description": "Base font size (pixels).",
+          "help": "Base font size in pixels for overlay text. Default 42. Scale it up for very wide posters. Per-element overrides live in the Overlay editor.",
+          "title": "Font Size",
+          "type": "integer"
+        },
+        "margin": {
+          "default": 20,
+          "description": "Pixel margin from the poster edge.",
+          "help": "Distance (in pixels) between the overlay and the poster edge. Default 20.",
+          "title": "Margin",
+          "type": "integer"
+        },
+        "position": {
+          "default": "top_left",
+          "description": "Base corner/edge for the overlay block.",
+          "help": "Default anchor for overlay elements (e.g. `top_left`, `bottom_left`). Individual elements can override this. The fine-grained layout is managed in the Overlay editor (later S9 session).",
+          "title": "Position",
+          "type": "string"
+        },
+        "radius": {
+          "default": 12,
+          "description": "Corner radius of the backdrop plate (pixels).",
+          "help": "Corner rounding (pixels) of the semi-transparent plate behind overlay text. Default 12. 0 = sharp corners.",
+          "title": "Radius",
+          "type": "integer"
+        }
+      },
+      "title": "OverlayStyle",
+      "type": "object"
+    },
+    "OverlaysConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "format_rules": {
+          "additionalProperties": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "description": "Per-category K9 overlay detection rules; empty uses K9 defaults.",
+          "help": "Conditional badge detection (K9): resolution/HDR/audio badges are drawn only when an enabled rule matches the item's MediaStreams; no match means no badge. Leave empty to use built-in Kometa-style defaults. Editable in the Overlay editor's Format rules section: toggle a rule on/off or change its priority; conditions and labels are read-only.",
+          "title": "Format Rules",
+          "type": "object"
+        },
+        "logo_packs": {
+          "description": "Overlay logo packs in priority order (first match wins).",
+          "help": "Logo sources for rating badges and resolution/HDR/audio image badges, in priority order \u2014 the first pack that has an image for a badge wins. `kometa` uses the pack installed via the Install-Kometa-logos button into `<config>/assets/logos/kometa/`. `custom` reads flat files from `<config>/assets/logos/<key>.png` (your own artwork). Leave empty (or use no sources) to draw text pills only. Missing images always fall back to the current text pill.",
+          "items": {
+            "enum": [
+              "none",
+              "kometa",
+              "custom"
+            ],
+            "type": "string"
+          },
+          "title": "Logo Packs",
+          "type": "array"
+        },
+        "profiles": {
+          "additionalProperties": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "description": "Named overlay profiles; libraries reference one by name.",
+          "help": "Named overlay profiles (K8/D2). A library's `overlay_profile` points at one of these names. Each profile may set: `style` (a full style document merged over `overlays.style`), `format_rules` (per-category K9 rule overrides merged over `overlays.format_rules`), and `elements` (the overlay element list, falling back to the library's `overlays` when absent). Libraries with no profile get no overlays. YAML-editable; unknown keys are an error.",
+          "title": "Profiles",
+          "type": "object"
+        },
+        "stream_batch_size": {
+          "default": 50,
+          "description": "Items per /Items?Ids= batch when fetching MediaStreams.",
+          "help": "Apply/plan fetches MediaStreams in batches of this many item IDs per `GET /Items?Ids=a,b,c` request instead of one request per item. Default 50 (1-500). N items use ceil(N/batch) requests.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Stream Batch Size",
+          "type": "integer"
+        },
+        "style": {
+          "$ref": "#/$defs/OverlayStyle",
+          "description": "Base overlay style (position, fonts, colors).",
+          "help": "Global defaults for the overlay compositor (position, margin, font size, colors, radius). Per-element layout lives under ``user_styles`` and is edited in the Overlay editor. The compositor renders from the original poster so re-runs never stack (SPEC override O7)."
+        },
+        "user_styles": {
+          "additionalProperties": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "description": "User-edited overlay style documents, keyed by name.",
+          "help": "Named overlay styles saved from the Overlay editor. Each value is a full style document (base settings + per-element overrides); presets are always cloned into this map before editing so built-in presets stay read-only.",
+          "title": "User Styles",
+          "type": "object"
+        }
+      },
+      "title": "OverlaysConfig",
+      "type": "object"
+    },
+    "PathMapping": {
+      "additionalProperties": false,
+      "description": "One Jellyfin-path -> local-path translation (SPEC override O6).",
+      "properties": {
+        "jellyfin": {
+          "description": "Path as seen from Jellyfin (starts with its media root).",
+          "help": "The media path *as Jellyfin sees it*, e.g. `/media`. Every Jellyfin path Finmeta touches is translated through this mapping before it is read from or written to disk. A path with no mapping is skipped with an error (never guessed).",
+          "title": "Jellyfin",
+          "type": "string"
+        },
+        "local": {
+          "description": "Corresponding path on the local filesystem.",
+          "help": "The local path that maps to the Jellyfin path, e.g. `/media` in the container or `/work/fixture/library` in dev. This is where sidecar files (NFOs, artwork) are written.",
+          "title": "Local",
+          "type": "string"
+        }
+      },
+      "required": [
+        "jellyfin",
+        "local"
+      ],
+      "title": "PathMapping",
+      "type": "object"
+    },
+    "Playlist": {
+      "additionalProperties": false,
+      "properties": {
+        "filter": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Filter"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional filter selecting playlist items.",
+          "help": "Optional constraints (year range, min rating, genres) selecting which items fill the playlist. Empty = all items in the library."
+        },
+        "library": {
+          "description": "Library the playlist is built from.",
+          "help": "The library (key from `libraries`) whose items fill the playlist. Must reference a configured library.",
+          "title": "Library",
+          "type": "string"
+        },
+        "limit": {
+          "default": 20,
+          "description": "Maximum number of items in the playlist.",
+          "help": "Cap on how many items go into the playlist. Default 20.",
+          "title": "Limit",
+          "type": "integer"
+        },
+        "name": {
+          "description": "Display name of the playlist.",
+          "help": "The name shown in Jellyfin for this playlist. Must be unique among playlists you define.",
+          "title": "Name",
+          "type": "string"
+        },
+        "sort": {
+          "default": "rating_desc",
+          "description": "Sort order for the playlist.",
+          "help": "How items are ordered in the playlist, e.g. `rating_desc` (best first), `rating_asc`, `year_desc`, `year_asc`, `title`. Default `rating_desc`.",
+          "title": "Sort",
+          "type": "string"
+        },
+        "user": {
+          "description": "Jellyfin username the playlist is created for.",
+          "help": "The Jellyfin user the playlist is created under. Must exist in Jellyfin. Used for user-scoped playlists.",
+          "title": "User",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "user",
+        "library"
+      ],
+      "title": "Playlist",
+      "type": "object"
+    },
+    "PosterRotation": {
+      "additionalProperties": false,
+      "description": "Automatically reshuffle+reapply the poster of a library's top-rated\nitems on a cron schedule (S9d6), so the best items' artwork visibly\nchanges over time instead of staying static forever.\n\nOnly has a visible effect once ``artwork_selection`` for the library\nresolves to ``random_top_n`` with ``top_n >= 2`` (there must be more than\none candidate poster to rotate between) -- enabling this field forces\nthat via ``_LibraryBase._apply_poster_rotation_requirements`` below,\nrather than silently doing nothing.",
+      "properties": {
+        "cron": {
+          "default": "0 4 * * 0",
+          "description": "Cron expression for when the rotation runs.",
+          "help": "A 5-field cron expression, default `0 4 * * 0` (Sundays 04:00). Same syntax as the Schedules tab.",
+          "title": "Cron",
+          "type": "string"
+        },
+        "enabled": {
+          "default": false,
+          "description": "Rotate the poster of this library's top-rated items weekly (or per `cron`).",
+          "help": "When on, a scheduled job reshuffles and reapplies the poster of this library's `item_count` highest-rated items on the `cron` schedule. Off by default -- opt in per library.",
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "item_count": {
+          "default": 5,
+          "description": "How many of the library's highest-rated items get rotated.",
+          "help": "The N highest-rated items (by Jellyfin's `CommunityRating`) in this library whose poster gets reshuffled+reapplied each run. Default 5.",
+          "maximum": 50,
+          "minimum": 1,
+          "title": "Item Count",
+          "type": "integer"
+        }
+      },
+      "title": "PosterRotation",
+      "type": "object"
+    },
+    "Schedule": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "default": "plan",
+          "description": "What the schedule does: plan (dry-run) or apply.",
+          "enum": [
+            "plan",
+            "apply"
+          ],
+          "help": "`plan` = build the WritePlan without writing anything (safe, default); `apply` = actually write files and call the Jellyfin API. `apply` is refused while `dry_run` is true.",
+          "title": "Action",
+          "type": "string"
+        },
+        "cron": {
+          "description": "Cron expression for when the schedule runs.",
+          "help": "A 5-field cron expression, e.g. `0 4 * * *` (daily at 04:00) or `0 2 * * 1` (Mondays 02:00). Standard cron minute/hour/day/month/weekday fields.",
+          "title": "Cron",
+          "type": "string"
+        },
+        "libraries": {
+          "description": "Libraries to include (empty = all configured).",
+          "help": "Restrict the run to these libraries (keys from `libraries`). Empty = run against all configured libraries.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Libraries",
+          "type": "array"
+        }
+      },
+      "required": [
+        "cron"
+      ],
+      "title": "Schedule",
+      "type": "object"
+    },
+    "ServerConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "api_key_env": {
+          "default": "JELLYFIN_API_KEY",
+          "description": "Name of the environment variable holding the Jellyfin API key.",
+          "help": "Only the *name* of the env var that holds your Jellyfin API key (never the key itself). The key is read from that env var or from Settings. Changing this name does not change where the key comes from \u2014 it just renames the lookup.",
+          "title": "Api Key Env",
+          "type": "string"
+        },
+        "base_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional URL prefix when Jellyfin is behind a reverse proxy.",
+          "help": "Prefix added to every API path when Jellyfin is served under a sub-path by a reverse proxy. With `url: http://home.example.com` and `base_path: /jellyfin`, Finmeta calls `http://home.example.com/jellyfin/System/Info`. Leave empty for the normal case; a leading slash is optional and is normalized.",
+          "title": "Base Path"
+        },
+        "timeout": {
+          "default": 30.0,
+          "description": "Per-request timeout for the Jellyfin client, in seconds.",
+          "exclusiveMinimum": 0,
+          "help": "How long to wait, in seconds, for each Jellyfin request before giving up (default 30). Raise it for a slow or distant server.",
+          "title": "Timeout",
+          "type": "number"
+        },
+        "url": {
+          "description": "Jellyfin server URL (scheme + host + port).",
+          "help": "The address of your Jellyfin server, e.g. `http://jellyfin:8096` or `http://192.168.1.10:8096`. Inside a container, `http://localhost:8096` points at the container itself, not your Jellyfin \u2014 use the LAN IP, or the container/service name when Finmeta and Jellyfin share a Docker network. A trailing slash is stripped automatically. Changing this (or base_path / verify_ssl / timeout) hot-reloads the client \u2014 no restart. Reverse-proxy example: `url: http://home.example.com` with `base_path: /jellyfin` calls `http://home.example.com/jellyfin/System/Info`.",
+          "title": "Url",
+          "type": "string"
+        },
+        "verify_ssl": {
+          "default": true,
+          "description": "Verify TLS certificates for https connections.",
+          "help": "Verify the server's TLS certificate for `https` URLs (default on). Turn off only for a self-signed cert you trust (e.g. a home reverse proxy); then the connection is not protected from tampering.",
+          "title": "Verify Ssl",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "title": "ServerConfig",
+      "type": "object"
+    },
+    "SourcesConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "fanart": {
+          "$ref": "#/$defs/FanartSource",
+          "description": "fanart.tv source settings.",
+          "help": "Settings for the fanart.tv source (enabled + which env var holds the key). See the fanart.tv help in the External services tab."
+        },
+        "field_sources": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "description": "Per-rating-field precedence: an ordered list of provider names. The first provider that has a non-None value wins. Valid field names: rating_imdb, rating_rt_critic, rating_rt_audience, rating_metacritic, rating_tmdb, rating_trakt, rating_letterboxd. Valid provider names: mdblist, omdb, imdb_datasets, jellyfin, tmdb.",
+          "help": "Which provider supplies each rating value, in priority order. The first provider in the list that has a value for the item wins. Defaults: `rating_imdb: [mdblist, omdb, imdb_datasets, jellyfin]`, `rating_rt_critic: [mdblist, omdb, jellyfin]`, `rating_metacritic: [mdblist, omdb]`, `rating_tmdb: [mdblist, tmdb]`, and `rating_rt_audience`, `rating_trakt`, `rating_letterboxd` all default to `[mdblist]`. Reorder these in the Rating sources tab; only providers that can supply a rating appear for that field.",
+          "title": "Field Sources",
+          "type": "object"
+        },
+        "imdb_datasets": {
+          "$ref": "#/$defs/ImdbDatasetsSource",
+          "description": "IMDb bulk-dataset ratings source settings.",
+          "help": "Settings for the IMDb bulk-dataset ratings source (enabled). No key \u2014 it downloads IMDb's public title.ratings dataset. See the IMDb datasets help."
+        },
+        "local": {
+          "$ref": "#/$defs/LocalSource",
+          "description": "Local asset source settings.",
+          "help": "Settings for the local on-disk artwork source (enabled + path). Use this to supply your own artwork files."
+        },
+        "mdblist": {
+          "$ref": "#/$defs/MdblistSource",
+          "description": "MDBList ratings source settings.",
+          "help": "Settings for the MDBList ratings source (enabled + which env var holds the key). See the MDBList help in the External services tab."
+        },
+        "omdb": {
+          "$ref": "#/$defs/OmdbSource",
+          "description": "OMDb ratings source settings.",
+          "help": "Settings for the OMDb ratings source (enabled + which env var holds the key). See the OMDb help in the External services tab."
+        },
+        "precedence": {
+          "description": "Order in which sources are consulted; first hit wins.",
+          "help": "For each artwork kind, sources are tried in this order and the first one that has a candidate wins. Default `[local, fanart, tmdb]`. Only names that are configured may appear.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Precedence",
+          "type": "array"
+        },
+        "tmdb": {
+          "$ref": "#/$defs/TmdbSource",
+          "description": "TMDb source settings.",
+          "help": "Settings for the TMDb source (enabled + which env var holds the key). See the TMDb help in the External services tab."
+        }
+      },
+      "title": "SourcesConfig",
+      "type": "object"
+    },
+    "StatusOverlayConfig": {
+      "additionalProperties": false,
+      "description": "S9g1/K7a: TV show status (from Sonarr) -- overlay element + optional collections.",
+      "properties": {
+        "collection_names": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Override the default collection name for a status (status key -> name).",
+          "help": "Only used when `create_collections` is on. Maps a status key (e.g. `new_season_soon`, `returning`, `ended`) to a custom Jellyfin collection name; any status not listed here uses a title-cased default (e.g. `new_season_soon` -> 'New Season Soon').",
+          "title": "Collection Names",
+          "type": "object"
+        },
+        "create_collections": {
+          "default": false,
+          "description": "Also create a Jellyfin collection per status (e.g. 'New Season Soon').",
+          "help": "Off by default. When on, every TV show with a computed status (see the `status` overlay element) is added to a Jellyfin collection named after that status -- one collection per status value present, created the same way as `collections` (SPEC override O1, no collection.nfo). Override a status's collection name via `collection_names`.",
+          "title": "Create Collections",
+          "type": "boolean"
+        },
+        "recent_days": {
+          "default": 14,
+          "description": "How many days a just-aired premiere/finale still counts as 'just happened'.",
+          "help": "Controls the *_aired statuses (new_season_started, season_finale_aired, final_episode_aired): an episode that aired more than this many days ago no longer counts as 'just happened' and the show falls back to a plain status (returning/ended) instead. Default 14.",
+          "minimum": 0,
+          "title": "Recent Days",
+          "type": "integer"
+        }
+      },
+      "title": "StatusOverlayConfig",
+      "type": "object"
+    },
+    "TmdbCollection": {
+      "additionalProperties": false,
+      "properties": {
+        "filter": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Filter"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional filter applied to the library items.",
+          "help": "Optional constraints (year range, min rating, genres) applied on top of the library. Required for `filter`-type collections; ignored for `tmdb_collection`."
+        },
+        "library": {
+          "description": "Library this collection is built from.",
+          "help": "The library (key from `libraries`) whose items are used to build this collection. Must reference a configured library.",
+          "title": "Library",
+          "type": "string"
+        },
+        "min_items": {
+          "default": 2,
+          "description": "Minimum matched items before the collection is created.",
+          "help": "Only create the collection if at least this many library items match it. Default 2 (avoids near-empty collections).",
+          "title": "Min Items",
+          "type": "integer"
+        },
+        "name": {
+          "description": "Display name of the collection.",
+          "help": "The name shown in Jellyfin for this collection. Must be unique among collections you define.",
+          "title": "Name",
+          "type": "string"
+        },
+        "type": {
+          "const": "tmdb_collection",
+          "description": "Collection type discriminator (TMDb collection).",
+          "help": "Fixed value `tmdb_collection`. Builds a Jellyfin collection from a TMDb collection (films that share a TMDb collection id). Needs at least `min_items` matches.",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "library",
+        "type"
+      ],
+      "title": "TmdbCollection",
+      "type": "object"
+    },
+    "TmdbSource": {
+      "additionalProperties": false,
+      "properties": {
+        "api_key_env": {
+          "default": "TMDB_KEY",
+          "description": "Name of the environment variable holding the TMDb API key.",
+          "help": "Env var name holding your TMDb API v3 key (not the key itself). Set the key via that env var or in Settings. Get one at https://www.themoviedb.org/settings/api.",
+          "title": "Api Key Env",
+          "type": "string"
+        },
+        "enabled": {
+          "default": true,
+          "description": "Enable TMDb as a metadata/artwork source.",
+          "help": "Turn TMDb on/off. TMDb provides metadata, ratings and most artwork. On by default. Disabling it makes matching/artwork much weaker.",
+          "title": "Enabled",
+          "type": "boolean"
+        }
+      },
+      "title": "TmdbSource",
+      "type": "object"
+    },
+    "TrendingConfig": {
+      "additionalProperties": false,
+      "description": "S9g2/K7b: trending collections + optional TOP 10 rank overlay, via MDBList.",
+      "properties": {
+        "lists": {
+          "description": "MDBList lists to mirror as Jellyfin collections.",
+          "help": "Requires `sources.mdblist.enabled` and a saved MDBList API key (the `mdblist_key` secret). Each entry is one public MDBList list, mirrored into one Jellyfin collection of matched library items; optionally also tags its top 10 with a rank for the `trending_rank` overlay element.",
+          "items": {
+            "$ref": "#/$defs/TrendingListConfig"
+          },
+          "title": "Lists",
+          "type": "array"
+        }
+      },
+      "title": "TrendingConfig",
+      "type": "object"
+    },
+    "TrendingListConfig": {
+      "additionalProperties": false,
+      "description": "S9g2/K7b: one MDBList list to mirror into a Jellyfin collection.",
+      "properties": {
+        "collection_name": {
+          "description": "Jellyfin collection name to create/sync from this list.",
+          "help": "The Jellyfin collection this list's matched items are added to (SPEC override O1 -- created via the Jellyfin API, no collection.nfo). Only items already present in a managed library and matched by TMDb id are added; items MDBList lists that aren't in your library are skipped (not downloaded -- see K7b).",
+          "title": "Collection Name",
+          "type": "string"
+        },
+        "limit": {
+          "default": 0,
+          "description": "Max items to pull from the list (0 = the list's own size).",
+          "help": "Cap how many of the list's (already-ranked) items to fetch. 0 = no cap.",
+          "minimum": 0,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "rank_overlay": {
+          "default": false,
+          "description": "Tag this list's top 10 matched items with their rank for the trending_rank element.",
+          "help": "When on, items ranked 1-10 on this list get a '#<rank>' value for the `trending_rank` overlay element (e.g. a TOP 10 badge). Off by default. When more than one list has this on, the FIRST list (in config order) that ranks an item wins.",
+          "title": "Rank Overlay",
+          "type": "boolean"
+        },
+        "url": {
+          "description": "Public MDBList list URL, e.g. https://mdblist.com/lists/<user>/<slug>.",
+          "help": "The list's public page URL on mdblist.com (open the list on mdblist.com and copy the address bar). MDBList's own 'Popular Lists' page has ready-made Trakt Trending Movies/TV Shows mirrors you can point at directly.",
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url",
+        "collection_name"
+      ],
+      "title": "TrendingListConfig",
+      "type": "object"
+    },
+    "TvArtwork": {
+      "additionalProperties": false,
+      "properties": {
+        "backdrop": {
+          "default": false,
+          "description": "Write a backdrop/landscape file.",
+          "help": "Write a show `fanart.jpg`/backdrop (16:9). Off by default.",
+          "title": "Backdrop",
+          "type": "boolean"
+        },
+        "episode_thumbs": {
+          "default": false,
+          "description": "Write per-episode thumbnails.",
+          "help": "Write a thumbnail image for each episode. Off by default; noisy and large for long-running shows.",
+          "title": "Episode Thumbs",
+          "type": "boolean"
+        },
+        "logo": {
+          "default": false,
+          "description": "Write a logo file.",
+          "help": "Write a show `logo.png` (transparent title logo). Off by default. Very useful for TV shows.",
+          "title": "Logo",
+          "type": "boolean"
+        },
+        "poster": {
+          "default": false,
+          "description": "Write a poster file.",
+          "help": "Write a show `poster.jpg` (2:3). Off by default.",
+          "title": "Poster",
+          "type": "boolean"
+        },
+        "season_posters": {
+          "default": false,
+          "description": "Write per-season posters.",
+          "help": "Write `seasonXX.poster.jpg` for each season. Off by default.",
+          "title": "Season Posters",
+          "type": "boolean"
+        }
+      },
+      "title": "TvArtwork",
+      "type": "object"
+    },
+    "TvLibrary": {
+      "additionalProperties": false,
+      "properties": {
+        "artwork": {
+          "$ref": "#/$defs/TvArtwork",
+          "description": "TV artwork settings.",
+          "help": "TV artwork options (poster, backdrop, logo, season_posters, episode_thumbs). See each option's help."
+        },
+        "artwork_selection": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ArtworkSelection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Per-library automatic artwork selection (None = inherit global).",
+          "help": "Override the global `artwork_selection` for this library. Leave unset to inherit the global preset/top_n."
+        },
+        "artwork_write_method": {
+          "anyOf": [
+            {
+              "enum": [
+                "sidecar",
+                "jellyfin_api"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Per-library artwork write method override (None = inherit global).",
+          "help": "Override the global `artwork_write_method` for this library. Leave unset to inherit the global setting.",
+          "title": "Artwork Write Method"
+        },
+        "enabled": {
+          "default": false,
+          "description": "Whether this library is managed at all.",
+          "help": "Turn this library on/off. Libraries that appear in Jellyfin but are not mentioned in config stay off and untouched (anime libraries included). Default `false` so a newly added Jellyfin library never gets written to until you explicitly enable it.",
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "metadata": {
+          "$ref": "#/$defs/Metadata",
+          "description": "Metadata (NFO) settings for this library.",
+          "help": "Controls whether and what metadata NFO is written for this library (enabled + which fields). See Metadata help."
+        },
+        "overlay_profile": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Name of the overlay profile applied to this library's items.",
+          "help": "Which named overlay profile (from `overlays.profiles`) is applied to this library's items during plan/apply. A profile supplies the overlay element list plus per-element style/format-rule overrides. Leave unset for no overlays at all. Unknown names are a config error.",
+          "title": "Overlay Profile"
+        },
+        "overlays": {
+          "deprecated": true,
+          "description": "Deprecated: overlay element names (use overlay_profile instead).",
+          "help": "Deprecated (S9d4c). Kept only so older configs keep loading: at config-load time, a non-empty list here with no profile (or a profile with no `elements`) is migrated into an auto-generated profile `<library>-auto` holding this list, assigned via `overlay_profile`. From then on only the profile is read. Set `overlay_profile` + `overlays.profiles` directly instead of this list in new configs.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Overlays",
+          "type": "array"
+        },
+        "poster_rotation": {
+          "$ref": "#/$defs/PosterRotation",
+          "description": "Scheduled poster reshuffle for this library's top-rated items.",
+          "help": "Off by default. See PosterRotation help."
+        },
+        "theme_song": {
+          "default": false,
+          "description": "Copy the show's theme song from the local asset dir.",
+          "help": "Place a theme song for each show, sourced from the local asset directory only (v1 does not download from YouTube \u2014 see SPEC override O2). Off by default.",
+          "title": "Theme Song",
+          "type": "boolean"
+        },
+        "type": {
+          "const": "tvshows",
+          "description": "Library type discriminator (must be `tvshows`).",
+          "help": "Fixed value `tvshows`. Tells Finmeta this library is a TV library and selects the TV artwork options.",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "TvLibrary",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "artwork_language_fallback": {
+      "description": "Ordered artwork language fallbacks (null = textless).",
+      "help": "Ordered fallback languages for artwork, e.g. `[en, null]`. A `null` entry means 'prefer textless artwork'. Finmeta walks this list and uses the first language that has a matching image.",
+      "items": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "title": "Artwork Language Fallback",
+      "type": "array"
+    },
+    "artwork_selection": {
+      "$ref": "#/$defs/ArtworkSelection",
+      "description": "Global automatic artwork selection settings.",
+      "help": "How Finmeta automatically chooses among artwork candidates (preset + top_n). A library can override this under `libraries.<name>.artwork_selection`."
+    },
+    "artwork_write_method": {
+      "default": "sidecar",
+      "description": "How poster/backdrop/logo/landscape artwork is written (metadata NFO and theme songs are always sidecar files; Jellyfin has no API for either).",
+      "enum": [
+        "sidecar",
+        "jellyfin_api"
+      ],
+      "help": "`sidecar` (default, v1 behaviour, and the recommended setting) writes poster.jpg/backdrop.jpg/etc. directly into the media folder next to the video file. `jellyfin_api` instead uploads images straight to Jellyfin (`POST /Items/{id}/Images/{type}`) and never touches the media folder \u2014 useful when Finmeta's filesystem view of the library differs from Jellyfin's, or sidecar files in the media folder aren't wanted. Caveat found running against a real library: if the item's media folder already has a local poster/backdrop/logo/fanart file, Jellyfin's own library scanning keeps re-asserting that local file as authoritative \u2014 the upload silently 'succeeds' every apply but Jellyfin never serves the new image. Only use `jellyfin_api` for a library confirmed to have no local artwork files already in its media folders. In `jellyfin_api` mode the pre-Finmeta original (needed so overlay re-renders never stack \u2014 SPEC override O7) is captured once, the first time Finmeta touches that item, by downloading its CURRENT image from Jellyfin; it is cached under `<config>/jellyfin_originals/` and never re-fetched. A library can override this under `libraries.<name>.artwork_write_method`.",
+      "title": "Artwork Write Method",
+      "type": "string"
+    },
+    "backup_retention_days": {
+      "default": 14,
+      "description": "Days a superseded backup copy spends in trash before permanent deletion.",
+      "help": "S9d5: every file write backs up the previous version (SPEC override O5). Without cleanup these pile up forever. On each apply, Finmeta moves every superseded backup copy (i.e. not the very first one ever made for a path, and not the most recent one) into `<config>/trash/`; a trash entry is then permanently deleted once it has sat there for this many days. The FIRST backup ever made for a path (the true pre-Finmeta original, needed for overlay re-renders to never stack badges -- SPEC override O7, and for a full undo) and the MOST RECENT backup (needed to undo the latest run) are never touched, regardless of this setting. Set to `0` to disable cleanup and keep every backup forever.",
+      "minimum": 0,
+      "title": "Backup Retention Days",
+      "type": "integer"
+    },
+    "collection_presets": {
+      "description": "Active built-in preset collection ids (S9f2).",
+      "help": "Ids of built-in preset collections to keep active (e.g. `adaptive_seasonal`, `top_popular_movies`) \u2014 see the Collections tab for the full catalog. `adaptive_seasonal` drives a whole calendar of holiday collections (Valentine's Day, Mother's/Father's Day, Halloween, Thanksgiving, Christmas), each only present in Jellyfin during its own window and deleted automatically outside it (recreated next time it's active); chart presets (Top 50 Popular, Highest Rated) are always kept in sync. Applies automatically to every enabled library of the matching type \u2014 no per-library selection needed. Only evaluated on a full (all-libraries) plan/apply, not a single-library or single-item run.",
+      "items": {
+        "type": "string"
+      },
+      "title": "Collection Presets",
+      "type": "array"
+    },
+    "collections": {
+      "description": "Collections to create in Jellyfin.",
+      "help": "Collections Finmeta creates and keeps in sync in Jellyfin. Each is one of `tmdb_collection`, `filter`, or `list`. Created via the Jellyfin API and defined here (no collection.nfo \u2014 SPEC override O1).",
+      "items": {
+        "discriminator": {
+          "mapping": {
+            "filter": "#/$defs/FilterCollection",
+            "list": "#/$defs/ListCollection",
+            "tmdb_collection": "#/$defs/TmdbCollection"
+          },
+          "propertyName": "type"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/TmdbCollection"
+          },
+          {
+            "$ref": "#/$defs/FilterCollection"
+          },
+          {
+            "$ref": "#/$defs/ListCollection"
+          }
+        ]
+      },
+      "title": "Collections",
+      "type": "array"
+    },
+    "dry_run": {
+      "default": true,
+      "description": "Plan-only mode; refuse to write files or call the write API.",
+      "help": "Safety switch. While `true` (the shipped default), apply runs refuse to write anything \u2014 the API/CLI only produce a plan. Set to `false` to allow real writes. See `POST /api/runs`.",
+      "title": "Dry Run",
+      "type": "boolean"
+    },
+    "language": {
+      "default": "en-US",
+      "description": "Preferred metadata/artwork language.",
+      "help": "Preferred language for metadata and artwork (BCP-47, e.g. `en-US`, `en-GB`). Default `en-US`.",
+      "title": "Language",
+      "type": "string"
+    },
+    "libraries": {
+      "additionalProperties": {
+        "discriminator": {
+          "mapping": {
+            "movies": "#/$defs/MovieLibrary",
+            "tvshows": "#/$defs/TvLibrary"
+          },
+          "propertyName": "type"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/MovieLibrary"
+          },
+          {
+            "$ref": "#/$defs/TvLibrary"
+          }
+        ]
+      },
+      "description": "Named library profiles (the main config surface).",
+      "help": "The libraries Finmeta manages, keyed by a name you choose (e.g. `Movies`, `Shows`). Each has a type, metadata and artwork options, theme song and overlays. Collections/playlists/schedules reference these by name.",
+      "title": "Libraries",
+      "type": "object"
+    },
+    "media_apps": {
+      "$ref": "#/$defs/MediaAppsConfig",
+      "description": "Sonarr and Radarr instances.",
+      "help": "Your Sonarr (`media_apps.sonarr`) and Radarr (`media_apps.radarr`) instances. Each has a url, the name of the secret holding its API key, timeout, verify_ssl and enabled. Finmeta is read-only against these \u2014 it never adds, edits or deletes anything."
+    },
+    "overlays": {
+      "$ref": "#/$defs/OverlaysConfig",
+      "description": "Global overlay compositor style defaults.",
+      "help": "Global defaults for the poster overlay compositor (position, fonts, colors, radius). Per-element layout is managed in the Overlay editor (later S9 session)."
+    },
+    "path_mappings": {
+      "description": "Jellyfin-path -> local-path translations.",
+      "help": "The set of path mappings used to translate every Jellyfin path to a local path before touching disk (SPEC override O6). An unmapped path is skipped with an error, never guessed.",
+      "items": {
+        "$ref": "#/$defs/PathMapping"
+      },
+      "title": "Path Mappings",
+      "type": "array"
+    },
+    "playlists": {
+      "description": "Playlists to create in Jellyfin.",
+      "help": "Playlists Finmeta creates and keeps in sync in Jellyfin. Each picks items from a library by an optional filter, up to a limit, in a chosen sort order.",
+      "items": {
+        "$ref": "#/$defs/Playlist"
+      },
+      "title": "Playlists",
+      "type": "array"
+    },
+    "schedules": {
+      "description": "Recurring plan/apply runs (cron).",
+      "help": "Recurring runs. Each has a cron schedule, an action (plan or apply) and an optional library subset. `apply` is refused while `dry_run` is true.",
+      "items": {
+        "$ref": "#/$defs/Schedule"
+      },
+      "title": "Schedules",
+      "type": "array"
+    },
+    "server": {
+      "$ref": "#/$defs/ServerConfig",
+      "description": "Jellyfin server connection settings.",
+      "help": "Where Finmeta's Jellyfin is and which env var holds its API key. See ServerConfig help."
+    },
+    "sources": {
+      "$ref": "#/$defs/SourcesConfig",
+      "description": "Metadata/artwork source settings + precedence.",
+      "help": "Which sources (TMDb, fanart.tv, local, OMDb, MDBList, IMDb datasets) are enabled and in what order they are consulted. See the External services tab and each source's help."
+    },
+    "status_overlay": {
+      "$ref": "#/$defs/StatusOverlayConfig",
+      "description": "TV show status (K7a) settings: recent-days window + optional collections.",
+      "help": "Settings for the TV show `status` overlay element (computed from Sonarr -- new series, new season soon, upcoming finale, returning, ended, etc.). The element itself is enabled per overlay profile like any other (`elements: [status, ...]`); this section only controls the recent-days window and optional per-status collections."
+    },
+    "sync_mode": {
+      "default": "sync",
+      "description": "Collection/playlist sync behaviour.",
+      "enum": [
+        "sync",
+        "append"
+      ],
+      "help": "`sync` = add new members *and* remove ones that no longer match (default); `append` = only add, never remove. Applies to collections and playlists.",
+      "title": "Sync Mode",
+      "type": "string"
+    },
+    "trending": {
+      "$ref": "#/$defs/TrendingConfig",
+      "description": "MDBList trending collections (K7b).",
+      "help": "Lists of MDBList lists mirrored into Jellyfin collections, with an optional TOP 10 rank overlay element (`trending_rank`). Empty by default."
+    }
+  },
+  "required": [
+    "server"
+  ],
+  "title": "Config",
+  "type": "object"
+}

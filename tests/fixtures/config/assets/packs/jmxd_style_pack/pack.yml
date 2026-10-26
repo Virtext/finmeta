@@ -1,0 +1,24 @@
+name: jmxd_style_pack
+description: >
+  Fixture mirroring a real Kometa/jmxd-style media-info import's category
+  naming (video_codec/audio_codec), NOT Finmeta's own element names
+  (hdr/audio) -- regression fixture for the alias table in
+  engine.image_pack_resolve.ELEMENT_CATEGORY_ALIASES.
+categories:
+  video_codec:
+    matcher: filename_regex
+    keys: [HDR, DV]
+    filename_regex:
+      HDR: (?i)\bHDR10\b
+      DV: (?i)\bDV\b(?!.*HDR)
+  audio_codec:
+    matcher: filename_regex
+    keys: [Atmos, TrueHD]
+    filename_regex:
+      Atmos: (?i)\bATMOS\b
+      TrueHD: (?i)\bTRUEHD\b(?! ATMOS)
+  combined_codec:
+    matcher: filename_regex
+    keys: [TrueHD_Atmos]
+    filename_regex:
+      TrueHD_Atmos: (?i)\bTRUEHD\b.*\bATMOS\b

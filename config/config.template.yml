@@ -1,0 +1,71 @@
+# Finmeta config template (config/config.yml).
+# Copy to config/config.yml and edit. Unknown keys are an error.
+# dry_run: true is the shipped default — apply is refused while it is true.
+dry_run: true
+server:
+  url: http://jellyfin:8096
+  api_key_env: JELLYFIN_API_KEY   # name of the env var holding the API key
+  base_path: null                # reverse-proxy sub-path, e.g. /jellyfin (optional)
+  verify_ssl: true               # verify TLS certificates for https URLs
+  timeout: 30                    # per-request timeout in seconds
+# Translate every Jellyfin path to a local path before touching disk (O6).
+path_mappings:
+  - jellyfin: /media
+    local: /media
+language: en-US               # metadata + artwork language preference
+artwork_language_fallback: [en, null]   # null = textless artwork
+
+sources:
+  tmdb:   { enabled: true, api_key_env: TMDB_KEY }
+  fanart: { enabled: false, api_key_env: FANART_KEY }
+  local:  { enabled: true, path: /assets }
+  omdb:   { enabled: false, api_key_env: OMDB_KEY }
+  mdblist: { enabled: false, api_key_env: MDBLIST_KEY }
+  imdb_datasets: { enabled: false }
+  precedence: [local, fanart, tmdb]    # first source with a candidate wins
+  field_sources:                       # per-rating-field provider priority order
+    rating_imdb: [mdblist, omdb, imdb_datasets, jellyfin]
+    rating_rt_critic: [mdblist, omdb, jellyfin]
+    rating_rt_audience: [mdblist]
+    rating_metacritic: [mdblist, omdb]
+    rating_tmdb: [mdblist, tmdb]
+    rating_trakt: [mdblist]
+    rating_letterboxd: [mdblist]
+
+media_apps:
+  sonarr: []                    # Sonarr instances ({name, url, api_key, timeout, verify_ssl, enabled})
+  radarr: []                    # Radarr instances ({name, url, api_key, timeout, verify_ssl, enabled})
+
+# No libraries configured yet -- add yours from the Libraries/Profiles tab
+# in the UI (it reads real names straight from your Jellyfin server), or by
+# hand below. A library you don't list here is never read or written to.
+# Example shape (this is documentation, not live config):
+#
+# libraries:
+#   Movies:
+#     type: movies
+#     enabled: true
+#     metadata:   { enabled: true, fields: [title, originaltitle, overview, tagline, year, genres, studios, rating] }
+#     artwork:    { poster: true, backdrop: true, logo: true, landscape: false }
+#     theme_song: true
+#     overlay_profile: my-movie-overlays   # defined under overlays.profiles below
+#   Shows:
+#     type: tvshows
+#     enabled: true
+#     metadata:   { enabled: true }
+#     artwork:    { poster: true, backdrop: true, logo: true, season_posters: true, episode_thumbs: false }
+#     theme_song: true
+#     overlay_profile: my-show-overlays
+libraries: {}
+
+overlays:
+  style: { position: top_left, margin: 20, font_size: 42, bg: "#000000B0", fg: "#FFFFFF", radius: 12 }
+  profiles: {}
+
+# Collections/playlists/schedules each reference a configured library, so
+# these only make sense once you've added yours above -- see
+# docs/ARCHITECTURE.md or the README for the full shape and examples.
+collections: []
+sync_mode: sync               # sync = add + remove; append = only add
+playlists: []
+schedules: []

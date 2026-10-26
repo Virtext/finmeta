@@ -1,0 +1,1641 @@
+{
+ "movie:105": {
+  "kind": "movie",
+  "response": {
+   "adult": false,
+   "backdrop_path": "/5bzPWQ2dFUl2aZKkp7ILJVVkRed.jpg",
+   "belongs_to_collection": {
+    "backdrop_path": "/c9C9Pg2QctyjZHRmS0P8rZg1OTA.jpg",
+    "id": 264,
+    "name": "Back to the Future Collection",
+    "poster_path": "/5Xsu2o5IsZRuuxCEVZ9nVve21FP.jpg"
+   },
+   "budget": 19000000,
+   "genres": [
+    {
+     "id": 12,
+     "name": "Adventure"
+    },
+    {
+     "id": 35,
+     "name": "Comedy"
+    },
+    {
+     "id": 878,
+     "name": "Science Fiction"
+    }
+   ],
+   "homepage": "http://www.backtothefuture.com/movies/backtothefuture1",
+   "id": 105,
+   "imdb_id": "tt0088763",
+   "origin_country": [
+    "US"
+   ],
+   "original_language": "en",
+   "original_title": "Back to the Future",
+   "overview": "Eighties teenager Marty McFly is accidentally sent back in time to 1955, inadvertently disrupting his parents' first meeting and attracting his mother's romantic interest. Marty must repair the damage to history by rekindling his parents' romance and - with the help of his eccentric inventor friend Doc Brown - return to 1985.",
+   "popularity": 38.3116,
+   "poster_path": "/vN5B5WgYscRGcQpVhHl6p9DDTP0.jpg",
+   "production_companies": [
+    {
+     "id": 33,
+     "logo_path": "/8lvHyhjr8oUKOOy2dKXoALWKdp0.png",
+     "name": "Universal Pictures",
+     "origin_country": "US"
+    },
+    {
+     "id": 56,
+     "logo_path": "/cEaxANEisCqeEoRvODv2dO1I0iI.png",
+     "name": "Amblin Entertainment",
+     "origin_country": "US"
+    }
+   ],
+   "production_countries": [
+    {
+     "iso_3166_1": "US",
+     "name": "United States of America"
+    }
+   ],
+   "release_date": "1985-07-03",
+   "revenue": 391546852,
+   "runtime": 116,
+   "softcore": false,
+   "spoken_languages": [
+    {
+     "english_name": "English",
+     "iso_639_1": "en",
+     "name": "English"
+    }
+   ],
+   "status": "Released",
+   "tagline": "He was never in time for his classes... He wasn't in time for his dinner... Then one day... he wasn't in his time at all.",
+   "title": "Back to the Future",
+   "video": false,
+   "vote_average": 8.331,
+   "vote_count": 22560
+  },
+  "status": 200,
+  "tmdb_id": 105
+ },
+ "movie:129": {
+  "kind": "movie",
+  "response": {
+   "adult": false,
+   "backdrop_path": "/6oaL4DP75yABrd5EbC4H2zq5ghc.jpg",
+   "belongs_to_collection": null,
+   "budget": 19000000,
+   "genres": [
+    {
+     "id": 16,
+     "name": "Animation"
+    },
+    {
+     "id": 10751,
+     "name": "Family"
+    },
+    {
+     "id": 14,
+     "name": "Fantasy"
+    }
+   ],
+   "homepage": "https://gkids.com/films/spirited-away",
+   "id": 129,
+   "imdb_id": "tt0245429",
+   "origin_country": [
+    "JP"
+   ],
+   "original_language": "ja",
+   "original_title": "\u5343\u3068\u5343\u5c0b\u306e\u795e\u96a0\u3057",
+   "overview": "A young girl, Chihiro, becomes trapped in a strange new world of spirits. When her parents undergo a mysterious transformation, she must call upon the courage she never knew she had to free her family.",
+   "popularity": 42.6289,
+   "poster_path": "/39wmItIWsg5sZMyRUHLkWBcuVCM.jpg",
+   "production_companies": [
+    {
+     "id": 10342,
+     "logo_path": "/uFuxPEZRUcBTEiYIxjHJq62Vr77.png",
+     "name": "Studio Ghibli",
+     "origin_country": "JP"
+    },
+    {
+     "id": 1779,
+     "logo_path": "/41nGzTdCnORYZIZzaGZtfsBwQCl.png",
+     "name": "Tokuma Shoten",
+     "origin_country": "JP"
+    },
+    {
+     "id": 6755,
+     "logo_path": "/bWiM2iY82B32NGmPCOFatgfekIR.png",
+     "name": "Nippon Television Network Corporation",
+     "origin_country": "JP"
+    },
+    {
+     "id": 11847,
+     "logo_path": "/gW5RN3ylzsAwQ1uGHBpezUZ0vXF.png",
+     "name": "Mitsubishi",
+     "origin_country": "JP"
+    },
+    {
+     "id": 1778,
+     "logo_path": "/b5rT6VbYza3LyfltCmz1OcqzWJM.png",
+     "name": "dentsu",
+     "origin_country": "JP"
+    },
+    {
+     "id": 1780,
+     "logo_path": "/4Qzhr7FxVtaMwmsh7118G3yvOhO.png",
+     "name": "TFC",
+     "origin_country": "JP"
+    },
+    {
+     "id": 164892,
+     "logo_path": "/2wH2cZCfpQvMsWZCZbHFEJx0R86.png",
+     "name": "The Walt Disney Company (Japan)",
+     "origin_country": "JP"
+    }
+   ],
+   "production_countries": [
+    {
+     "iso_3166_1": "JP",
+     "name": "Japan"
+    }
+   ],
+   "release_date": "2001-07-20",
+   "revenue": 274925095,
+   "runtime": 125,
+   "softcore": false,
+   "spoken_languages": [
+    {
+     "english_name": "Japanese",
+     "iso_639_1": "ja",
+     "name": "\u65e5\u672c\u8a9e"
+    }
+   ],
+   "status": "Released",
+   "tagline": "Prepare to be spirited away.",
+   "title": "Spirited Away",
+   "video": false,
+   "vote_average": 8.536,
+   "vote_count": 19037
+  },
+  "status": 200,
+  "tmdb_id": 129
+ },
+ "movie:155": {
+  "kind": "movie",
+  "response": {
+   "adult": false,
+   "backdrop_path": "/9FE5eD92WfVCiivM9Pq9GVSrlWk.jpg",
+   "belongs_to_collection": {
+    "backdrop_path": "/xyhrCEdB4XRkelfVsqXeUZ6rLHi.jpg",
+    "id": 263,
+    "name": "The Dark Knight Collection",
+    "poster_path": "/ogyw5LTmL53dVxsppcy8Dlm30Fu.jpg"
+   },
+   "budget": 185000000,
+   "genres": [
+    {
+     "id": 28,
+     "name": "Action"
+    },
+    {
+     "id": 53,
+     "name": "Thriller"
+    },
+    {
+     "id": 80,
+     "name": "Crime"
+    }
+   ],
+   "homepage": "https://www.warnerbros.com/movies/dark-knight/",
+   "id": 155,
+   "imdb_id": "tt0468569",
+   "origin_country": [
+    "US"
+   ],
+   "original_language": "en",
+   "original_title": "The Dark Knight",
+   "overview": "Batman raises the stakes in his war on crime. With the help of Lt. Jim Gordon and District Attorney Harvey Dent, Batman sets out to dismantle the remaining criminal organizations that plague the streets. The partnership proves to be effective, but they soon find themselves prey to a reign of chaos unleashed by a rising criminal mastermind known to the terrified citizens of Gotham as the Joker.",
+   "popularity": 56.3074,
+   "poster_path": "/qJ2tW6WMUDux911r6m7haRef0WH.jpg",
+   "production_companies": [
+    {
+     "id": 174,
+     "logo_path": "/zhD3hhtKB5qyv7ZeL4uLpNxgMVU.png",
+     "name": "Warner Bros. Pictures",
+     "origin_country": "US"
+    },
+    {
+     "id": 923,
+     "logo_path": "/5UQsZrfbfG2dYJbx8DxfoTr2Bvu.png",
+     "name": "Legendary Pictures",
+     "origin_country": "US"
+    },
+    {
+     "id": 9996,
+     "logo_path": "/3tvBqYsBhxWeHlu62SIJ1el93O7.png",
+     "name": "Syncopy",
+     "origin_country": "GB"
+    },
+    {
+     "id": 429,
+     "logo_path": "/4Y00XuSMuP1gimd0jP6JT57QbCI.png",
+     "name": "DC",
+     "origin_country": "US"
+    }
+   ],
+   "production_countries": [
+    {
+     "iso_3166_1": "GB",
+     "name": "United Kingdom"
+    },
+    {
+     "iso_3166_1": "US",
+     "name": "United States of America"
+    }
+   ],
+   "release_date": "2008-07-16",
+   "revenue": 1008480529,
+   "runtime": 152,
+   "softcore": false,
+   "spoken_languages": [
+    {
+     "english_name": "English",
+     "iso_639_1": "en",
+     "name": "English"
+    },
+    {
+     "english_name": "Mandarin",
+     "iso_639_1": "zh",
+     "name": "\u666e\u901a\u8bdd"
+    }
+   ],
+   "status": "Released",
+   "tagline": "Welcome to a world without rules.",
+   "title": "The Dark Knight",
+   "video": false,
+   "vote_average": 8.5,
+   "vote_count": 36957
+  },
+  "status": 200,
+  "tmdb_id": 155
+ },
+ "movie:157336": {
+  "kind": "movie",
+  "response": {
+   "adult": false,
+   "backdrop_path": "/8sNiAPPYU14PUepFNeSNGUTiHW.jpg",
+   "belongs_to_collection": null,
+   "budget": 165000000,
+   "genres": [
+    {
+     "id": 12,
+     "name": "Adventure"
+    },
+    {
+     "id": 18,
+     "name": "Drama"
+    },
+    {
+     "id": 878,
+     "name": "Science Fiction"
+    }
+   ],
+   "homepage": "http://www.interstellarmovie.net/",
+   "id": 157336,
+   "imdb_id": "tt0816692",
+   "origin_country": [
+    "US"
+   ],
+   "original_language": "en",
+   "original_title": "Interstellar",
+   "overview": "The adventures of a group of explorers who make use of a newly discovered wormhole to surpass the limitations on human space travel and conquer the vast distances involved in an interstellar voyage.",
+   "popularity": 65.8256,
+   "poster_path": "/yQvGrMoipbRoddT0ZR8tPoR7NfX.jpg",
+   "production_companies": [
+    {
+     "id": 923,
+     "logo_path": "/5UQsZrfbfG2dYJbx8DxfoTr2Bvu.png",
+     "name": "Legendary Pictures",
+     "origin_country": "US"
+    },
+    {
+     "id": 9996,
+     "logo_path": "/3tvBqYsBhxWeHlu62SIJ1el93O7.png",
+     "name": "Syncopy",
+     "origin_country": "GB"
+    },
+    {
+     "id": 13769,
+     "logo_path": null,
+     "name": "Lynda Obst Productions",
+     "origin_country": "US"
+    }
+   ],
+   "production_countries": [
+    {
+     "iso_3166_1": "GB",
+     "name": "United Kingdom"
+    },
+    {
+     "iso_3166_1": "US",
+     "name": "United States of America"
+    }
+   ],
+   "release_date": "2014-11-04",
+   "revenue": 746606706,
+   "runtime": 169,
+   "softcore": false,
+   "spoken_languages": [
+    {
+     "english_name": "English",
+     "iso_639_1": "en",
+     "name": "English"
+    }
+   ],
+   "status": "Released",
+   "tagline": "Mankind was born on Earth. It was never meant to die here.",
+   "title": "Interstellar",
+   "video": false,
+   "vote_average": 8.49,
+   "vote_count": 41466
+  },
+  "status": 200,
+  "tmdb_id": 157336
+ },
+ "movie:238": {
+  "kind": "movie",
+  "response": {
+   "adult": false,
+   "backdrop_path": "/ejdD20cdHNFAYAN2DlqPToXKyzx.jpg",
+   "belongs_to_collection": {
+    "backdrop_path": "/28eqCQ51SuLfkbzhQE7jCmTfYfy.jpg",
+    "id": 230,
+    "name": "The Godfather Collection",
+    "poster_path": "/kKjIYmvpBUIxcYJ0LL9YZwv4nrZ.jpg"
+   },
+   "budget": 6000000,
+   "genres": [
+    {
+     "id": 18,
+     "name": "Drama"
+    },
+    {
+     "id": 80,
+     "name": "Crime"
+    }
+   ],
+   "homepage": "http://www.thegodfather.com/",
+   "id": 238,
+   "imdb_id": "tt0068646",
+   "origin_country": [
+    "US"
+   ],
+   "original_language": "en",
+   "original_title": "The Godfather",
+   "overview": "Spanning the years 1945 to 1955, a chronicle of the fictional Italian-American Corleone crime family. When organized crime family patriarch, Vito Corleone barely survives an attempt on his life, his youngest son, Michael steps in to take care of the would-be killers, launching a campaign of bloody revenge.",
+   "popularity": 56.9093,
+   "poster_path": "/3bhkrj58Vtu7enYsRolD1fZdja1.jpg",
+   "production_companies": [
+    {
+     "id": 4,
+     "logo_path": "/jay6WcMgagAklUt7i9Euwj1pzTF.png",
+     "name": "Paramount Pictures",
+     "origin_country": "US"
+    },
+    {
+     "id": 10211,
+     "logo_path": null,
+     "name": "Alfran Productions",
+     "origin_country": "US"
+    },
+    {
+     "id": 16311,
+     "logo_path": null,
+     "name": "Albert S. Ruddy Productions",
+     "origin_country": "US"
+    }
+   ],
+   "production_countries": [
+    {
+     "iso_3166_1": "US",
+     "name": "United States of America"
+    }
+   ],
+   "release_date": "1972-03-14",
+   "revenue": 245066411,
+   "runtime": 175,
+   "softcore": false,
+   "spoken_languages": [
+    {
+     "english_name": "English",
+     "iso_639_1": "en",
+     "name": "English"
+    },
+    {
+     "english_name": "Italian",
+     "iso_639_1": "it",
+     "name": "Italiano"
+    },
+    {
+     "english_name": "Latin",
+     "iso_639_1": "la",
+     "name": "Latin"
+    }
+   ],
+   "status": "Released",
+   "tagline": "An offer you can't refuse.",
+   "title": "The Godfather",
+   "video": false,
+   "vote_average": 8.7,
+   "vote_count": 23747
+  },
+  "status": 200,
+  "tmdb_id": 238
+ },
+ "movie:27205": {
+  "kind": "movie",
+  "response": {
+   "adult": false,
+   "backdrop_path": "/8ZTVqvKDQ8emSGUEMjsS4yHAwrp.jpg",
+   "belongs_to_collection": null,
+   "budget": 160000000,
+   "genres": [
+    {
+     "id": 28,
+     "name": "Action"
+    },
+    {
+     "id": 878,
+     "name": "Science Fiction"
+    },
+    {
+     "id": 80,
+     "name": "Crime"
+    }
+   ],
+   "homepage": "https://www.warnerbros.com/movies/inception",
+   "id": 27205,
+   "imdb_id": "tt1375666",
+   "origin_country": [
+    "US",
+    "GB"
+   ],
+   "original_language": "en",
+   "original_title": "Inception",
+   "overview": "Cobb, a skilled thief who commits corporate espionage by infiltrating the subconscious of his targets is offered a chance to regain his old life as payment for a task considered to be impossible: \"inception\", the implantation of another person's idea into a target's subconscious.",
+   "popularity": 49.7208,
+   "poster_path": "/xlaY2zyzMfkhk0HSC5VUwzoZPU1.jpg",
+   "production_companies": [
+    {
+     "id": 174,
+     "logo_path": "/zhD3hhtKB5qyv7ZeL4uLpNxgMVU.png",
+     "name": "Warner Bros. Pictures",
+     "origin_country": "US"
+    }
+   ],
+   "production_countries": [
+    {
+     "iso_3166_1": "GB",
+     "name": "United Kingdom"
+    },
+    {
+     "iso_3166_1": "US",
+     "name": "United States of America"
+    }
+   ],
+   "release_date": "2010-07-15",
+   "revenue": 839030630,
+   "runtime": 148,
+   "softcore": false,
+   "spoken_languages": [
+    {
+     "english_name": "English",
+     "iso_639_1": "en",
+     "name": "English"
+    },
+    {
+     "english_name": "French",
+     "iso_639_1": "fr",
+     "name": "Fran\u00e7ais"
+    },
+    {
+     "english_name": "Japanese",
+     "iso_639_1": "ja",
+     "name": "\u65e5\u672c\u8a9e"
+    },
+    {
+     "english_name": "Swahili",
+     "iso_639_1": "sw",
+     "name": "Kiswahili"
+    }
+   ],
+   "status": "Released",
+   "tagline": "Your mind is the scene of the crime.",
+   "title": "Inception",
+   "video": false,
+   "vote_average": 8.373,
+   "vote_count": 40414
+  },
+  "status": 200,
+  "tmdb_id": 27205
+ },
+ "movie:348": {
+  "kind": "movie",
+  "response": {
+   "adult": false,
+   "backdrop_path": "/AmR3JG1VQVxU8TfAvljUhfSFUOx.jpg",
+   "belongs_to_collection": {
+    "backdrop_path": "/6X42JnSMdo3dPAswOHUuvebdTq7.jpg",
+    "id": 8091,
+    "name": "Alien Collection",
+    "poster_path": "/gWFHIY77cRVoBRGERwMHqpD27gc.jpg"
+   },
+   "budget": 11000000,
+   "genres": [
+    {
+     "id": 27,
+     "name": "Horror"
+    },
+    {
+     "id": 878,
+     "name": "Science Fiction"
+    }
+   ],
+   "homepage": "https://www.20thcenturystudios.com/movies/alien",
+   "id": 348,
+   "imdb_id": "tt0078748",
+   "origin_country": [
+    "US"
+   ],
+   "original_language": "en",
+   "original_title": "Alien",
+   "overview": "During its return to the earth, commercial spaceship Nostromo intercepts a distress signal from a distant planet. When a three-member team of the crew discovers a chamber containing thousands of eggs on the planet, a creature inside one of the eggs attacks an explorer. The entire crew is unaware of the impending nightmare set to descend upon them when the alien parasite planted inside its unfortunate host is birthed.",
+   "popularity": 29.6089,
+   "poster_path": "/vfrQk5IPloGg1v9Rzbh2Eg3VGyM.jpg",
+   "production_companies": [
+    {
+     "id": 401,
+     "logo_path": "/t7mM3DvQ9MwDT3YzMCBrkWpWiiz.png",
+     "name": "Brandywine Productions",
+     "origin_country": "US"
+    },
+    {
+     "id": 276266,
+     "logo_path": null,
+     "name": "Twentieth Century-Fox Productions",
+     "origin_country": "GB"
+    },
+    {
+     "id": 276267,
+     "logo_path": null,
+     "name": "Ronald Shusett Productions",
+     "origin_country": "US"
+    }
+   ],
+   "production_countries": [
+    {
+     "iso_3166_1": "US",
+     "name": "United States of America"
+    },
+    {
+     "iso_3166_1": "GB",
+     "name": "United Kingdom"
+    }
+   ],
+   "release_date": "1979-05-25",
+   "revenue": 104931801,
+   "runtime": 117,
+   "softcore": false,
+   "spoken_languages": [
+    {
+     "english_name": "English",
+     "iso_639_1": "en",
+     "name": "English"
+    },
+    {
+     "english_name": "Spanish",
+     "iso_639_1": "es",
+     "name": "Espa\u00f1ol"
+    }
+   ],
+   "status": "Released",
+   "tagline": "In space no one can hear you scream.",
+   "title": "Alien",
+   "video": false,
+   "vote_average": 8.175,
+   "vote_count": 16967
+  },
+  "status": 200,
+  "tmdb_id": 348
+ },
+ "movie:438631": {
+  "kind": "movie",
+  "response": {
+   "adult": false,
+   "backdrop_path": "/zRKQW58MBEY078AxkHxEJzUskCl.jpg",
+   "belongs_to_collection": {
+    "backdrop_path": "/fahk0Fu7VUUfK6IkTt1R3waOD9F.jpg",
+    "id": 726871,
+    "name": "Dune Collection",
+    "poster_path": "/lxIGYkpvYjLtYtZH684AQft0FhD.jpg"
+   },
+   "budget": 165000000,
+   "genres": [
+    {
+     "id": 878,
+     "name": "Science Fiction"
+    },
+    {
+     "id": 12,
+     "name": "Adventure"
+    }
+   ],
+   "homepage": "https://www.warnerbros.com/movies/dune",
+   "id": 438631,
+   "imdb_id": "tt1160419",
+   "origin_country": [
+    "US"
+   ],
+   "original_language": "en",
+   "original_title": "Dune",
+   "overview": "Paul Atreides, a brilliant and gifted young man born into a great destiny beyond his understanding, must travel to the most dangerous planet in the universe to ensure the future of his family and his people. As malevolent forces explode into conflict over the planet's exclusive supply of the most precious resource in existence - a commodity capable of unlocking humanity's greatest potential - only those who can conquer their fear will survive.",
+   "popularity": 35.7325,
+   "poster_path": "/v1tRXZ4JtD2Iv6fjkPvT4GiwslV.jpg",
+   "production_companies": [
+    {
+     "id": 923,
+     "logo_path": "/5UQsZrfbfG2dYJbx8DxfoTr2Bvu.png",
+     "name": "Legendary Pictures",
+     "origin_country": "US"
+    }
+   ],
+   "production_countries": [
+    {
+     "iso_3166_1": "US",
+     "name": "United States of America"
+    }
+   ],
+   "release_date": "2021-09-15",
+   "revenue": 410668500,
+   "runtime": 155,
+   "softcore": false,
+   "spoken_languages": [
+    {
+     "english_name": "English",
+     "iso_639_1": "en",
+     "name": "English"
+    }
+   ],
+   "status": "Released",
+   "tagline": "It begins.",
+   "title": "Dune",
+   "video": false,
+   "vote_average": 7.784,
+   "vote_count": 15705
+  },
+  "status": 200,
+  "tmdb_id": 438631
+ },
+ "movie:603": {
+  "kind": "movie",
+  "response": {
+   "adult": false,
+   "backdrop_path": "/tlm8UkiQsitc8rSuIAscQDCnP8d.jpg",
+   "belongs_to_collection": {
+    "backdrop_path": "/bRm2DEgUiYciDw3myHuYFInD7la.jpg",
+    "id": 2344,
+    "name": "The Matrix Collection",
+    "poster_path": "/bV9qTVHTVf0gkW0j7p7M0ILD4pG.jpg"
+   },
+   "budget": 63000000,
+   "genres": [
+    {
+     "id": 28,
+     "name": "Action"
+    },
+    {
+     "id": 878,
+     "name": "Science Fiction"
+    }
+   ],
+   "homepage": "http://www.warnerbros.com/matrix",
+   "id": 603,
+   "imdb_id": "tt0133093",
+   "origin_country": [
+    "US"
+   ],
+   "original_language": "en",
+   "original_title": "The Matrix",
+   "overview": "Set in the 22nd century, The Matrix tells the story of a computer hacker who joins a group of underground insurgents fighting the vast and powerful computers who now rule the earth.",
+   "popularity": 44.7334,
+   "poster_path": "/dXNAPwY7VrqMAo51EKhhCJfaGb5.jpg",
+   "production_companies": [
+    {
+     "id": 79,
+     "logo_path": "/at4uYdwAAgNRKhZuuFX8ShKSybw.png",
+     "name": "Village Roadshow Pictures",
+     "origin_country": "US"
+    },
+    {
+     "id": 372,
+     "logo_path": null,
+     "name": "Groucho II Film Partnership",
+     "origin_country": ""
+    },
+    {
+     "id": 1885,
+     "logo_path": "/xlvoOZr4s1PygosrwZyolIFe5xs.png",
+     "name": "Silver Pictures",
+     "origin_country": "US"
+    },
+    {
+     "id": 174,
+     "logo_path": "/zhD3hhtKB5qyv7ZeL4uLpNxgMVU.png",
+     "name": "Warner Bros. Pictures",
+     "origin_country": "US"
+    }
+   ],
+   "production_countries": [
+    {
+     "iso_3166_1": "US",
+     "name": "United States of America"
+    }
+   ],
+   "release_date": "1999-03-31",
+   "revenue": 463517383,
+   "runtime": 136,
+   "softcore": false,
+   "spoken_languages": [
+    {
+     "english_name": "English",
+     "iso_639_1": "en",
+     "name": "English"
+    }
+   ],
+   "status": "Released",
+   "tagline": "Believe the unbelievable.",
+   "title": "The Matrix",
+   "video": false,
+   "vote_average": 8.26,
+   "vote_count": 28948
+  },
+  "status": 200,
+  "tmdb_id": 603
+ },
+ "movie:604": {
+  "kind": "movie",
+  "response": {
+   "adult": false,
+   "backdrop_path": "/ihOJcrorpDQtHTzIOrobbOhpJsj.jpg",
+   "belongs_to_collection": {
+    "backdrop_path": "/bRm2DEgUiYciDw3myHuYFInD7la.jpg",
+    "id": 2344,
+    "name": "The Matrix Collection",
+    "poster_path": "/bV9qTVHTVf0gkW0j7p7M0ILD4pG.jpg"
+   },
+   "budget": 150000000,
+   "genres": [
+    {
+     "id": 12,
+     "name": "Adventure"
+    },
+    {
+     "id": 28,
+     "name": "Action"
+    },
+    {
+     "id": 53,
+     "name": "Thriller"
+    },
+    {
+     "id": 878,
+     "name": "Science Fiction"
+    }
+   ],
+   "homepage": "https://www.warnerbros.com/movies/matrix-reloaded",
+   "id": 604,
+   "imdb_id": "tt0234215",
+   "origin_country": [
+    "US"
+   ],
+   "original_language": "en",
+   "original_title": "The Matrix Reloaded",
+   "overview": "The Resistance builds in numbers as humans are freed from the Matrix and brought to the city of Zion. Neo discovers his superpowers, including the ability to see the code inside the Matrix. With machine sentinels digging to Zion in 72 hours, Neo, Morpheus and Trinity must find the Keymaker to ultimately reach the Source.",
+   "popularity": 25.1336,
+   "poster_path": "/8xEVAe84zlL9rkfYT6dZXero4KK.jpg",
+   "production_companies": [
+    {
+     "id": 79,
+     "logo_path": "/at4uYdwAAgNRKhZuuFX8ShKSybw.png",
+     "name": "Village Roadshow Pictures",
+     "origin_country": "US"
+    },
+    {
+     "id": 1885,
+     "logo_path": "/xlvoOZr4s1PygosrwZyolIFe5xs.png",
+     "name": "Silver Pictures",
+     "origin_country": "US"
+    },
+    {
+     "id": 172,
+     "logo_path": null,
+     "name": "NPV Entertainment",
+     "origin_country": "US"
+    }
+   ],
+   "production_countries": [
+    {
+     "iso_3166_1": "US",
+     "name": "United States of America"
+    }
+   ],
+   "release_date": "2003-05-15",
+   "revenue": 738599701,
+   "runtime": 138,
+   "softcore": false,
+   "spoken_languages": [
+    {
+     "english_name": "English",
+     "iso_639_1": "en",
+     "name": "English"
+    },
+    {
+     "english_name": "French",
+     "iso_639_1": "fr",
+     "name": "Fran\u00e7ais"
+    }
+   ],
+   "status": "Released",
+   "tagline": "Free your mind.",
+   "title": "The Matrix Reloaded",
+   "video": false,
+   "vote_average": 7.086,
+   "vote_count": 12408
+  },
+  "status": 200,
+  "tmdb_id": 604
+ },
+ "movie:680": {
+  "kind": "movie",
+  "response": {
+   "adult": false,
+   "backdrop_path": "/suaEOtk1N1sgg2MTM7oZd2cfVp3.jpg",
+   "belongs_to_collection": null,
+   "budget": 8000000,
+   "genres": [
+    {
+     "id": 53,
+     "name": "Thriller"
+    },
+    {
+     "id": 80,
+     "name": "Crime"
+    },
+    {
+     "id": 35,
+     "name": "Comedy"
+    }
+   ],
+   "homepage": "https://www.miramax.com/movie/pulp-fiction/",
+   "id": 680,
+   "imdb_id": "tt0110912",
+   "origin_country": [
+    "US"
+   ],
+   "original_language": "en",
+   "original_title": "Pulp Fiction",
+   "overview": "A burger-loving hit man, his philosophical partner, a drug-addled gangster's moll and a washed-up boxer converge in this sprawling, comedic crime caper. Their adventures unfurl in three stories that ingeniously trip back and forth in time.",
+   "popularity": 40.2825,
+   "poster_path": "/vQWk5YBFWF4bZaofAbv0tShwBvQ.jpg",
+   "production_companies": [
+    {
+     "id": 14,
+     "logo_path": "/m6AHu84oZQxvq7n1rsvMNJIAsMu.png",
+     "name": "Miramax",
+     "origin_country": "US"
+    },
+    {
+     "id": 59,
+     "logo_path": "/b1tj5EWcFQLYaQrw1D9V4s8kUgN.png",
+     "name": "A Band Apart",
+     "origin_country": "US"
+    },
+    {
+     "id": 216,
+     "logo_path": "/iKPzC6YxqNAk6fMoTtFhIF5p6yw.png",
+     "name": "Jersey Films",
+     "origin_country": "US"
+    }
+   ],
+   "production_countries": [
+    {
+     "iso_3166_1": "US",
+     "name": "United States of America"
+    }
+   ],
+   "release_date": "1994-09-10",
+   "revenue": 213928762,
+   "runtime": 154,
+   "softcore": false,
+   "spoken_languages": [
+    {
+     "english_name": "English",
+     "iso_639_1": "en",
+     "name": "English"
+    },
+    {
+     "english_name": "Spanish",
+     "iso_639_1": "es",
+     "name": "Espa\u00f1ol"
+    },
+    {
+     "english_name": "French",
+     "iso_639_1": "fr",
+     "name": "Fran\u00e7ais"
+    }
+   ],
+   "status": "Released",
+   "tagline": "You won\u2019t know the facts until you\u2019ve seen the fiction.",
+   "title": "Pulp Fiction",
+   "video": false,
+   "vote_average": 8.48,
+   "vote_count": 31076
+  },
+  "status": 200,
+  "tmdb_id": 680
+ },
+ "movie:6977": {
+  "kind": "movie",
+  "response": {
+   "adult": false,
+   "backdrop_path": "/gddUsvfyySrM5k8B8wwJy2VRlBx.jpg",
+   "belongs_to_collection": null,
+   "budget": 25000000,
+   "genres": [
+    {
+     "id": 80,
+     "name": "Crime"
+    },
+    {
+     "id": 53,
+     "name": "Thriller"
+    },
+    {
+     "id": 37,
+     "name": "Western"
+    }
+   ],
+   "homepage": "",
+   "id": 6977,
+   "imdb_id": "tt0477348",
+   "origin_country": [
+    "US"
+   ],
+   "original_language": "en",
+   "original_title": "No Country for Old Men",
+   "overview": "Llewelyn Moss stumbles upon dead bodies, $2 million and a hoard of heroin in a Texas desert, but methodical killer Anton Chigurh comes looking for it, with local sheriff Ed Tom Bell hot on his trail. The roles of prey and predator blur as the violent pursuit of money and justice collide.",
+   "popularity": 26.0104,
+   "poster_path": "/6d5XOczc226jECq0LIX0siKtgHR.jpg",
+   "production_companies": [
+    {
+     "id": 14,
+     "logo_path": "/m6AHu84oZQxvq7n1rsvMNJIAsMu.png",
+     "name": "Miramax",
+     "origin_country": "US"
+    },
+    {
+     "id": 838,
+     "logo_path": "/tcW3UqV46Mdq6GyaS1ydEDocEDF.png",
+     "name": "Paramount Vantage",
+     "origin_country": "US"
+    },
+    {
+     "id": 258,
+     "logo_path": "/tMI4xPwgxfNaNId3h9dOcHGU1NI.png",
+     "name": "Scott Rudin Productions",
+     "origin_country": "US"
+    },
+    {
+     "id": 2092,
+     "logo_path": "/9IAf3DxvsjOVSQVjX5F22jTU4Nh.png",
+     "name": "Mike Zoss Productions",
+     "origin_country": "US"
+    }
+   ],
+   "production_countries": [
+    {
+     "iso_3166_1": "US",
+     "name": "United States of America"
+    }
+   ],
+   "release_date": "2007-11-09",
+   "revenue": 171627166,
+   "runtime": 122,
+   "softcore": false,
+   "spoken_languages": [
+    {
+     "english_name": "English",
+     "iso_639_1": "en",
+     "name": "English"
+    },
+    {
+     "english_name": "Spanish",
+     "iso_639_1": "es",
+     "name": "Espa\u00f1ol"
+    }
+   ],
+   "status": "Released",
+   "tagline": "There are no clean getaways.",
+   "title": "No Country for Old Men",
+   "video": false,
+   "vote_average": 7.95,
+   "vote_count": 13900
+  },
+  "status": 200,
+  "tmdb_id": 6977
+ },
+ "tv:1396": {
+  "kind": "tv",
+  "response": {
+   "adult": false,
+   "backdrop_path": "/tsRy63Mu5cu8etL1X7ZLyf7UP1M.jpg",
+   "created_by": [
+    {
+     "credit_id": "52542286760ee31328001a7b",
+     "gender": 2,
+     "id": 66633,
+     "name": "Vince Gilligan",
+     "original_name": "Vince Gilligan",
+     "profile_path": "/wJIxATESjzsjSgvRhVavOmdamXc.jpg"
+    }
+   ],
+   "episode_run_time": [],
+   "first_air_date": "2008-01-20",
+   "genres": [
+    {
+     "id": 18,
+     "name": "Drama"
+    },
+    {
+     "id": 80,
+     "name": "Crime"
+    }
+   ],
+   "homepage": "https://www.sonypictures.com/tv/breakingbad",
+   "id": 1396,
+   "in_production": false,
+   "languages": [
+    "en",
+    "de",
+    "es"
+   ],
+   "last_air_date": "2013-09-29",
+   "last_episode_to_air": {
+    "air_date": "2013-09-29",
+    "episode_number": 16,
+    "episode_type": "finale",
+    "id": 62161,
+    "name": "Felina",
+    "overview": "All bad things must come to an end.",
+    "production_code": "",
+    "runtime": 56,
+    "season_number": 5,
+    "show_id": 1396,
+    "still_path": "/pA0YwyhvdDXP3BEGL2grrIhq8aM.jpg",
+    "vote_average": 9.3,
+    "vote_count": 325
+   },
+   "name": "Breaking Bad",
+   "networks": [
+    {
+     "id": 174,
+     "logo_path": "/pmvRmATOCaDykE6JrVoeYxlFHw3.png",
+     "name": "AMC",
+     "origin_country": "US"
+    }
+   ],
+   "next_episode_to_air": null,
+   "number_of_episodes": 62,
+   "number_of_seasons": 5,
+   "origin_country": [
+    "US"
+   ],
+   "original_language": "en",
+   "original_name": "Breaking Bad",
+   "overview": "Walter White, a New Mexico chemistry teacher, is diagnosed with Stage III cancer and given a prognosis of only two years left to live. He becomes filled with a sense of fearlessness and an unrelenting desire to secure his family's financial future at any cost as he enters the dangerous world of drugs and crime.",
+   "popularity": 217.7491,
+   "poster_path": "/anFx9aTOOYqgS3v7x3R84Kz67ly.jpg",
+   "production_companies": [
+    {
+     "id": 11073,
+     "logo_path": "/wHs44fktdoj6c378ZbSWfzKsM2Z.png",
+     "name": "Sony Pictures Television",
+     "origin_country": "US"
+    },
+    {
+     "id": 33742,
+     "logo_path": "/2jdh2sEa0R6y6uT0F7g0IgA2WO8.png",
+     "name": "High Bridge Productions",
+     "origin_country": "US"
+    },
+    {
+     "id": 2605,
+     "logo_path": null,
+     "name": "Gran Via Productions",
+     "origin_country": "US"
+    }
+   ],
+   "production_countries": [
+    {
+     "iso_3166_1": "US",
+     "name": "United States of America"
+    }
+   ],
+   "seasons": [
+    {
+     "air_date": "2009-02-17",
+     "episode_count": 9,
+     "id": 3577,
+     "name": "Specials",
+     "overview": "",
+     "poster_path": "/4RaIvSQgHHHPfaI1jFqaMR8UJWM.jpg",
+     "season_number": 0,
+     "vote_average": 0.0
+    },
+    {
+     "air_date": "2008-01-20",
+     "episode_count": 7,
+     "id": 3572,
+     "name": "Season 1",
+     "overview": "High school chemistry teacher Walter White's life is suddenly transformed by a dire medical diagnosis. Street-savvy former student Jesse Pinkman \"teaches\" Walter a new trade.",
+     "poster_path": "/1BP4xYv9ZG4ZVHkL7ocOziBbSYH.jpg",
+     "season_number": 1,
+     "vote_average": 8.4
+    },
+    {
+     "air_date": "2009-03-08",
+     "episode_count": 13,
+     "id": 3573,
+     "name": "Season 2",
+     "overview": "Walt must deal with the chain reaction of his choice, as he and Jesse face new and severe consequences. When danger and suspicion around Walt escalate, he is pushed to new levels of desperation. Just how much higher will the stakes rise? How far is Walt willing to go to ensure his family's security? Will his grand plan spiral out of control?",
+     "poster_path": "/e3oGYpoTUhOFK0BJfloru5ZmGV.jpg",
+     "season_number": 2,
+     "vote_average": 8.5
+    },
+    {
+     "air_date": "2010-03-21",
+     "episode_count": 13,
+     "id": 3575,
+     "name": "Season 3",
+     "overview": "Walt continues to battle dueling identities: a desperate husband and father trying to provide for his family, and a newly appointed key player in the Albuquerque drug trade. As the danger around him escalates, Walt is now entrenched in the complex worlds of an angst-ridden family on the verge of dissolution, and the ruthless and unrelenting drug cartel.",
+     "poster_path": "/ffP8Q8ew048YofHRnFVM18B2fPG.jpg",
+     "season_number": 3,
+     "vote_average": 8.4
+    },
+    {
+     "air_date": "2011-07-17",
+     "episode_count": 13,
+     "id": 3576,
+     "name": "Season 4",
+     "overview": "Walt and Jesse must cope with the fallout of their previous actions, both personally and professionally. Tension mounts as Walt faces a true standoff with his employer, Gus, with neither side willing or able to back down. Walt must also adjust to a new relationship with Skyler, whom while still reconciling her relationship with Walt, is committed to properly laundering Walt\u2019s money and ensuring her sister Marie and an ailing Hank are financially stable.",
+     "poster_path": "/5ewrnKp4TboU4hTLT5cWO350mHj.jpg",
+     "season_number": 4,
+     "vote_average": 8.6
+    },
+    {
+     "air_date": "2012-07-15",
+     "episode_count": 16,
+     "id": 3578,
+     "name": "Season 5",
+     "overview": "Walt is faced with the prospect of moving on in a world without his enemy. As the pressure of a criminal life starts to build, Skyler struggles to keep Walt\u2019s terrible secrets. Facing resistance from sometime adversary and former Fring lieutenant Mike, Walt tries to keep his world from falling apart even as his DEA Agent brother in law, Hank, finds numerous leads that could blaze a path straight to Walt.\u00a0",
+     "poster_path": "/r3z70vunihrAkjILQKWHX0G2xzO.jpg",
+     "season_number": 5,
+     "vote_average": 8.9
+    }
+   ],
+   "softcore": false,
+   "spoken_languages": [
+    {
+     "english_name": "English",
+     "iso_639_1": "en",
+     "name": "English"
+    },
+    {
+     "english_name": "German",
+     "iso_639_1": "de",
+     "name": "Deutsch"
+    },
+    {
+     "english_name": "Spanish",
+     "iso_639_1": "es",
+     "name": "Espa\u00f1ol"
+    }
+   ],
+   "status": "Ended",
+   "tagline": "Change the equation.",
+   "type": "Scripted",
+   "vote_average": 9.0,
+   "vote_count": 18828
+  },
+  "status": 200,
+  "tmdb_id": 1396
+ },
+ "tv:2316": {
+  "kind": "tv",
+  "response": {
+   "adult": false,
+   "backdrop_path": "/mLyW3UTgi2lsMdtueYODcfAB9Ku.jpg",
+   "created_by": [
+    {
+     "credit_id": "525730af760ee3776a344e95",
+     "gender": 2,
+     "id": 1216630,
+     "name": "Greg Daniels",
+     "original_name": "Greg Daniels",
+     "profile_path": "/2lplV4pxfpEL7Rpdr7YFXmGx84x.jpg"
+    }
+   ],
+   "episode_run_time": [],
+   "first_air_date": "2005-03-24",
+   "genres": [
+    {
+     "id": 35,
+     "name": "Comedy"
+    }
+   ],
+   "homepage": "https://www.nbc.com/the-office",
+   "id": 2316,
+   "in_production": false,
+   "languages": [
+    "en"
+   ],
+   "last_air_date": "2013-05-16",
+   "last_episode_to_air": {
+    "air_date": "2013-05-16",
+    "episode_number": 23,
+    "episode_type": "finale",
+    "id": 170335,
+    "name": "Finale",
+    "overview": "One year later, Dunder Mifflin employees past and present reunite for a panel discussion about the documentary and to attend Dwight and Angela's wedding.",
+    "production_code": "",
+    "runtime": 45,
+    "season_number": 9,
+    "show_id": 2316,
+    "still_path": "/1pJtFmAS3TJuWoCaUrY904pqNFE.jpg",
+    "vote_average": 8.932,
+    "vote_count": 74
+   },
+   "name": "The Office",
+   "networks": [
+    {
+     "id": 6,
+     "logo_path": "/cm111bsDVlYaC1foL0itvEI4yLG.png",
+     "name": "NBC",
+     "origin_country": "US"
+    }
+   ],
+   "next_episode_to_air": null,
+   "number_of_episodes": 186,
+   "number_of_seasons": 9,
+   "origin_country": [
+    "US"
+   ],
+   "original_language": "en",
+   "original_name": "The Office",
+   "overview": "The everyday lives of office employees in the Scranton, Pennsylvania branch of the fictional Dunder Mifflin Paper Company.",
+   "popularity": 369.6397,
+   "poster_path": "/7DJKHzAi83BmQrWLrYYOqcoKfhR.jpg",
+   "production_companies": [
+    {
+     "id": 26727,
+     "logo_path": "/jeTxdjXhzgKZyLr3l9MllkTn3fy.png",
+     "name": "Universal Television",
+     "origin_country": "US"
+    },
+    {
+     "id": 59845,
+     "logo_path": null,
+     "name": "Deedle-Dee Productions",
+     "origin_country": "US"
+    },
+    {
+     "id": 6383,
+     "logo_path": "/bQVIn5JphAADvT4hljIMuzgm3sz.png",
+     "name": "Reveille Productions",
+     "origin_country": "US"
+    },
+    {
+     "id": 215547,
+     "logo_path": "/bLfxRVYgDEFMPI5G2Kwezw3YsOr.png",
+     "name": "Shine America",
+     "origin_country": "US"
+    },
+    {
+     "id": 8301,
+     "logo_path": "/zrcVDabl14MNfPwxL8DC2IyR12t.png",
+     "name": "Universal Media Studios",
+     "origin_country": "US"
+    }
+   ],
+   "production_countries": [
+    {
+     "iso_3166_1": "US",
+     "name": "United States of America"
+    }
+   ],
+   "seasons": [
+    {
+     "air_date": "2006-07-13",
+     "episode_count": 106,
+     "id": 7246,
+     "name": "Specials",
+     "overview": "",
+     "poster_path": "/hL7duCNjfylgdKdVPMY4ggKzCjD.jpg",
+     "season_number": 0,
+     "vote_average": 0.0
+    },
+    {
+     "air_date": "2005-03-24",
+     "episode_count": 6,
+     "id": 7240,
+     "name": "Season 1",
+     "overview": "This season introduced the main characters, and established the general plot, which revolves around Michael Scott, regional manager of the Scranton branch office, trying to convince the filmmakers of the documentary that he presides over a happy, well-running office. Meanwhile, sales rep Jim Halpert finds methods to undermine his cube-mate, Dwight Schrute; receptionist Pam Beesly tries to deal with Michael's insensitivities and flubs; and temporary employee Ryan Howard is acting mostly as an observer of the insanity around him.",
+     "poster_path": "/d71JQWhX75ZE2D383DlIsHVH1In.jpg",
+     "season_number": 1,
+     "vote_average": 7.7
+    },
+    {
+     "air_date": "2005-09-20",
+     "episode_count": 22,
+     "id": 7241,
+     "name": "Season 2",
+     "overview": "Beginning with \"The Dundies\", the second season further developed into the plot of the fear of company downsizing, along with the introduction of new characters and developing some of the minor ones\u2014especially that of Dwight Schrute. Michael Scott soon starts a relationship with his boss Jan Levenson and, Pam Beesley and Jim Halpert\u2019s relationship become one of the focal points of the season. Their compatibility becomes more obvious as Jim\u2019s feelings for Pam continue to grow, while she struggles with her relationship with the warehouse worker Roy Anderson.",
+     "poster_path": "/sAd3RhOjhTuaIBpyiI1QmB0YUq8.jpg",
+     "season_number": 2,
+     "vote_average": 8.2
+    },
+    {
+     "air_date": "2006-09-21",
+     "episode_count": 23,
+     "id": 7242,
+     "name": "Season 3",
+     "overview": "The season marked the move of main character Jim Halpert from Scranton to Stamford, and also introduced Rashida Jones as Karen Filippelli, and Ed Helms as Andy Bernard\u2014both members of Dunder Mifflin Stamford\u2014as recurring characters. The main plot for the early episodes of the season deals with a recurring problem in seasons one and two\u2014the problem of company downsizing\u2014while in the last half of the season, inter-office relationships also became a major plot point.",
+     "poster_path": "/1SR5ZR0KNHTRvAzFayaKbhKAFSu.jpg",
+     "season_number": 3,
+     "vote_average": 8.2
+    },
+    {
+     "air_date": "2007-09-27",
+     "episode_count": 14,
+     "id": 7245,
+     "name": "Season 4",
+     "overview": "Season four marked the departure of Karen Filippelli as a regular character, although she appeared for a few seconds in the first episode, \"Fun Run\" and in the sixth episode, \"Branch Wars\", as the regional manager of the Utica branch. Relationships again emerged as the main theme of the season, with Jim Halpert and Pam Beesley's rising, and Michael Scott and Jan Levinson's, as well as Dwight Schrute and Angela Martin's declining. Technology was another prevalent theme as the office staff struggled with initiatives introduced by Ryan Howard to modernize the company.",
+     "poster_path": "/zunFI6wdYJQRHnfXnziArUTs2e2.jpg",
+     "season_number": 4,
+     "vote_average": 8.1
+    },
+    {
+     "air_date": "2008-09-25",
+     "episode_count": 26,
+     "id": 7244,
+     "name": "Season 5",
+     "overview": "Michael Scott and his fellow Dunder Mifflin-ites steal customers, frame co-workers, and indulge in intra-office love affairs.",
+     "poster_path": "/hwlQxOPGIybqBz5TYYIe6XtOfi4.jpg",
+     "season_number": 5,
+     "vote_average": 8.2
+    },
+    {
+     "air_date": "2009-09-17",
+     "episode_count": 24,
+     "id": 7243,
+     "name": "Season 6",
+     "overview": "In Season 6, the crew faces romances, marriage, parenthood, new corporate ownership, Darryl\u2019s rise to middle management, and a ball-busting new boss.",
+     "poster_path": "/hk3a9U26J726oV8nHTdeMTtH91B.jpg",
+     "season_number": 6,
+     "vote_average": 7.9
+    },
+    {
+     "air_date": "2010-09-23",
+     "episode_count": 24,
+     "id": 7247,
+     "name": "Season 7",
+     "overview": "In Season 7, Dwight is now the owner of the building, Andy is courting Erin, Jim and Pam struggle with being new parents, and past girlfriends haunt Michael.",
+     "poster_path": "/uR3y9BwPA8gnk2nmB6ncQejEe8k.jpg",
+     "season_number": 7,
+     "vote_average": 8.0
+    },
+    {
+     "air_date": "2011-09-22",
+     "episode_count": 24,
+     "id": 7248,
+     "name": "Season 8",
+     "overview": "The eighth season largely centers around Andy Bernard's ascension to regional manager, as well as the antics of Robert California, the new CEO of Sabre, a fictional printer company that owns Dunder Mifflin. Halfway through the season, Dwight Schrute \u2014along with Jim Halpert, Stanley Hudson, Ryan Howard, Erin Hannon, and Cathy \u2014travel to Florida to help set up a Sabre Store, where Nellie Bertram is introduced.",
+     "poster_path": "/sQLtAEBbQNIXGZyTUt3IK9gX4VE.jpg",
+     "season_number": 8,
+     "vote_average": 7.5
+    },
+    {
+     "air_date": "2012-09-20",
+     "episode_count": 23,
+     "id": 7249,
+     "name": "Season 9",
+     "overview": "In Season 9, Andy finds his true calling in showbiz, Jim lands the job of his dreams, Erin struggles with love, and Angela's marriage isn\u2019t what it seems.",
+     "poster_path": "/ncR9y2RApOTSjfggJHjvoIlAqDG.jpg",
+     "season_number": 9,
+     "vote_average": 7.6
+    }
+   ],
+   "softcore": false,
+   "spoken_languages": [
+    {
+     "english_name": "English",
+     "iso_639_1": "en",
+     "name": "English"
+    }
+   ],
+   "status": "Ended",
+   "tagline": "A comedy for anyone whose boss is an idiot.",
+   "type": "Scripted",
+   "vote_average": 8.583,
+   "vote_count": 5577
+  },
+  "status": 200,
+  "tmdb_id": 2316
+ },
+ "tv:66732": {
+  "kind": "tv",
+  "response": {
+   "adult": false,
+   "backdrop_path": "/9P4IIMYY3HifqeruZq0ZZ9g7YUi.jpg",
+   "created_by": [
+    {
+     "credit_id": "57599b039251410a99001cce",
+     "gender": 2,
+     "id": 1179422,
+     "name": "Ross Duffer",
+     "original_name": "Ross Duffer",
+     "profile_path": "/AnZhpHzHKy0IWwn9KxkukXXWNte.jpg"
+    },
+    {
+     "credit_id": "57599b0e925141378a002c87",
+     "gender": 2,
+     "id": 1179419,
+     "name": "Matt Duffer",
+     "original_name": "Matt Duffer",
+     "profile_path": "/xaBSTbWWVmKcZN5RoIzPiF5RzZj.jpg"
+    }
+   ],
+   "episode_run_time": [],
+   "first_air_date": "2016-07-15",
+   "genres": [
+    {
+     "id": 10759,
+     "name": "Action & Adventure"
+    },
+    {
+     "id": 9648,
+     "name": "Mystery"
+    },
+    {
+     "id": 10765,
+     "name": "Sci-Fi & Fantasy"
+    }
+   ],
+   "homepage": "https://www.netflix.com/title/80057281",
+   "id": 66732,
+   "in_production": false,
+   "languages": [
+    "en"
+   ],
+   "last_air_date": "2025-12-31",
+   "last_episode_to_air": {
+    "air_date": "2025-12-31",
+    "episode_number": 8,
+    "episode_type": "finale",
+    "id": 5607051,
+    "name": "Chapter Eight: The Rightside Up",
+    "overview": "As Vecna prepares to destroy the world as we know it, the party must put everything on the line to defeat him once and for all.",
+    "production_code": "",
+    "runtime": 129,
+    "season_number": 5,
+    "show_id": 66732,
+    "still_path": "/kP23RWbUWM6vGhT9PxFyP5VT3y4.jpg",
+    "vote_average": 7.0,
+    "vote_count": 281
+   },
+   "name": "Stranger Things",
+   "networks": [
+    {
+     "id": 213,
+     "logo_path": "/wwemzKWzjKYJFfCeiB57q3r4Bcm.png",
+     "name": "Netflix",
+     "origin_country": ""
+    }
+   ],
+   "next_episode_to_air": null,
+   "number_of_episodes": 42,
+   "number_of_seasons": 5,
+   "origin_country": [
+    "US"
+   ],
+   "original_language": "en",
+   "original_name": "Stranger Things",
+   "overview": "When a young boy vanishes, a small town uncovers a mystery involving secret experiments, terrifying supernatural forces, and one strange little girl.",
+   "popularity": 134.3388,
+   "poster_path": "/uOOtwVbSr4QDjAGIifLDwpb2Pdl.jpg",
+   "production_companies": [
+    {
+     "id": 2575,
+     "logo_path": "/9YJrHYlcfHtwtulkFMAies3aFEl.png",
+     "name": "21 Laps Entertainment",
+     "origin_country": "US"
+    },
+    {
+     "id": 170090,
+     "logo_path": null,
+     "name": "Monkey Massacre Productions",
+     "origin_country": "US"
+    },
+    {
+     "id": 184664,
+     "logo_path": "/4qv40ryAKUzvwptbv13eXUAl1Wm.png",
+     "name": "Upside Down Pictures",
+     "origin_country": "US"
+    }
+   ],
+   "production_countries": [
+    {
+     "iso_3166_1": "US",
+     "name": "United States of America"
+    }
+   ],
+   "seasons": [
+    {
+     "air_date": "2016-07-15",
+     "episode_count": 8,
+     "id": 77680,
+     "name": "Season 1",
+     "overview": "Strange things are afoot in Hawkins, Indiana, where a young boy's sudden disappearance unearths a young girl with otherworldly powers.",
+     "poster_path": "/oHu8CAhFkGgGNkANgdl59BrIRAb.jpg",
+     "season_number": 1,
+     "vote_average": 8.5
+    },
+    {
+     "air_date": "2017-10-27",
+     "episode_count": 9,
+     "id": 83248,
+     "name": "Stranger Things 2",
+     "overview": "It's been nearly a year since Will's strange disappearance. But life's hardly back to normal in Hawkins. Not even close.",
+     "poster_path": "/lXS60geme1LlEob5Wgvj3KilClA.jpg",
+     "season_number": 2,
+     "vote_average": 8.2
+    },
+    {
+     "air_date": "2019-07-04",
+     "episode_count": 8,
+     "id": 115216,
+     "name": "Stranger Things 3",
+     "overview": "Budding romance. A brand-new mall. And rabid rats running toward danger. It's the summer of 1985 in Hawkins ... and one summer can change everything.",
+     "poster_path": "/x2LSRK2Cm7MZhjluni1msVJ3wDF.jpg",
+     "season_number": 3,
+     "vote_average": 8.2
+    },
+    {
+     "air_date": "2022-05-27",
+     "episode_count": 9,
+     "id": 163313,
+     "name": "Stranger Things 4",
+     "overview": "Darkness returns to Hawkins just in time for spring break, igniting fresh terror, disturbing memories \u2014 and an ominous new threat.",
+     "poster_path": "/zvGTZYDCoMSMIBkXExxRxLYimqN.jpg",
+     "season_number": 4,
+     "vote_average": 8.5
+    },
+    {
+     "air_date": "2025-11-26",
+     "episode_count": 8,
+     "id": 402292,
+     "name": "Stranger Things 5",
+     "overview": "The fall of 1987. Hawkins is scarred by rifts. Vecna has vanished and the government has placed the town under military quarantine, forcing Eleven back into hiding. To end this nightmare, they'll need everyone together, one last time.",
+     "poster_path": "/5i5Fg549J27knMvhI5NRM2FT3Gn.jpg",
+     "season_number": 5,
+     "vote_average": 7.5
+    }
+   ],
+   "softcore": false,
+   "spoken_languages": [
+    {
+     "english_name": "English",
+     "iso_639_1": "en",
+     "name": "English"
+    }
+   ],
+   "status": "Ended",
+   "tagline": "It only gets stranger...",
+   "type": "Scripted",
+   "vote_average": 8.547,
+   "vote_count": 21970
+  },
+  "status": 200,
+  "tmdb_id": 66732
+ }
+}

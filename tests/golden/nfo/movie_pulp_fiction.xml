@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<movie>
+  <uniqueid type="tmdb" default="true">680</uniqueid>
+  <uniqueid type="imdb">tt0110912</uniqueid>
+  <lockdata>true</lockdata>
+  <title>Pulp Fiction</title>
+  <originaltitle>Pulp Fiction</originaltitle>
+  <sorttitle>Pulp Fiction</sorttitle>
+  <year>1994</year>
+  <premiered>1994-09-14</premiered>
+  <plot>A burger-loving hit man, his pilot partner, and their fixer associate perform odd jobs for their mysterious employer.</plot>
+  <tagline>The world is yours</tagline>
+  <runtime>154</runtime>
+  <genre>Crime</genre>
+  <genre>Drama</genre>
+  <studio>A Band Apart</studio>
+  <studio>Dimension Films</studio>
+  <ratings>
+    <rating name="themoviedb" max="10">8.5</rating>
+  </ratings>
+</movie>

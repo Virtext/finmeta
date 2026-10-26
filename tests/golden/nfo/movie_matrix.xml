@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<movie>
+  <uniqueid type="tmdb" default="true">603</uniqueid>
+  <uniqueid type="imdb">tt0133093</uniqueid>
+  <lockdata>true</lockdata>
+  <title>The Matrix</title>
+  <originaltitle>The Matrix</originaltitle>
+  <sorttitle>The Matrix</sorttitle>
+  <year>1999</year>
+  <premiered>1999-03-30</premiered>
+  <plot>Set in the 22nd century, The Matrix tells the story of a computer hacker who joins a group of rebels who fight against the machines that have enslaved humanity.</plot>
+  <tagline>Welcome to the Real World</tagline>
+  <runtime>136</runtime>
+  <genre>Action</genre>
+  <genre>Science Fiction</genre>
+  <studio>Village Roadshow Pictures</studio>
+  <studio>Warner Bros. Pictures</studio>
+  <ratings>
+    <rating name="themoviedb" max="10">8.2</rating>
+  </ratings>
+</movie>
