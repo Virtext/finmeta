@@ -1,0 +1,67 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>finmeta</Name>
+  <Repository>ghcr.io/virtext/finmeta:latest</Repository>
+  <Registry>https://github.com/Virtext/finmeta/pkgs/container/finmeta</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/Virtext/finmeta/issues</Support>
+  <Project>https://github.com/Virtext/finmeta</Project>
+  <Overview>Jellyfin-native metadata, artwork and overlay manager -- a self-hosted alternative to Kometa that reads and writes metadata, posters and overlays directly against your Jellyfin library. No Plex required.&#13;
+&#13;
+On first run the web UI starts in dry-run mode with no password set -- open it, finish setup, and point it at your Jellyfin server before enabling writes.</Overview>
+  <Category>MediaApp:Other Tools:Utilities</Category>
+  <WebUI>http://[IP]:[PORT:8765]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/Virtext/finmeta/main/unraid/finmeta.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/Virtext/finmeta/main/ui/public/favicon.png</Icon>
+  <ExtraParams/>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled/>
+  <DonateText/>
+  <DonateLink/>
+  <Description>Jellyfin-native metadata, artwork and overlay manager -- a self-hosted alternative to Kometa that reads and writes metadata, posters and overlays directly against your Jellyfin library. No Plex required.</Description>
+  <Networking>
+    <Mode>bridge</Mode>
+    <Publish>
+      <Port>
+        <HostPort>8765</HostPort>
+        <ContainerPort>8765</ContainerPort>
+        <Protocol>tcp</Protocol>
+      </Port>
+    </Publish>
+  </Networking>
+  <Data>
+    <Volume>
+      <HostDir>/mnt/user/appdata/finmeta/config</HostDir>
+      <ContainerDir>/config</ContainerDir>
+      <Mode>rw</Mode>
+    </Volume>
+    <Volume>
+      <HostDir>/mnt/user/media</HostDir>
+      <ContainerDir>/media</ContainerDir>
+      <Mode>rw</Mode>
+    </Volume>
+  </Data>
+  <Environment>
+    <Variable>
+      <Value>Etc/UTC</Value>
+      <Name>TZ</Name>
+    </Variable>
+    <Variable>
+      <Value>8765</Value>
+      <Name>FINMETA_PORT</Name>
+    </Variable>
+  </Environment>
+  <Labels/>
+  <Config Name="WebUI Port" Target="8765" Default="8765" Mode="tcp" Description="Port the Finmeta web UI listens on." Type="Port" Display="always" Required="true" Mask="false">8765</Config>
+  <Config Name="Config" Target="/config" Default="/mnt/user/appdata/finmeta/config" Mode="rw" Description="Finmeta's own config.yml, auth DB and run history." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/finmeta/config</Config>
+  <Config Name="Media" Target="/media" Default="/mnt/user/media" Mode="rw" Description="Your Jellyfin media library. Must match the path_mappings entry you set in Finmeta's config.yml -- set this before enabling writes." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/media</Config>
+  <Config Name="Kometa import (optional)" Target="/import/kometa" Default="" Mode="ro" Description="Optional, read-only: point at an existing Kometa install to import its config/packs from the Finmeta UI without granting write access to it. Leave blank if unused." Type="Path" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="TZ" Target="TZ" Default="Etc/UTC" Mode="" Description="Timezone, used for scheduled jobs (e.g. poster rotation)." Type="Variable" Display="always" Required="true" Mask="false">Etc/UTC</Config>
+  <Config Name="FINMETA_SECRET_KEY" Target="FINMETA_SECRET_KEY" Default="" Mode="" Description="Encrypts stored provider API keys at rest. Generate one with: python3 -c &quot;import secrets; print(secrets.token_urlsafe(32))&quot; -- leave blank to let Finmeta generate and persist one on first run." Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="FINMETA_COOKIE_SECURE" Target="FINMETA_COOKIE_SECURE" Default="" Mode="" Description="Set to 1 once Finmeta is served behind HTTPS (e.g. via a reverse proxy). Leave blank otherwise." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="JELLYFIN_API_KEY" Target="JELLYFIN_API_KEY" Default="" Mode="" Description="Optional: your Jellyfin API key. Can also be entered later from the Finmeta web UI instead." Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+</Container>

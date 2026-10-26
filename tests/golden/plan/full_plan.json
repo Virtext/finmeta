@@ -1,0 +1,125 @@
+{
+  "items": [
+    {
+      "item_id": "mov001",
+      "item_name": "The Matrix (1999)",
+      "media_type": "movie",
+      "tmdb_id": 603,
+      "matched_by": "provider_id",
+      "files": [
+        {
+          "target_path": "/work/fixture/library/Movies/The Matrix (1999)/movie.nfo",
+          "kind": "metadata",
+          "source_ref": "generated",
+          "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "status": "create",
+          "write_method": "sidecar",
+          "meta": {}
+        },
+        {
+          "target_path": "/work/fixture/library/Movies/The Matrix (1999)/poster.jpg",
+          "kind": "poster",
+          "source_ref": "/work/fixture/assets/603/poster.jpg",
+          "content_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "status": "create",
+          "write_method": "sidecar",
+          "meta": {}
+        },
+        {
+          "target_path": "/work/fixture/library/Movies/The Matrix (1999)/backdrop.jpg",
+          "kind": "backdrop",
+          "source_ref": "/work/fixture/assets/603/backdrop.jpg",
+          "content_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "status": "create",
+          "write_method": "sidecar",
+          "meta": {}
+        }
+      ],
+      "ratings": {},
+      "rating_sources": {},
+      "format_counts": {},
+      "tv_status": null
+    },
+    {
+      "item_id": "mov002",
+      "item_name": "Pulp Fiction (1994)",
+      "media_type": "movie",
+      "tmdb_id": 680,
+      "matched_by": "title_year",
+      "files": [
+        {
+          "target_path": "/work/fixture/library/Movies/Pulp Fiction (1994)/movie.nfo",
+          "kind": "metadata",
+          "source_ref": "generated",
+          "content_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "status": "update",
+          "write_method": "sidecar",
+          "meta": {}
+        },
+        {
+          "target_path": "/work/fixture/library/Movies/Pulp Fiction (1994)/poster.jpg",
+          "kind": "poster",
+          "source_ref": "https://image.tmdb.org/t/p/original/x.jpg",
+          "content_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "status": "unchanged",
+          "write_method": "sidecar",
+          "meta": {}
+        }
+      ],
+      "ratings": {},
+      "rating_sources": {},
+      "format_counts": {},
+      "tv_status": null
+    },
+    {
+      "item_id": "tv001",
+      "item_name": "Breaking Bad",
+      "media_type": "tvshow",
+      "tmdb_id": 1396,
+      "matched_by": "provider_id",
+      "files": [
+        {
+          "target_path": "/work/fixture/library/Shows/Breaking Bad/tvshow.nfo",
+          "kind": "metadata",
+          "source_ref": "generated",
+          "content_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "status": "create",
+          "write_method": "sidecar",
+          "meta": {}
+        },
+        {
+          "target_path": "/work/fixture/library/Shows/Breaking Bad/poster.jpg",
+          "kind": "poster",
+          "source_ref": "/work/fixture/assets/1396/poster.jpg",
+          "content_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "status": "create",
+          "write_method": "sidecar",
+          "meta": {}
+        },
+        {
+          "target_path": "/work/fixture/library/Shows/Breaking Bad/theme.mp3",
+          "kind": "theme_song",
+          "source_ref": "/work/fixture/assets/1396/theme.mp3",
+          "content_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "status": "update",
+          "write_method": "sidecar",
+          "meta": {}
+        }
+      ],
+      "ratings": {},
+      "rating_sources": {},
+      "format_counts": {},
+      "tv_status": null
+    }
+  ],
+  "api_actions": [],
+  "unmatched": [
+    {
+      "item_id": "mov999",
+      "name": "Unknown Film (2020)",
+      "reason": "no TMDb match for \"Unknown Film (2020)\" (type=Movie)"
+    }
+  ],
+  "provider_warnings": [],
+  "total_items": null
+}

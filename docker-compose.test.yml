@@ -1,0 +1,17 @@
+# Throwaway Jellyfin test server for Finmeta development.
+# Same image as production. Sees ONLY the synthetic fixture library.
+services:
+  finmeta-jellyfin:
+    image: lscr.io/linuxserver/jellyfin:nightly
+    container_name: finmeta-jellyfin
+    environment:
+      - PUID=99
+      - PGID=100
+      - TZ=Etc/UTC
+    ports:
+      - "8097:8096"
+    volumes:
+      - ./.jf-test/config:/config
+      - ./.jf-test/cache:/cache
+      - ./fixture/library:/media
+    restart: "no"

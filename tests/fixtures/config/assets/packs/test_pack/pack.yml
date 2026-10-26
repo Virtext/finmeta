@@ -1,0 +1,19 @@
+name: test_pack
+description: Test fixture pack for S9d3
+categories:
+  resolution:
+    matcher: format_rule
+    keys: [res_4k, res_1080p, res_720p]
+  hdr:
+    matcher: format_rule
+    keys: [hdr10, dv, hdr10plus]
+  audio:
+    matcher: format_rule
+    keys: [atmos]
+  rating:
+    matcher: rating_tier
+    keys: [gold, silver, bronze]
+    tiers:
+      gold: ">=8.0"
+      silver: ">=6.0"
+      bronze: "<6.0"

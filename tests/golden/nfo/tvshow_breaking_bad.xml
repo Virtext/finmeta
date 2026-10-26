@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<tvshow>
+  <uniqueid type="tmdb" default="true">1396</uniqueid>
+  <uniqueid type="imdb">tt0903747</uniqueid>
+  <lockdata>true</lockdata>
+  <title>Breaking Bad</title>
+  <originaltitle>Breaking Bad</originaltitle>
+  <sorttitle>Breaking Bad</sorttitle>
+  <year>2008</year>
+  <premiered>2008-01-20</premiered>
+  <plot>A high school chemistry teacher diagnosed with inoperable lung cancer turns to manufacturing and selling methamphetamine.</plot>
+  <status>Ended</status>
+  <genre>Drama</genre>
+  <genre>Crime</genre>
+  <studio>Sony Pictures Television</studio>
+  <ratings>
+    <rating name="themoviedb" max="10">8.9</rating>
+  </ratings>
+</tvshow>

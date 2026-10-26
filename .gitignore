@@ -1,0 +1,60 @@
+.venv
+.node
+.logs
+.jf-test
+node_modules
+fixture/library
+config/cache.db
+config/cache/
+config/backups
+config/trash
+config/jellyfin_originals
+config/runs
+.verify
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.tools/
+backend/finmeta/web/
+config/config.yml
+ui/tsconfig.tsbuildinfo
+config/jobs.db
+config/overrides.db
+config/coming_soon.db
+config/assets/coming_soon_placeholder.mp4
+config/secrets.yml
+config/auth.yml
+config/config.last-good.yml
+
+# user-installed logo packs (trademarks; never committed or shipped)
+config/assets/logos/
+assets/logos/
+
+# user-installed/imported image packs (e.g. via Kometa import) -- third-party
+# art, same treatment as the logos above: local-only, never committed/shipped.
+# config/assets/packs/jmxd-media-info/pack.yml was committed before this rule
+# existed (as a structural-only test-fixture-derived stub, no real images);
+# untracked 2026-10-19 when it was reinstalled with real downloaded images.
+config/assets/packs/
+
+# ad-hoc backups of config/secrets-adjacent files (never commit these)
+*.bak
+*.bak-*
+
+# Internal dev-process docs (agent handoff notes, specs, session history,
+# security-review working notes). Not meant for the public repo; kept
+# locally for development continuity only.
+CLAUDE.md
+AGENT_RULES.md
+STATE.md
+SESSIONS.md
+SPEC.md
+SPEC_S9.md
+SPEC_KOMETA.md
+JELLYFIN_NOTES.md
+docs/HISTORY.md
+docs/HELP_AUDIT.md
+docs/SECURITY_REVIEW.md
+docs/jellyfin-openapi.json
+scripts/ctx.sh

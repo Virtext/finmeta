@@ -1,0 +1,221 @@
+<p align="center">
+  <img src="docs/assets/brand/finmeta-icon.svg" width="96" alt="">
+</p>
+
+# Finmeta
+
+Finmeta is a self-hosted metadata and artwork manager for **Jellyfin** —
+a Jellyfin-native alternative to [Kometa](https://kometa.wiki) (formerly
+Plex Meta Manager). It enriches selected libraries with metadata, artwork,
+poster overlays, theme music, collections and playlists, and ships with a
+web UI for configuration, live preview, and plan/apply control.
+
+> Status: actively developed, pre-1.0. Core flows (plan → apply → undo,
+> overlays, collections, trending, TV status) work end-to-end against a
+> real Jellyfin server. See the open items in the repo's issue tracker
+> before relying on it for a production library.
+
+## Screenshots
+
+<table>
+<tr>
+<td width="50%">
+
+**Library browser** — plan/apply per item or for the whole library
+![Library browser](docs/assets/screenshots/library-browser.png)
+
+</td>
+<td width="50%">
+
+**Artwork candidates** — every matching poster, ranked, one click to pick
+![Artwork candidates](docs/assets/screenshots/candidates.png)
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+**Overlay editor** — per-status TV ribbon colours and position/offset,
+tuned independently of every other overlay element
+![Per-status overlay colours](docs/assets/screenshots/overlay-status-colors.png)
+
+</td>
+<td width="50%">
+
+**Overlay preview** — pick any library, search for a title, see the
+rendered poster before anything is written
+![Overlay preview search](docs/assets/screenshots/overlay-preview-search.png)
+
+</td>
+</tr>
+</table>
+
+## Why not just use Kometa?
+
+Kometa is built around Plex first, with Jellyfin support layered on top.
+Finmeta is Jellyfin-native from the ground up: it talks to the Jellyfin API
+directly, understands Jellyfin's own image/NFO conventions, and its UI is
+built for Jellyfin's data model rather than translated from Plex's. It can
+also import an existing Kometa `config.yml` (overlay blocks, defaults with
+`template_variables`, and collection definitions) to ease migration.
+
+## Features
+
+- **Plan first, apply second** — every change is computed as a reviewable
+  `WritePlan` (CLI diff or UI preview) before anything touches disk or
+  Jellyfin.
+- **Safe by default** — `dry_run: true` out of the box, automatic backups,
+  a per-run manifest, and full `undo`.
+- **Metadata & artwork** from TMDb, fanart.tv, OMDb, MDBList and local
+  assets, with configurable source precedence per field.
+- **Poster overlays** — resolution, HDR, audio codec, ratings, network
+  badges, TV show status — rendered in a style compatible with Kometa's
+  defaults, including importing Kometa overlay YAML and image packs.
+- **Collections** — preset builders (TMDb collections, genre/year filters,
+  curated lists) plus an "Adaptive Seasonal Collections" toggle that
+  mirrors Kometa's own seasonal calendar (Halloween, Christmas, etc.).
+- **Trending & TV status** via MDBList and Sonarr/Radarr integration.
+- **Playlists**, theme music management, and a scheduler for unattended
+  runs.
+- **Web UI** for configuration, library browsing, overlay/collection
+  preview, and secrets management — no hand-edited YAML required for
+  day-to-day use.
+
+## Quick start
+
+Finmeta is a single Python backend (FastAPI) serving a bundled React UI.
+
+### Docker (recommended)
+
+```bash
+git clone https://github.com/<your-org>/finmeta.git
+cd finmeta
+cp docker-compose.yml docker-compose.override.yml   # edit paths/vars, or edit docker-compose.yml directly
+docker compose up -d --build
+```
+
+On first start, Finmeta copies `config/config.template.yml` into your
+mounted `/config` as `config.yml` if none exists yet — `dry_run: true`,
+nothing written to Jellyfin or disk until you explicitly apply.
+
+### Without Docker
+
+```bash
+git clone https://github.com/<your-org>/finmeta.git
+cd finmeta
+python -m venv .venv && .venv/bin/pip install -e ".[dev]"
+
+cd ui && npm install && npm run build && cd ..   # builds into backend/finmeta/web/
+
+cp config/config.template.yml config/config.yml  # edit to taste; dry_run stays true until you're ready
+
+export FINMETA_CONFIG=config/config.yml
+export JELLYFIN_API_KEY=...                      # or whatever api_key_env you configured
+.venv/bin/python -m finmeta.api.server           # serves on :8765
+```
+
+Open `http://<host>:8765`, set an admin password on first run, and
+configure your Jellyfin server, libraries and metadata sources from the
+Settings page. Leave `dry_run: true` and run a plan first — nothing is
+written to disk or Jellyfin until you explicitly apply.
+
+> **Set `path_mappings` too, not just the Jellyfin server.** Pointing
+> Finmeta at your Jellyfin server is not enough on its own — `path_mappings`
+> (Settings → General) has to translate the folder paths *Jellyfin itself
+> reports* for your libraries into paths Finmeta can actually read/write on
+> disk. Get this wrong (e.g. leaving the template's default `/media` →
+> `/media` when your real library lives somewhere else) and every item in
+> that library quietly plans to nothing — no poster, no metadata, no
+> candidates to pick from, no error either, just an empty result. Check what
+> path Jellyfin reports for the library (its folder path in the Jellyfin
+> admin dashboard, under that library's settings) and match `jellyfin:`
+> to it.
+
+### Media volumes
+
+**`artwork_write_method: sidecar` is the default and the recommended
+setting** — it writes `poster.jpg`/`backdrop.jpg`/etc. straight into the
+media folder next to the video file, the same convention Kometa/TRaSH use.
+It needs two things set up correctly, not just one: `path_mappings` (see
+above) to translate the folder paths Jellyfin reports into paths Finmeta can
+read, *and* your actual media library mounted into the container at that
+same `local:` path — e.g. if `path_mappings` maps Jellyfin's `/data/Movies`
+to local `/media/Movies`, your compose file needs
+`- /path/on/host/Movies:/media/Movies` (or a parent directory covering it),
+writable by the container's user. Skip either one and `sidecar` fails with a
+permission or not-found error on every write.
+
+`jellyfin_api` uploads artwork straight to Jellyfin's own API instead, so
+Finmeta never needs filesystem access to your media — no volume mount, no
+`path_mappings` for writes to work. **Caveat found running against a real
+library:** if the item's media folder already has a local
+poster/backdrop/logo/fanart file sitting next to the video (common for
+scene-release folders, or any library previously scraped by Kodi/Emby-style
+local artwork), Jellyfin's own library scanning keeps re-asserting that
+local file as authoritative — the upload silently "succeeds" every single
+apply, Finmeta's own log says so, but Jellyfin never actually serves the new
+image. Only use `jellyfin_api` for a library you've confirmed has no local
+artwork files already in its media folders; `sidecar` doesn't have this
+failure mode.
+
+### Configuration
+
+All configuration lives in one YAML file (`config/config.yml`, see
+`config/config.template.yml` for every option with comments) and can also
+be edited from the UI. Relevant environment variables:
+
+| Variable | Purpose |
+|---|---|
+| `FINMETA_CONFIG` | Path to `config.yml` (default `config/config.yml`) |
+| `FINMETA_HOST` / `FINMETA_PORT` | Bind address (default `0.0.0.0:8765`) |
+| `FINMETA_SECRET_KEY` | Encrypts stored secrets (API keys) at rest |
+| `FINMETA_AUTH` | Set to `off` only for local development — never in production |
+| `FINMETA_COOKIE_SECURE` | Set to `1` when served behind TLS |
+| `JELLYFIN_API_KEY`, `TMDB_KEY`, `FANART_KEY`, `OMDB_KEY`, `MDBLIST_KEY`, ... | Named by whatever `*_env` keys you set in `config.yml`; can also be entered via the UI |
+
+API keys, the admin password hash, and the session secret are never
+committed to this repository and are not included in the Docker image —
+you provide them via environment variables or the UI on first run.
+
+## Architecture
+
+For a deeper look at how Finmeta is put together — the plan → apply → undo
+lifecycle, the package layout, and exactly where Kometa/UMTK compatibility
+begins and ends — see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+## Credits & acknowledgments
+
+Finmeta would not exist without the prior work of the Kometa/Plex Meta
+Manager community:
+
+- **[Kometa](https://github.com/Kometa-Team/Kometa)** (MIT License) — the
+  original inspiration and compatibility target. Finmeta does not reuse
+  Kometa's code, and does not bundle or ship Kometa's overlay images;
+  instead it can *import* a user's own Kometa configuration and, on
+  request, download Kometa's defaults from their public GitHub repo at
+  runtime. Finmeta's "Adaptive Seasonal Collections" preset is built
+  directly from Kometa's published `defaults/movie/seasonal.yml` logic.
+- **[Kometa-Team/Community-Configs](https://github.com/Kometa-Team/Community-Configs)**
+  contributors, including **bullmoose20**, **Adam-Pope** and
+  **JJJonesJr33**, whose shared configs were used as real-world test
+  cases for Finmeta's Kometa-import compatibility.
+- **[Jellyfin](https://jellyfin.org)** — the media server Finmeta is
+  built for.
+- **[TMDb](https://www.themoviedb.org)** — the primary metadata and
+  artwork source. This product uses the TMDb API but is not endorsed or
+  certified by TMDb.
+- **[fanart.tv](https://fanart.tv)**, **[OMDb](https://www.omdbapi.com)**
+  and **[MDBList](https://mdblist.com)** — optional additional metadata,
+  ratings and artwork sources.
+
+Third-party overlay/logo packs and any Kometa assets a user imports
+through Finmeta are kept local to that user's own config directory and
+are never committed to this repository or shipped in the Docker image —
+see `.gitignore`.
+
+## License
+
+MIT — see [LICENSE](LICENSE). Third-party services used by Finmeta (TMDb,
+fanart.tv, OMDb, MDBList, Jellyfin) are governed by their own terms; using
+Finmeta with those sources means you agree to those terms, including API
+key usage limits.

@@ -1,0 +1,5 @@
+name: bad_pack
+categories:
+  bogus_category:
+    matcher: bogus_matcher
+    keys: [x]
