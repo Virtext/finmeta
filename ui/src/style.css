@@ -522,11 +522,12 @@ button { font: inherit; cursor: pointer; }
 .range-field { justify-content:flex-start; }
 .range-field input[type=range] { width:100%; }
 
-.element-row { display:flex; align-items:center; gap:8px; padding:5px 0; border-bottom:1px solid var(--border); }
+.element-row { display:flex; align-items:center; gap:8px; padding:5px 0; border-bottom:1px solid var(--border); cursor:pointer; }
 .element-row:last-child { border-bottom:none; }
 .element-row.disabled { opacity:0.5; }
+.element-row .element-controls-grid { cursor:default; }
 .element-toggle-label { display:flex; align-items:center; gap:6px; cursor:pointer; font-size:0.85rem; flex:1; }
-.element-expand-btn { padding:0 6px; line-height:1; }
+.element-expand-btn { padding:0 6px; line-height:1; color:var(--muted); }
 .element-controls-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px 14px; margin-top:8px; width:100%; }
 @media (max-width:900px){ .element-controls-grid{ grid-template-columns:repeat(2,minmax(0,1fr));} }
 .overlay-ribbon-text { grid-column: span 4; }
