@@ -10,7 +10,9 @@ import { getConfig, putConfig, getLibraries, getItemsLight, getOverlays,
 import type { JfLibrary, ImagePackInfo } from '../api';
 import type { HelpResp } from '../types';
 import { load as yamlLoad, dump as yamlDump } from 'js-yaml';
-import type { ItemLightView } from '../types';
+import type { ItemLightView, LibItemsLightResp } from '../types';
+
+const PREVIEW_PAGE_SIZE = 200;   // same page size as LibraryBrowser.tsx's own list
 
 const ELEMENT_ORDER = [
   'imdb', 'rt_critic', 'rt_audience', 'metacritic', 'tmdb', 'letterboxd', 'trakt',
@@ -372,7 +374,10 @@ export default function OverlaysEditor({ initialLibrary }: Props) {
   // LibraryBrowser.tsx's own search input.
   const [previewLibrary, setPreviewLibrary] = useState<string>('');
   const [previewSearch, setPreviewSearch] = useState('');
-  const [previewItems, setPreviewItems] = useState<ItemLightView[]>([]);
+  const [previewItemsResp, setPreviewItemsResp] = useState<LibItemsLightResp | null>(null);
+  const [previewItemsLoadingMore, setPreviewItemsLoadingMore] = useState(false);
+  const previewItems = previewItemsResp?.items ?? [];
+  const previewReqIdRef = useRef(0);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [previews, setPreviews] = useState<{item_id:string;image?:string;error?:string;samples?:string[]}[]>([]);
   const [previewBusy, setPreviewBusy] = useState(false);
@@ -409,21 +414,50 @@ export default function OverlaysEditor({ initialLibrary }: Props) {
   // ids aren't scoped to a single library lookup.
   useEffect(() => { setSelectedIds([]); }, [previewLibrary]);
 
+  // Operator-reported (2026-10-30): typing a search outside whatever the
+  // first page happened to contain found nothing -- this only ever fetched
+  // one unfiltered page and filtered it client-side (see PreviewGrid below,
+  // before this fix). Now mirrors App.tsx's own loadLibraryItems/handleSearch:
+  // search is server-side (Jellyfin SearchTerm via /items/light?search=),
+  // debounced, replacing the current page; clearing it reloads the
+  // unfiltered first page the same way. A stale response (library switched
+  // or search edited again mid-request) is dropped via previewReqIdRef.
+  const previewSearchDebounceRef = useRef<number | undefined>(undefined);
   useEffect(() => {
-    if (!previewLibrary) { setPreviewItems([]); return; }
-    let cancelled = false;
-    // Fixed 2026-10-25 (operator-reported "Overlays preview doesn't load" --
-    // actually loaded, but after ~2.4 MINUTES): this only needs item
-    // id/name/type for the preview item picker, but getItems() hits
-    // GET /items (no limit/offset here) -- routes_core.library_items,
-    // which builds a full WritePlan for literally every item in the library
-    // (TMDb/fanart/etc. lookups, ~7s/item per that route's own comment).
-    // getItemsLight() hits /items/light instead -- Jellyfin-only, no plan
-    // build -- which is exactly what library_items_light was added for.
-    getItemsLight(previewLibrary).then(d => { if (!cancelled) setPreviewItems(d.items); })
-      .catch(() => { if (!cancelled) setPreviewItems([]); });
-    return () => { cancelled = true; };
-  }, [previewLibrary]);
+    if (!previewLibrary) { setPreviewItemsResp(null); return; }
+    if (previewSearchDebounceRef.current !== undefined) window.clearTimeout(previewSearchDebounceRef.current);
+    const reqId = ++previewReqIdRef.current;
+    const fire = () => {
+      // Fixed 2026-10-25 (operator-reported "Overlays preview doesn't load" --
+      // actually loaded, but after ~2.4 MINUTES): this only needs item
+      // id/name/type for the preview item picker, but getItems() hits
+      // GET /items (no limit/offset here) -- routes_core.library_items,
+      // which builds a full WritePlan for literally every item in the library
+      // (TMDb/fanart/etc. lookups, ~7s/item per that route's own comment).
+      // getItemsLight() hits /items/light instead -- Jellyfin-only, no plan
+      // build -- which is exactly what library_items_light was added for.
+      getItemsLight(previewLibrary, {limit: PREVIEW_PAGE_SIZE, offset: 0, search: previewSearch || undefined})
+        .then(d => { if (previewReqIdRef.current === reqId) setPreviewItemsResp(d); })
+        .catch(() => { if (previewReqIdRef.current === reqId) setPreviewItemsResp(null); });
+    };
+    previewSearchDebounceRef.current = window.setTimeout(fire, 300);
+    return () => { if (previewSearchDebounceRef.current !== undefined) window.clearTimeout(previewSearchDebounceRef.current); };
+  }, [previewLibrary, previewSearch]);
+
+  function loadMorePreviewItems(): void {
+    if (!previewLibrary || !previewItemsResp?.has_more || previewItemsLoadingMore) return;
+    const reqId = ++previewReqIdRef.current;
+    setPreviewItemsLoadingMore(true);
+    getItemsLight(previewLibrary, {
+      limit: PREVIEW_PAGE_SIZE, offset: previewItemsResp.items.length, search: previewSearch || undefined,
+    })
+      .then(d => {
+        if (previewReqIdRef.current !== reqId) return;
+        setPreviewItemsResp(prev => prev ? {...d, items: [...prev.items, ...d.items]} : d);
+      })
+      .catch(() => {})
+      .finally(() => { if (previewReqIdRef.current === reqId) setPreviewItemsLoadingMore(false); });
+  }
 
   // Debounced preview refresh whenever doc or selected items change.
   const idsKey = selectedIds.join(',');
@@ -688,7 +722,10 @@ export default function OverlaysEditor({ initialLibrary }: Props) {
           <PreviewGrid selectedIds={selectedIds} setSelectedIds={setSelectedIds}
                         libraryNames={libraryNames} previewLibrary={previewLibrary} setPreviewLibrary={setPreviewLibrary}
                         previewSearch={previewSearch} setPreviewSearch={setPreviewSearch}
-                        items={previewItems} previews={previews} busy={previewBusy}/>
+                        items={previewItems} totalItems={previewItemsResp?.total_items ?? 0}
+                        hasMore={!!previewItemsResp?.has_more} loadingMore={previewItemsLoadingMore}
+                        onLoadMore={loadMorePreviewItems}
+                        previews={previews} busy={previewBusy}/>
         </section>
       </div>
     </div>
@@ -832,12 +869,11 @@ function InstalledPacksSection({
   // instead of a separate "download" panel elsewhere on the page.
   const sourceKeyByPackName: Record<string, string> = {};
   for (const [key, src] of Object.entries(sources)) sourceKeyByPackName[src.default_pack_name] = key;
-  // "ichimoku" has no known source to re-download from (hand-built, not via
-  // Kometa-import), but the operator wants it protected from accidental
-  // deletion the same way jmxd-media-info is -- 2026-10-27, after it
-  // vanished from disk once already (cause still unexplained). No Update
-  // button for it (nothing to re-fetch), just no Delete either.
-  const PROTECTED_NO_SOURCE = new Set(['ichimoku']);
+  // Was ['ichimoku'] (2026-10-27 -> 2026-10-30): a short-lived download
+  // feature for it was tried and reverted (never worked reliably for the
+  // operator), and with it the only reason this guard existed -- the
+  // operator now wants ichimoku deletable like any other hand-placed pack.
+  const PROTECTED_NO_SOURCE = new Set<string>([]);
   const installedPackNames = new Set(availPacks.filter((x) => x.valid).map((x) => x.name));
   const notYetInstalled = Object.entries(sources).filter(([, src]) => !installedPackNames.has(src.default_pack_name));
   return (
@@ -1163,17 +1199,16 @@ function HelpIcon({ help }: { help?: string }) {
 }
 
 interface PreviewItemEntry { item_id: string; image?: string; error?: string; samples?: string[] }
-const PREVIEW_CHIP_CAP = 150;   // keep the DOM sane on a multi-thousand-item library; search narrows it down
 
 function PreviewGrid({selectedIds, setSelectedIds, libraryNames, previewLibrary, setPreviewLibrary,
-                       previewSearch, setPreviewSearch, items, previews, busy}:{
+                       previewSearch, setPreviewSearch, items, totalItems, hasMore, loadingMore, onLoadMore,
+                       previews, busy}:{
   selectedIds: string[]; setSelectedIds:(ids:string[])=>void;
   libraryNames: string[]; previewLibrary: string; setPreviewLibrary:(v:string)=>void;
   previewSearch: string; setPreviewSearch:(v:string)=>void;
-  items: ItemLightView[]; previews:PreviewItemEntry[]; busy:boolean;
+  items: ItemLightView[]; totalItems: number; hasMore: boolean; loadingMore: boolean; onLoadMore: () => void;
+  previews:PreviewItemEntry[]; busy:boolean;
 }) {
-  const q = previewSearch.trim().toLowerCase();
-  const filtered = q ? items.filter(it=>it.item_name.toLowerCase().includes(q)) : items;
   const toggleItem = (id:string) => {
     if (selectedIds.includes(id)) setSelectedIds(selectedIds.filter(x=>x!==id));
     else if (selectedIds.length>=4) return; // cap at four per spec
@@ -1188,27 +1223,32 @@ function PreviewGrid({selectedIds, setSelectedIds, libraryNames, previewLibrary,
             {libraryNames.map(n=><option key={n} value={n}>{n}</option>)}
           </select>
         </label>
+        {/* Server-side search (Jellyfin SearchTerm), same as LibraryBrowser.tsx --
+            operator-reported (2026-10-30): this used to only filter whichever one
+            page had already loaded, so a title outside that page was never found
+            no matter what you typed. */}
         <input className="config-input" type="text" style={{flex:'1 1 160px'}}
-               placeholder={`Search ${items.length} title${items.length===1?'':'s'}…`}
+               placeholder={`Search ${totalItems} title${totalItems===1?'':'s'}…`}
                value={previewSearch} onChange={(e)=>setPreviewSearch(e.target.value)}/>
       </div>
       {items.length === 0 ? (
-        <div className="field-hint muted">No library items available to preview against.</div>
+        <div className="field-hint muted">
+          {previewSearch.trim() ? <>No titles match "{previewSearch}".</> : <>No library items available to preview against.</>}
+        </div>
       ) : (
         <>
-          {q && filtered.length === 0 && (
-            <div className="field-hint muted">No titles match "{previewSearch}".</div>
-          )}
           <div style={{display:'flex',gap:'6px',flexWrap:'wrap',marginBottom:'8px',maxHeight:'220px',overflowY:'auto'}}>
-            {filtered.slice(0,PREVIEW_CHIP_CAP).map((it)=>(
+            {items.map((it)=>(
               <button key={it.item_id} type="button"
                       className={`btn preview-item-chip ${selectedIds.includes(it.item_id)?'active':''}`}
                       onClick={()=>toggleItem(it.item_id)} title={`${it.media_type}`}>{trunc(it.item_name,16)}</button>
             ))}
-            {filtered.length > PREVIEW_CHIP_CAP && (
-              <span className="field-hint muted">+{filtered.length - PREVIEW_CHIP_CAP} more — refine your search</span>
-            )}
           </div>
+          {hasMore && (
+            <button type="button" className="btn load-more-btn" disabled={loadingMore} onClick={onLoadMore}>
+              {loadingMore ? 'Loading…' : `Load more (${items.length}/${totalItems})`}
+            </button>
+          )}
           {previews.length===0 && !busy && selectedIds.length>0 && <div className="field-hint muted">Waiting for server render…</div>}
           <div className="preview-grid-2x2">
             {/* Only render cells for items still selected so a server response that
