@@ -97,6 +97,8 @@ export default function SchedulesPanel() {
         Once an item's artwork is locked (first successful apply — see the candidate picker's
         🔒 indicator), an "apply" schedule here already behaves as a nightly overlay-only
         refresh: it never re-queries TMDb/fanart for locked items.
+        {' '}Not sure about the cron syntax?{' '}
+        <a href="https://crontab.guru/" target="_blank" rel="noreferrer" className="link">crontab.guru</a>.
       </p>
       <div className="profiles-table-wrap">
         <table className="profiles-table">

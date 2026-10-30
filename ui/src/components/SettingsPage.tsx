@@ -550,6 +550,7 @@ function GeneralTab({ configParsed, secrets, helpFor, saveConfigPatch }: {
         >
           <option value="relative">relative (TODAY / TOMORROW / weekday / DD.MM)</option>
           <option value="classic">classic (always DD.MM)</option>
+          <option value="weekday">weekday (always a day name, never a date)</option>
         </select>
       </div>
       <div className="field-row">

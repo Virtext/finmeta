@@ -924,9 +924,10 @@
           "description": "How a dated status (e.g. 'NEW SEASON') shows its date on the badge.",
           "enum": [
             "relative",
-            "classic"
+            "classic",
+            "weekday"
           ],
-          "help": "`relative` (default): TODAY/TOMORROW for the next two days, the weekday name for days 2-6 out, else DD.MM. `classic`: always DD.MM, regardless of how far away the date is.",
+          "help": "`relative` (default): TODAY/TOMORROW for the next two days, the weekday name for days 2-6 out, else DD.MM. `classic`: always DD.MM, regardless of how far away the date is. `weekday`: always the weekday name (e.g. 'MONDAY'), never a numeric date or TODAY/TOMORROW -- ambiguous beyond a week out (operator's choice to accept that).",
           "title": "Date Style",
           "type": "string"
         },
