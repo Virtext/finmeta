@@ -398,7 +398,7 @@ def _collect_placed(
                 _imgs = resolve_profile_pack_image(
                     config_dir, packs_profile, key,
                     k9_result=(k9m or {}).get(key), filename=filename,
-                    rating_value=rating_value,
+                    rating_value=rating_value, all_k9m=k9m,
                 )
                 logo = _imgs[0] if _imgs else None
             if logo is None and key in (sample_keys or ()) and packs_profile and config_dir is not None:

@@ -193,3 +193,38 @@ def test_unresolved_non_optional_is_partial_not_crash():
     flat, rep = expand_data(data)
     assert flat[0].file is None and flat[0].group == "g"
     assert rep.by_key("x").status == "partial"
+
+
+def test_template_call_variable_overrides_resolve():
+    # Real-world shape (pete2583/resolution.yml): a template call carries its
+    # own variable (`weight: 41`) alongside `name`, referenced by the
+    # template body via <<weight>> -- not declared in the overlay's own
+    # `variables:` block at all.
+    data = {"templates": {"T": {"overlay": {"weight": "<<weight>>"}}},
+            "overlays": {"x": {"template": [{"name": "T", "weight": 41}]}}}
+    flat, rep = expand_data(data)
+    assert flat[0].weight == 41
+    assert rep.by_key("x").status == "ok"
+
+
+def test_template_call_variable_outranks_overlay_variables():
+    # Kometa precedence: a per-call template parameter wins even over the
+    # overlay's own `variables:` block.
+    data = {"templates": {"T": {"overlay": {"weight": "<<weight>>"}}},
+            "overlays": {"x": {"variables": {"weight": 1},
+                               "template": [{"name": "T", "weight": 99}]}}}
+    flat, _ = expand_data(data)
+    assert flat[0].weight == 99
+
+
+def test_template_call_variable_is_per_call_not_shared():
+    # Two template calls on the same overlay each get their OWN override,
+    # not a merged/leaked one.
+    data = {"templates": {
+                "A": {"overlay": {"group": "<<weight>>"}},
+                "B": {"overlay": {"name": "<<weight>>"}}},
+            "overlays": {"x": {"template": [{"name": "A", "weight": 1},
+                                             {"name": "B", "weight": 2}]}}}
+    flat, _ = expand_data(data)
+    assert flat[0].group == 1
+    assert flat[0].name == "2"

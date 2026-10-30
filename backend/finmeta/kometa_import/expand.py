@@ -232,15 +232,24 @@ def _deep_merge_keep_first(a: Dict[str, Any], b: Mapping[str, Any]) -> Dict[str,
     return a
 
 
-def _template_names(entry: Mapping[str, Any]) -> List[str]:
+def _template_calls(entry: Mapping[str, Any]) -> List[Tuple[str, Dict[str, Any]]]:
+    """``(template name, per-call variable overrides)`` for each ``template:`` entry.
+
+    A Kometa template call may carry variables alongside ``name`` (e.g.
+    ``template: [{name: Resolution, weight: 41}]``) that apply ONLY to that
+    one call, at higher precedence than the overlay's own ``variables:``
+    block -- Kometa's own template-call semantics. A bare string entry
+    (``template: Resolution``) has no overrides.
+    """
     t = entry.get("template")
-    names: List[str] = []
+    calls: List[Tuple[str, Dict[str, Any]]] = []
     for item in _as_list(t) if t is not None else []:
         if isinstance(item, Mapping) and "name" in item:
-            names.append(str(item["name"]))
+            overrides = {str(k): v for k, v in item.items() if k != "name"}
+            calls.append((str(item["name"]), overrides))
         elif isinstance(item, str):
-            names.append(item)
-    return names
+            calls.append((item, {}))
+    return calls
 
 
 # --------------------------------------------------------------------------- core
@@ -300,7 +309,8 @@ def expand_data(data: Mapping[str, Any], source: str = "<memory>") -> Tuple[List
             continue
 
         overlay_vars = entry.get("variables") or {}
-        names = _template_names(entry)
+        calls = _template_calls(entry)
+        names = [tname for tname, _ in calls]
         merged_body: Dict[str, Any] = {}
         merged_vars: Dict[str, Any] = {}
         used: List[str] = []
@@ -309,14 +319,18 @@ def expand_data(data: Mapping[str, Any], source: str = "<memory>") -> Tuple[List
         # The entry's own body (anything besides variables/template) comes first.
         own_body = {k: v for k, v in entry.items() if k not in ("variables", "template")}
 
-        for tname in names:
+        for tname, call_overrides in calls:
             template = templates.get(tname)
             if not isinstance(template, Mapping):
                 item.notes.append(f"template '{tname}' is not defined in this file (Kometa default?) — skipped")
                 report.missing_templates.add(tname)
                 continue
             used.append(tname)
-            variables = _resolve_variables(key, overlay_vars, template, tv)
+            # Per-call overrides (e.g. `weight: 41` on this template entry)
+            # outrank the overlay's own `variables:` block -- Kometa's own
+            # template-call precedence.
+            call_vars = {**overlay_vars, **call_overrides}
+            variables = _resolve_variables(key, call_vars, template, tv)
             optional_ctx = _Ctx(variables, set())
             optional = set()
             for o in template.get("optional") or []:
