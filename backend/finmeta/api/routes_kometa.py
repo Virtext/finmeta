@@ -40,6 +40,7 @@ from pydantic import BaseModel, Field
 from finmeta.api.deps import get_ctx
 from finmeta.api.state import AppContext
 from finmeta.kometa_import.expand import expand_file
+from finmeta.kometa_import.manifest_packs import MANIFEST_SOURCES
 from finmeta.kometa_import.report import ImportReport
 from finmeta.kometa_import.to_pack import kometa_to_pack
 
@@ -83,10 +84,25 @@ class KometaSourcesResp(BaseModel):
 
 @router.get("/sources", response_model=KometaSourcesResp)
 def kometa_sources():
-    """Known downloadable overlay sources (label + default pack name + zip_url, no local paths)."""
-    return {"sources": {k: {"label": v["label"], "zip_url": v["zip_url"],
-                            "default_pack_name": v["default_pack_name"]}
-                        for k, v in KNOWN_SOURCES.items()}}
+    """Known downloadable overlay sources (label + default pack name + zip_url, no local paths).
+
+    Two different kinds share this one listing (the frontend's "Installed
+    Packs" download/update row doesn't care which): KNOWN_SOURCES entries
+    fetch one zip and expand a self-contained Kometa overlay YAML out of it
+    (jmxd); MANIFEST_SOURCES entries fetch a fixed list of individual image
+    URLs straight into a hand-written pack.yml (ichimoku, pete2583 -- their
+    upstream source isn't a Kometa overlay YAML Finmeta's importer can
+    expand, see manifest_packs.py). ``zip_url`` has no real zip for the
+    latter; it's filled with the upstream folder for transparency only,
+    never read by the download logic itself (see _resolve_remote_spec)."""
+    out = {k: {"label": v["label"], "zip_url": v["zip_url"],
+               "default_pack_name": v["default_pack_name"]}
+           for k, v in KNOWN_SOURCES.items()}
+    for k, v in MANIFEST_SOURCES.items():
+        first_url = next(iter(v["files"].values()))
+        upstream_dir = first_url.rsplit("/", 1)[0]
+        out[k] = {"label": v["label"], "zip_url": upstream_dir, "default_pack_name": v["default_pack_name"]}
+    return {"sources": out}
 
 
 def _missing(copies: List[Tuple[str, str]]) -> List[str]:
@@ -168,6 +184,47 @@ def _resolve_remote_spec(req: KometaImportRemoteReq) -> Dict[str, str]:
             "overlay_file_rel": req.overlay_file_rel, "kometa_root_rel": req.kometa_root_rel}
 
 
+def _import_manifest_source(name: str, pack_name: str, dry_run: bool, overwrite: bool,
+                            config_dir: Path) -> Dict[str, Any]:
+    """Write a MANIFEST_SOURCES pack: its pack.yml is fixed (committed in
+    manifest_packs.py, not derived from a downloaded Kometa overlay YAML),
+    and each image is fetched individually from its own verified URL --
+    there is no zip to stage, no expand_file/kometa_to_pack involved."""
+    spec = MANIFEST_SOURCES[name]
+    pack_yml = spec["pack_yml"]
+    files: Dict[str, str] = spec["files"]
+
+    if dry_run:
+        return {"dry_run": True, "pack_name": pack_name, "pack_yml": pack_yml,
+                "files": sorted(files)}
+
+    packs_root = config_dir / "assets" / "packs"
+    target = packs_root / pack_name
+    if target.exists() and not overwrite:
+        raise HTTPException(status_code=409,
+                            detail=f"pack {pack_name!r} already exists; pass overwrite=true to replace it")
+    if target.exists():
+        shutil.rmtree(target)
+    target.mkdir(parents=True, exist_ok=True)
+    (target / "pack.yml").write_text(
+        yaml.safe_dump(pack_yml, sort_keys=False, allow_unicode=True), encoding="utf-8")
+
+    written: List[str] = []
+    failed: List[str] = []
+    for rel, url in files.items():
+        dest = target / rel
+        _ensure_inside(dest, target)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            _download_zip(url, dest)   # generic http(s) GET-to-file, not zip-specific despite the name
+            written.append(rel)
+        except HTTPException:
+            failed.append(rel)   # one bad URL never aborts the rest -- same "never a crash" rule as _missing()
+
+    return {"dry_run": False, "pack_name": pack_name, "pack_yml": pack_yml,
+            "written": written, "failed": failed}
+
+
 @router.post("/import-remote")
 def kometa_import_remote(req: KometaImportRemoteReq, ctx: AppContext = Depends(get_ctx)):
     """Download a known (or custom) Kometa-style overlay source and import it.
@@ -180,9 +237,16 @@ def kometa_import_remote(req: KometaImportRemoteReq, ctx: AppContext = Depends(g
     ``<config>/assets/packs/<pack_name>/``, ``overwrite=true`` required to
     replace an existing one (409 otherwise). Missing source images are
     listed in ``missing_images`` and skipped, never an error.
+
+    ``source`` in MANIFEST_SOURCES (ichimoku, pete2583) takes a completely
+    different path -- see ``_import_manifest_source`` -- since those packs'
+    upstream isn't a self-contained Kometa overlay YAML this endpoint's own
+    expand_file/kometa_to_pack pipeline can expand.
     """
     if not _PACK_NAME_RE.match(req.pack_name):
         raise HTTPException(status_code=400, detail="pack_name must be a slug of [a-z0-9-]")
+    if req.source in MANIFEST_SOURCES:
+        return _import_manifest_source(req.source, req.pack_name, req.dry_run, req.overwrite, ctx.config_dir)
     spec = _resolve_remote_spec(req)
     staged = _stage_source(spec["zip_url"], req.pack_name, ctx.config_dir)
     root = staged / spec["root_dir"]

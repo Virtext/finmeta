@@ -388,12 +388,26 @@ export default function OverlaysEditor({ initialLibrary }: Props) {
     getJellyfinLibraries().then(d => setJfLibs(d.libraries)).catch(()=>{});
   }, []);
 
-  // Default the preview library to whichever library is being edited (scope),
-  // falling back to the first known library once the list loads.
+  // Follow whichever library is being edited (scope): switching the target
+  // library tab (e.g. Movies -> Anime) always re-points the preview at that
+  // same library -- operator-reported (2026-10-30), previewing Movies items
+  // while editing Anime's style is never useful. Only the initial fallback
+  // (scope === 'global', nothing picked yet) leaves room for the preview
+  // library dropdown's own manual choice to stick between renders.
   useEffect(() => {
-    if (previewLibrary || !libraryNames.length) return;
-    setPreviewLibrary(libraryNames.includes(scope) ? scope : libraryNames[0]);
-  }, [libraryNames, scope, previewLibrary]);
+    if (!libraryNames.length) return;
+    if (scope !== 'global' && libraryNames.includes(scope)) {
+      setPreviewLibrary(scope);
+    } else if (!previewLibrary) {
+      setPreviewLibrary(libraryNames[0]);
+    }
+  }, [libraryNames, scope]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Selected preview items belong to whichever library was previewed before
+  // -- carrying them over to a newly-followed library would silently render
+  // stale items from the old one (same bug as above), since Jellyfin item
+  // ids aren't scoped to a single library lookup.
+  useEffect(() => { setSelectedIds([]); }, [previewLibrary]);
 
   useEffect(() => {
     if (!previewLibrary) { setPreviewItems([]); return; }
@@ -818,12 +832,12 @@ function InstalledPacksSection({
   // instead of a separate "download" panel elsewhere on the page.
   const sourceKeyByPackName: Record<string, string> = {};
   for (const [key, src] of Object.entries(sources)) sourceKeyByPackName[src.default_pack_name] = key;
-  // "ichimoku" has no known source to re-download from (hand-built, not via
-  // Kometa-import), but the operator wants it protected from accidental
-  // deletion the same way jmxd-media-info is -- 2026-10-27, after it
-  // vanished from disk once already (cause still unexplained). No Update
-  // button for it (nothing to re-fetch), just no Delete either.
-  const PROTECTED_NO_SOURCE = new Set(['ichimoku']);
+  // 2026-10-27: protects a hand-built pack with no re-downloadable source
+  // from accidental deletion (no Update button either, since there's
+  // nothing to re-fetch) -- empty now that ichimoku gained a real
+  // MANIFEST_SOURCES entry (2026-10-30) and picks up the sourceKey branch
+  // below on its own. Kept around for the next hand-built, sourceless pack.
+  const PROTECTED_NO_SOURCE = new Set<string>([]);
   const installedPackNames = new Set(availPacks.filter((x) => x.valid).map((x) => x.name));
   const notYetInstalled = Object.entries(sources).filter(([, src]) => !installedPackNames.has(src.default_pack_name));
   return (
