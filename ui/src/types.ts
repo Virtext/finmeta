@@ -86,7 +86,9 @@ export interface LibItemsResp {
   summary: { items: number; create: number; update: number; unchanged: number };
 }
 
-/** GET .../items/light -- what the browser loads first (see LibraryBrowser.tsx). */
+/** GET .../items/light -- what the browser loads first (see LibraryBrowser.tsx).
+ * Paginated (2026-10-30 fix): `items` is one page; `total_items`/`has_more`
+ * tell the UI whether to offer "Load more". */
 export interface LibItemsLightResp {
   library: string;
   enabled: boolean;
@@ -94,6 +96,10 @@ export interface LibItemsLightResp {
   overlay_element_count: number;
   media_apps?: Record<'sonarr' | 'radarr', ArrInstanceView[]>;
   items: ItemLightView[];
+  total_items: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
 }
 
 export interface PlanResp {

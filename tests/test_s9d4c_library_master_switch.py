@@ -45,6 +45,14 @@ class FakeJf:
     def get_items(self, parent_id: Optional[str] = None, recursive: bool = True) -> List[Item]:
         return list(self._items_by_parent.get(parent_id, []))
 
+    def iter_items(self, *, parent_id=None, recursive=True, include_item_types=None,
+                   fields=None, user_id=None, page_size=200):
+        pool = self._items_by_parent.get(parent_id, [])
+        if include_item_types:
+            pool = [it for it in pool if it.type in include_item_types]
+        for it in pool:
+            yield it
+
     def get_items_media_streams_raw(self, item_ids, batch_size=50):
         return {}
 

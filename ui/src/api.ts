@@ -37,8 +37,16 @@ async function j<T>(path: string, init?: RequestInit): Promise<T> {
 const enc = (s: string) => encodeURIComponent(s);
 
 export const getLibraries = () => j<LibrariesResp>('/api/libraries');
-export const getItemsLight = (lib: string) =>
-  j<LibItemsLightResp>(`/api/libraries/${enc(lib)}/items/light`);
+export const getItemsLight = (
+  lib: string, opts?: { limit?: number; offset?: number; search?: string },
+) => {
+  const params = new URLSearchParams();
+  if (opts?.limit != null) params.set('limit', String(opts.limit));
+  if (opts?.offset != null) params.set('offset', String(opts.offset));
+  if (opts?.search) params.set('search', opts.search);
+  const qs = params.toString();
+  return j<LibItemsLightResp>(`/api/libraries/${enc(lib)}/items/light${qs ? `?${qs}` : ''}`);
+};
 export const getItems = (lib: string, page?: { limit: number; offset: number }) =>
   j<LibItemsResp>(
     `/api/libraries/${enc(lib)}/items` +

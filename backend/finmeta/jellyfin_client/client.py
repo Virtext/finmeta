@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import base64
 import time
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence
 
 import httpx
 
@@ -20,6 +21,20 @@ _AUTH_HEADER = (
     'DeviceId="finmeta-dev", Version="0.1.0"'
 )
 DEFAULT_ITEM_FIELDS = "Path,ProviderIds,Overview"
+
+
+@dataclass
+class ItemPage:
+    """One page of ``GET /Items``, with Jellyfin's reported total.
+
+    ``total_record_count`` falls back to ``len(items)`` when the server
+    omits ``TotalRecordCount`` (seen on some proxies/older servers), so
+    callers can always rely on the field being present.
+    """
+
+    items: List[Item] = field(default_factory=list)
+    total_record_count: int = 0
+    start_index: int = 0
 
 
 class JellyfinError(RuntimeError):
@@ -275,18 +290,87 @@ class JellyfinClient:
         self._request("POST", "/Library/Refresh")
 
     # -- items --------------------------------------------------------------
+    def get_items_page(self, *, parent_id: Optional[str] = None, recursive: bool = True,
+                       include_item_types: Optional[Sequence[str]] = None,
+                       fields: Optional[str] = DEFAULT_ITEM_FIELDS,
+                       user_id: Optional[str] = None, limit: Optional[int] = None,
+                       start_index: Optional[int] = None,
+                       sort_by: Optional[Sequence[str]] = None,
+                       sort_order: Optional[str] = None,
+                       search_term: Optional[str] = None) -> ItemPage:
+        """One page of ``GET /Items``, with Jellyfin's ``TotalRecordCount``.
+
+        Every library-scale caller should go through this (or :meth:`iter_items`)
+        instead of an unbounded ``get_items()`` -- a whole-library fetch with no
+        ``Limit``/``IncludeItemTypes`` is what times out on large libraries.
+        """
+        self._ensure_user_id()
+        start = start_index or 0
+        params = self._params(
+            userId=user_id or self.user_id, parentId=parent_id, recursive=recursive,
+            includeItemTypes=include_item_types, fields=fields, limit=limit,
+            startIndex=start_index, sortBy=sort_by, sortOrder=sort_order,
+            searchTerm=search_term, enableTotalRecordCount=True)
+        d = self._request("GET", "/Items", params=params) or {}
+        raw_items = d.get("Items", [])
+        items = [Item.from_dict(x) for x in raw_items]
+        total = d.get("TotalRecordCount")
+        return ItemPage(items=items,
+                        total_record_count=int(total) if total is not None else len(items),
+                        start_index=start)
+
     def get_items(self, *, parent_id: Optional[str] = None, recursive: bool = True,
                   include_item_types: Optional[Sequence[str]] = None,
                   fields: Optional[str] = DEFAULT_ITEM_FIELDS,
                   user_id: Optional[str] = None, limit: Optional[int] = None,
                   start_index: Optional[int] = None) -> List[Item]:
-        self._ensure_user_id()
-        params = self._params(
-            userId=user_id or self.user_id, parentId=parent_id, recursive=recursive,
-            includeItemTypes=include_item_types, fields=fields, limit=limit,
-            startIndex=start_index, enableTotalRecordCount=True)
-        d = self._request("GET", "/Items", params=params) or {}
-        return [Item.from_dict(x) for x in d.get("Items", [])]
+        """Backward-compatible wrapper around :meth:`get_items_page`.
+
+        Unbounded (no ``limit``) and un-typed calls are exactly the shape that
+        times out against a large real library -- prefer :meth:`get_items_page`
+        or :meth:`iter_items` for any library-scale enumeration.
+        """
+        return self.get_items_page(
+            parent_id=parent_id, recursive=recursive,
+            include_item_types=include_item_types, fields=fields,
+            user_id=user_id, limit=limit, start_index=start_index,
+        ).items
+
+    def iter_items(self, *, parent_id: Optional[str] = None, recursive: bool = True,
+                   include_item_types: Optional[Sequence[str]] = None,
+                   fields: Optional[str] = DEFAULT_ITEM_FIELDS,
+                   user_id: Optional[str] = None,
+                   page_size: int = 200) -> Iterator[Item]:
+        """Page through a whole library, de-duplicated, with a stable sort.
+
+        Always sorts by ``SortName,Id`` so pages can't skip or repeat items
+        if the library changes mid-walk. Stops on the first of: an empty
+        page, ``start_index >= total``, a short page (fewer items than
+        requested), or a page containing no item ID not already seen.
+        """
+        size = max(1, min(int(page_size), 500))
+        start = 0
+        seen: set = set()
+        while True:
+            page = self.get_items_page(
+                parent_id=parent_id, recursive=recursive,
+                include_item_types=include_item_types, fields=fields,
+                user_id=user_id, limit=size, start_index=start,
+                sort_by=["SortName", "Id"], sort_order="Ascending",
+            )
+            if not page.items:
+                return
+            new_items = [it for it in page.items if it.id not in seen]
+            if not new_items:
+                return
+            for it in new_items:
+                seen.add(it.id)
+                yield it
+            start += len(page.items)
+            if len(page.items) < size:
+                return
+            if start >= page.total_record_count:
+                return
 
     def get_item(self, item_id: str) -> Item:
         self._ensure_user_id()
@@ -300,8 +384,8 @@ class JellyfinClient:
                               include_item_types=[item_type])
 
     def count_items(self, parent_id: str, *, recursive: bool = True) -> int:
-        return len(self.get_items(parent_id=parent_id, recursive=recursive,
-                                  fields="Path"))
+        return self.get_items_page(parent_id=parent_id, recursive=recursive,
+                                   fields=None, limit=1).total_record_count
 
     # -- images (S9d5: artwork_write_method = "jellyfin_api") ---------------
     def get_image_bytes(self, item_id: str, image_type: str) -> Optional[bytes]:

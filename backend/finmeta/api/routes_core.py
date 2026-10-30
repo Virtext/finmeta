@@ -147,7 +147,12 @@ def _jellyfin_502_detail(exc: Exception) -> str:
 
 
 @router.get("/libraries/{name}/items/light")
-def library_items_light(name: str, ctx: AppContext = Depends(get_ctx)) -> dict:
+def library_items_light(
+    name: str, ctx: AppContext = Depends(get_ctx),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    search: Optional[str] = Query(default=None),
+) -> dict:
     """Jellyfin-only item list: no TMDb/fanart/etc. lookups, no WritePlan.
 
     2026-10-23: even paginated, a full per-item plan build is ~7s/item
@@ -156,6 +161,17 @@ def library_items_light(name: str, ctx: AppContext = Depends(get_ctx)) -> dict:
     only, for the search box); the full diff/status for one specific item
     is still fetched on demand via GET /items/{item_id}/plan the moment you
     select it, same as before.
+
+    Pagination fix (2026-10-30): this used to fetch the WHOLE library with
+    no Limit/IncludeItemTypes, recursive -- for a TV library that also
+    pulls every season and episode with Path/ProviderIds/Overview. On a
+    tester's large library that single call timed out (httpx.ReadTimeout
+    at both 30s and 120s). Now bounded (`limit`/`offset`, default 100,
+    1-500) and type-filtered (Movie/Series only) at Jellyfin via
+    get_items_page(), with minimal fields (no Path/ProviderIds/Overview --
+    this endpoint never reads them). `search` forwards to Jellyfin's own
+    SearchTerm so the UI's search box keeps working across pages without
+    loading everything client-side.
     """
     if name not in ctx.config.libraries:
         raise HTTPException(status_code=404, detail=f"unknown library {name!r}")
@@ -163,7 +179,15 @@ def library_items_light(name: str, ctx: AppContext = Depends(get_ctx)) -> dict:
     jf = ctx.make_jellyfin()
     try:
         jf_lib = jf.get_library(name)
-        items = jf.get_items(parent_id=jf_lib.item_id, recursive=True) if jf_lib else []
+        if jf_lib is None:
+            page_items, total = [], 0
+        else:
+            page = jf.get_items_page(
+                parent_id=jf_lib.item_id, recursive=True,
+                include_item_types=["Movie", "Series"], fields=None,
+                limit=limit, start_index=offset, search_term=search,
+            )
+            page_items, total = page.items, page.total_record_count
     except Exception as exc:
         raise HTTPException(status_code=502, detail=_jellyfin_502_detail(exc))
     finally:
@@ -171,7 +195,7 @@ def library_items_light(name: str, ctx: AppContext = Depends(get_ctx)) -> dict:
     light = [
         {"item_id": it.id, "item_name": it.name,
          "media_type": "movie" if it.type == "Movie" else "tvshow"}
-        for it in items if it.type in ("Movie", "Series")
+        for it in page_items
     ]
     overlay_elements = _profile_overlay_names(lib_cfg, ctx.config)
     return {
@@ -188,6 +212,10 @@ def library_items_light(name: str, ctx: AppContext = Depends(get_ctx)) -> dict:
             for kind in ("sonarr", "radarr")
         },
         "items": light,
+        "total_items": total,
+        "limit": limit,
+        "offset": offset,
+        "has_more": offset + len(light) < total,
     }
 
 
