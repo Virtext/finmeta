@@ -897,16 +897,18 @@ function ElementControls({doc, updateElement, setRibbonText, updateStatusColor, 
         const enabled = e.enabled !== false;
         const isOpen = openKey===key;
         return (
-          <div key={key} className={`element-row ${enabled?'':'disabled'}`}>
-            <label className="element-toggle-label">
-              <input type="checkbox" checked={!!e.enabled} onChange={(ev)=>updateElement(key,{enabled:ev.target.checked})}/>
+          <div key={key} className={`element-row ${enabled?'':'disabled'}`}
+               onClick={()=>setOpenKey(isOpen ? '' : key)} role="button" aria-expanded={isOpen}>
+            <span className="element-toggle-label">
+              <input type="checkbox" checked={!!e.enabled} onClick={(ev)=>ev.stopPropagation()}
+                     onChange={(ev)=>updateElement(key,{enabled:ev.target.checked})}/>
               <span>{ELEMENT_LABELS[key]}</span>
-            </label>
-            <button type="button" className="btn element-expand-btn" onClick={()=>setOpenKey(isOpen ? '' : key)} aria-expanded={isOpen}>
+            </span>
+            <span className="element-expand-btn" aria-hidden="true">
               {isOpen?'▼':'▸'}
-            </button>
+            </span>
             {isOpen && (
-              <div className="element-controls-grid">
+              <div className="element-controls-grid" onClick={(ev)=>ev.stopPropagation()}>
                 <NineGrid current={e.position || null} basePosition={doc.base_position} onSelect={(pos)=>updateElement(key,{position:pos})}/>
 
                 <NumField label="X offset" value={e.x_offset??0} min={-500} max={500} onCommit={(v)=>updateElement(key,{x_offset:v})}/>
