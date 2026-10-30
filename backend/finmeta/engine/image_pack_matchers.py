@@ -31,6 +31,18 @@ class MatchContext:
     """Everything a matcher needs to decide the key for one item."""
     #: K9 detection result for this category (the winning rule dict or None).
     k9_result: Optional[Dict[str, Any]] = None
+    #: ALL available K9 results at once, keyed by Finmeta overlay ELEMENT name
+    #: -- "resolution"/"hdr"/"audio" -- NOT the raw K9 rule-category name
+    #: ("dynamic_range" for hdr; see plan_builder.py's/routes_settings.py's
+    #: own `k9m = {"resolution": ..., "hdr": det.get("dynamic_range"), ...}`
+    #: construction, which is what callers actually pass as all_k9m). A
+    #: pack's `components` list must use this element vocabulary, not the K9
+    #: category vocabulary, or the hdr component silently never resolves
+    #: (hit this for real: pete2583's first pack.yml declared `dynamic_range`
+    #: and every HDR/DV item silently misclassified as SDR). For
+    #: format_rule_combo, which needs more than one category's result. Every
+    #: other matcher ignores this and uses the singular k9_result above.
+    k9_results: Optional[Mapping[str, Dict[str, Any]]] = None
     #: The item's filename (basename without extension), for filename_regex.
     filename: str = ""
     #: Arbitrary metadata (TMDb details, etc.), for the metadata matcher.
@@ -84,6 +96,80 @@ def match_format_rule(cat_def: CategoryDef, ctx: MatchContext) -> Optional[List[
         available = [p for p in parts if p in cat_def.keys]
         if available:
             return available
+    return None
+
+
+# ---------------------------------------------------------------------------
+# format_rule_combo matcher -- resolution + dynamic_range + audio, all from
+# real K9 detection (never filename guessing), into ONE badge image per
+# combination (SPEC follow-up: pete2583-style combined overlay packs).
+# ---------------------------------------------------------------------------
+
+#: K9 dynamic_range rule key -> this matcher's own bucket vocabulary. Every
+#: DV flavour (plain or stacked with HDR10/HDR10+) buckets to "dv"; every
+#: HDR flavour buckets to "hdr"; no result (SDR, by K9 design -- see
+#: format_rules.py) buckets to "sdr".
+_DYNAMIC_RANGE_BUCKETS: Dict[Optional[str], str] = {
+    None: "sdr",
+    "hdr10": "hdr", "hdr10plus": "hdr", "hlg": "hdr",
+    "dovi": "dv", "dovi_hdr10": "dv", "dovi_hdr10plus": "dv",
+}
+
+#: K9 audio rule key -> this matcher's own suffix vocabulary. Plain "dts",
+#: "aac", "other" and no-result all count as "no special audio codec" --
+#: same bucket as absent, i.e. no suffix at all (omitted from this map).
+_AUDIO_SUFFIXES: Dict[str, str] = {
+    "dd": "dd", "ddplus": "ddplus", "ddplus_atmos": "ddplus_atmos",
+    "truehd": "truehd", "truehd_atmos": "truehd_atmos",
+    "dtshd_ma": "dtshd_ma", "dtsx": "dtsx",
+}
+
+
+def match_format_rule_combo(cat_def: CategoryDef, ctx: MatchContext) -> Optional[List[str]]:
+    """Combine multiple K9 category results into one badge key.
+
+    ``cat_def.components`` names the K9 categories to combine, in order
+    (e.g. ``["resolution", "dynamic_range", "audio"]``). Builds candidate
+    keys ``"{resolution}__{dynamic_range_bucket}__{audio_suffix}"`` then,
+    falling back, ``"{resolution}__{dynamic_range_bucket}"`` (no audio
+    suffix) -- the first candidate present in ``cat_def.keys`` wins.
+    Returns None when ``components``/``k9_results`` is unset, or when the
+    resolution component has no K9 result (nothing to badge).
+    """
+    if not cat_def.components or not ctx.k9_results:
+        return None
+    components = list(cat_def.components)
+    if not components:
+        return None
+
+    res_result = ctx.k9_results.get(components[0])
+    if not res_result:
+        return None
+    res_key = res_result.get("key")
+    if not res_key:
+        return None
+
+    dr_key = None
+    if len(components) > 1:
+        dr_result = ctx.k9_results.get(components[1])
+        dr_key = dr_result.get("key") if dr_result else None
+    dr_bucket = _DYNAMIC_RANGE_BUCKETS.get(dr_key)
+    if dr_bucket is None:
+        return None  # an unrecognised dynamic_range key -- don't guess
+
+    audio_suffix = None
+    if len(components) > 2:
+        audio_result = ctx.k9_results.get(components[2])
+        audio_key = audio_result.get("key") if audio_result else None
+        audio_suffix = _AUDIO_SUFFIXES.get(audio_key)  # None for dts/aac/other/absent
+
+    if audio_suffix:
+        full_key = f"{res_key}__{dr_bucket}__{audio_suffix}"
+        if full_key in cat_def.keys:
+            return [full_key]
+    base_key = f"{res_key}__{dr_bucket}"
+    if base_key in cat_def.keys:
+        return [base_key]
     return None
 
 
@@ -212,6 +298,7 @@ def match_rating_tier(cat_def: CategoryDef, ctx: MatchContext) -> Optional[List[
 
 _MATCHERS = {
     "format_rule": match_format_rule,
+    "format_rule_combo": match_format_rule_combo,
     "filename_regex": match_filename_regex,
     "metadata": match_metadata,
     "rating_tier": match_rating_tier,
@@ -228,6 +315,6 @@ def resolve_pack_key(cat_def: CategoryDef, ctx: MatchContext) -> Optional[List[s
 
 __all__ = [
     "MatchContext", "resolve_pack_key",
-    "match_format_rule", "match_filename_regex",
+    "match_format_rule", "match_format_rule_combo", "match_filename_regex",
     "match_metadata", "match_rating_tier",
 ]

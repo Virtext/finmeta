@@ -127,10 +127,32 @@ def resolve_profile_packs(
 # not a Finmeta-specific one -- could never produce an hdr/audio badge, only
 # ever fall back to text, regardless of which pack it is or what it's named.
 ELEMENT_CATEGORY_ALIASES: Dict[str, List[str]] = {
-    "resolution": ["resolution"],
+    "resolution": ["resolution", "combined_resolution"],
     "hdr": ["hdr", "dynamic_range", "video_codec"],
     "audio": ["audio", "audio_codec"],
 }
+
+#: Reserved category name for a pack that combines resolution + dynamic_range
+#: + audio -- all from real K9 detection, never filename guessing -- into one
+#: badge image per combination (e.g. pete2583-style packs). Parallel to the
+#: existing "combined_codec" (hdr+audio only, filename-matched) below, but one
+#: level broader: when it resolves, it takes the RESOLUTION slot's position
+#: and suppresses hdr AND audio both, not just audio.
+COMBINED_RESOLUTION_CATEGORY = "combined_resolution"
+
+
+def _resolve_combined_resolution(
+    config_dir: Path, profile: Mapping[str, Any],
+    all_k9m: Optional[Mapping[str, Dict[str, Any]]],
+    filename: str, metadata: Optional[Mapping[str, Any]], rating_value: Optional[float],
+) -> List[bytes]:
+    if not all_k9m:
+        return []
+    ctx = MatchContext(k9_results=all_k9m, filename=filename,
+                       metadata=dict(metadata or {}), rating_value=rating_value)
+    return resolve_profile_packs(config_dir, profile, ctx,
+                                 only_categories=[COMBINED_RESOLUTION_CATEGORY]
+                                 ).get(COMBINED_RESOLUTION_CATEGORY) or []
 
 
 def resolve_profile_pack_image(
@@ -141,6 +163,7 @@ def resolve_profile_pack_image(
     filename: str = "",
     metadata: Optional[Mapping[str, Any]] = None,
     rating_value: Optional[float] = None,
+    all_k9m: Optional[Mapping[str, Dict[str, Any]]] = None,
 ) -> List[bytes]:
     """``resolve_profile_packs`` narrowed to ONE Finmeta overlay element.
 
@@ -149,7 +172,17 @@ def resolve_profile_pack_image(
     categories -- first alias with any image wins. Same inputs, same
     resolution, usable from both the apply path and the preview path so
     neither one can drift from the other.
+
+    ``all_k9m`` is the full K9 category->result dict (resolution/
+    dynamic_range/audio), needed only by the ``combined_resolution`` check
+    below -- every other matcher keeps using the single ``k9_result``.
     """
+    if element == "resolution":
+        combined_res = _resolve_combined_resolution(
+            config_dir, profile, all_k9m, filename, metadata, rating_value)
+        if combined_res:
+            return combined_res
+
     if element in ("hdr", "audio"):
         # A pack may define a "combined_codec" category: a single image
         # (e.g. "TrueHD Atmos") that conveys both HDR and audio info in one
@@ -164,6 +197,13 @@ def resolve_profile_pack_image(
                                          ).get("combined_codec")
         if combined:
             return combined if element == "hdr" else []
+
+        # A "combined_resolution" pack (resolution+hdr+audio in one image,
+        # see above) suppresses BOTH the hdr and audio slots when it wins --
+        # broader than combined_codec's hdr-takes-the-slot/audio-suppressed
+        # split, since here resolution itself already took a slot.
+        if _resolve_combined_resolution(config_dir, profile, all_k9m, filename, metadata, rating_value):
+            return []
 
     aliases = ELEMENT_CATEGORY_ALIASES.get(element, [element])
     ctx = MatchContext(k9_result=k9_result, filename=filename,
@@ -238,4 +278,5 @@ def resolve_profile_pack_sample_image(
 
 
 __all__ = ["resolve_profile_packs", "resolve_profile_pack_image",
-           "resolve_profile_pack_sample_image", "ELEMENT_CATEGORY_ALIASES"]
+           "resolve_profile_pack_sample_image", "ELEMENT_CATEGORY_ALIASES",
+           "COMBINED_RESOLUTION_CATEGORY"]

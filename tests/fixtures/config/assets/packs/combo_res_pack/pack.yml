@@ -1,0 +1,10 @@
+name: combo_res_pack
+description: >
+  Fixture for the format_rule_combo matcher / combined_resolution category --
+  regression fixture for engine.image_pack_resolve's resolution+hdr+audio
+  suppression wiring (pete2583-style packs).
+categories:
+  combined_resolution:
+    matcher: format_rule_combo
+    components: [resolution, hdr, audio]
+    keys: [res_1080p__hdr__ddplus_atmos, res_480p__dv]

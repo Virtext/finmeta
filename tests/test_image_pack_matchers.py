@@ -6,7 +6,8 @@ import pytest
 from finmeta.engine.image_packs import CategoryDef
 from finmeta.engine.image_pack_matchers import (
     MatchContext, resolve_pack_key,
-    match_format_rule, match_filename_regex, match_metadata, match_rating_tier,
+    match_format_rule, match_format_rule_combo, match_filename_regex,
+    match_metadata, match_rating_tier,
 )
 
 
@@ -46,6 +47,90 @@ class TestFormatRuleMatcher:
         ctx = MatchContext(k9_result={"image": "dv_hdr_plus.png"})
         # dv not in keys, hdr10plus not in keys -> no match
         assert match_format_rule(cat, ctx) is None
+
+
+class TestFormatRuleComboMatcher:
+    _COMPONENTS = ["resolution", "hdr", "audio"]
+    _KEYS = [
+        "res_1080p__sdr", "res_1080p__sdr__truehd_atmos",
+        "res_1080p__hdr", "res_1080p__hdr__ddplus_atmos",
+        "res_480p__sdr", "res_480p__dv",
+    ]
+
+    def _cat(self, **kw):
+        return CategoryDef(matcher="format_rule_combo", keys=self._KEYS,
+                           components=self._COMPONENTS, **kw)
+
+    def test_full_three_part_match(self):
+        ctx = MatchContext(k9_results={
+            "resolution": {"key": "res_1080p"},
+            "hdr": {"key": "hdr10"},
+            "audio": {"key": "ddplus_atmos"},
+        })
+        assert match_format_rule_combo(self._cat(), ctx) == ["res_1080p__hdr__ddplus_atmos"]
+
+    def test_audio_dropped_when_combo_key_absent(self):
+        # dtsx 1080p/hdr combo isn't in self._KEYS -> falls back to resolution+dr only.
+        ctx = MatchContext(k9_results={
+            "resolution": {"key": "res_1080p"},
+            "hdr": {"key": "hdr10"},
+            "audio": {"key": "dtsx"},
+        })
+        assert match_format_rule_combo(self._cat(), ctx) == ["res_1080p__hdr"]
+
+    def test_sdr_bucket_no_hdr_result(self):
+        ctx = MatchContext(k9_results={
+            "resolution": {"key": "res_1080p"},
+            "hdr": None,
+            "audio": {"key": "truehd_atmos"},
+        })
+        assert match_format_rule_combo(self._cat(), ctx) == ["res_1080p__sdr__truehd_atmos"]
+
+    def test_dv_bucket(self):
+        ctx = MatchContext(k9_results={
+            "resolution": {"key": "res_480p"},
+            "hdr": {"key": "dovi"},
+            "audio": None,
+        })
+        assert match_format_rule_combo(self._cat(), ctx) == ["res_480p__dv"]
+
+    def test_plain_dts_has_no_audio_suffix(self):
+        # "dts" (plain) is not in _AUDIO_SUFFIXES -> same bucket as no audio.
+        ctx = MatchContext(k9_results={
+            "resolution": {"key": "res_480p"},
+            "hdr": None,
+            "audio": {"key": "dts"},
+        })
+        assert match_format_rule_combo(self._cat(), ctx) == ["res_480p__sdr"]
+
+    def test_no_resolution_result_is_none(self):
+        ctx = MatchContext(k9_results={"resolution": None, "hdr": {"key": "hdr10"}})
+        assert match_format_rule_combo(self._cat(), ctx) is None
+
+    def test_no_k9_results_at_all_is_none(self):
+        ctx = MatchContext(k9_result={"image": "res_4k.png"})  # singular only, no k9_results
+        assert match_format_rule_combo(self._cat(), ctx) is None
+
+    def test_no_components_declared_is_none(self):
+        cat = CategoryDef(matcher="format_rule_combo", keys=self._KEYS)
+        ctx = MatchContext(k9_results={"resolution": {"key": "res_1080p"}})
+        assert match_format_rule_combo(cat, ctx) is None
+
+    def test_full_combo_not_in_keys_falls_back(self):
+        cat = CategoryDef(matcher="format_rule_combo", keys=["res_1080p__hdr"],
+                          components=self._COMPONENTS)
+        ctx = MatchContext(k9_results={
+            "resolution": {"key": "res_1080p"},
+            "hdr": {"key": "hdr10"},
+            "audio": {"key": "ddplus_atmos"},
+        })
+        assert match_format_rule_combo(cat, ctx) == ["res_1080p__hdr"]
+
+    def test_plain_format_rule_matcher_unaffected(self):
+        """Existing format_rule (single-category) matcher is untouched by this addition."""
+        cat = CategoryDef(matcher="format_rule", keys=["res_4k"])
+        ctx = MatchContext(k9_result={"image": "res_4k.png"}, k9_results={"resolution": {"key": "res_4k"}})
+        assert match_format_rule(cat, ctx) == ["res_4k"]
 
 
 class TestFilenameRegexMatcher:

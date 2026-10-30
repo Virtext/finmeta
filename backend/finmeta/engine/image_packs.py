@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 LEGACY_CATEGORIES = ("resolution", "hdr", "audio", "rating")
 
 #: Valid matcher types.
-VALID_MATCHERS = ("format_rule", "filename_regex", "metadata", "rating_tier")
+VALID_MATCHERS = ("format_rule", "format_rule_combo", "filename_regex", "metadata", "rating_tier")
 
 
 class CategoryDef(BaseModel):
@@ -50,6 +50,10 @@ class CategoryDef(BaseModel):
     field: Optional[str] = Field(default=None, description="Metadata field for metadata matcher.")
     tiers: Optional[Dict[str, str]] = Field(
         default=None, description="Tier expressions for rating_tier matcher (key -> comparison).")
+    components: Optional[List[str]] = Field(
+        default=None,
+        description="Ordered K9 category names to combine (e.g. ['resolution', "
+                    "'dynamic_range', 'audio']), for the format_rule_combo matcher.")
 
     @field_validator("matcher")
     @classmethod

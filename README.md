@@ -196,6 +196,12 @@ Manager community:
   contributors, including **bullmoose20**, **Adam-Pope** and
   **JJJonesJr33**, whose shared configs were used as real-world test
   cases for Finmeta's Kometa-import compatibility.
+- **[pete2583](https://github.com/Kometa-Team/Community-Configs/tree/master/pete2583)**
+  and **bradmarrti** — the combined resolution/HDR/audio badge images
+  (1080p/DV/4K bases by bradmarrti, 480p/576p/720p from the PMM defaults)
+  behind Finmeta's optional `pete2583` image pack. Hand-adapted to match
+  real Jellyfin media-stream detection instead of filename patterns; not
+  run through the Kometa overlay importer.
 - **[Jellyfin](https://jellyfin.org)** — the media server Finmeta is
   built for.
 - **[TMDb](https://www.themoviedb.org)** — the primary metadata and

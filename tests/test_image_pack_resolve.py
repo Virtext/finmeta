@@ -250,6 +250,74 @@ class TestCombinedCodec:
         assert len(audio) == 1
 
 
+class TestCombinedResolution:
+    """A pack may define a 'combined_resolution' category -- one image
+    combining resolution+dynamic_range+audio from REAL K9 detection (never
+    filename guessing) that takes the resolution slot and suppresses BOTH
+    the hdr and audio slots (broader than combined_codec, which only
+    suppresses audio). See engine.image_pack_matchers.match_format_rule_combo."""
+
+    _ALL_K9M_HDR_ATMOS_1080P = {
+        "resolution": {"key": "res_1080p"},
+        "hdr": {"key": "hdr10"},
+        "audio": {"key": "ddplus_atmos"},
+    }
+    _ALL_K9M_DV_480P = {
+        "resolution": {"key": "res_480p"},
+        "hdr": {"key": "dovi"},
+        "audio": None,
+    }
+
+    def test_combined_resolution_wins_the_resolution_slot(self, config_dir):
+        profile = {"packs": ["combo_res_pack"]}
+        images = resolve_profile_pack_image(
+            config_dir, profile, "resolution", all_k9m=self._ALL_K9M_HDR_ATMOS_1080P)
+        assert len(images) == 1
+
+    def test_combined_resolution_suppresses_hdr(self, config_dir):
+        profile = {"packs": ["combo_res_pack"]}
+        images = resolve_profile_pack_image(
+            config_dir, profile, "hdr", all_k9m=self._ALL_K9M_HDR_ATMOS_1080P)
+        assert images == []
+
+    def test_combined_resolution_suppresses_audio(self, config_dir):
+        profile = {"packs": ["combo_res_pack"]}
+        images = resolve_profile_pack_image(
+            config_dir, profile, "audio", all_k9m=self._ALL_K9M_HDR_ATMOS_1080P)
+        assert images == []
+
+    def test_combined_resolution_dv_bucket(self, config_dir):
+        profile = {"packs": ["combo_res_pack"]}
+        images = resolve_profile_pack_image(
+            config_dir, profile, "resolution", all_k9m=self._ALL_K9M_DV_480P)
+        assert len(images) == 1
+
+    def test_no_all_k9m_falls_back_to_plain_resolution(self, config_dir):
+        """Without all_k9m, combined_resolution can't resolve -- plain
+        resolution/hdr/audio aliasing keeps working unchanged (regression
+        guard: this pack has no plain 'resolution'/'hdr'/'audio' category,
+        so there's simply no badge, not a crash)."""
+        profile = {"packs": ["combo_res_pack"]}
+        images = resolve_profile_pack_image(
+            config_dir, profile, "resolution", k9_result={"image": "res_4k.png", "key": "res_4k"})
+        assert images == []
+
+    def test_jmxd_combined_codec_unaffected_by_combined_resolution(self, config_dir):
+        """A pack with only combined_codec (no combined_resolution) keeps its
+        existing hdr-takes-slot/audio-suppressed behaviour unchanged."""
+        profile = {"packs": ["jmxd_style_pack"]}
+        hdr = resolve_profile_pack_image(
+            config_dir, profile, "hdr",
+            filename="Movie.2020.2160p.TrueHD.Atmos.x265-GROUP.mkv",
+            all_k9m=self._ALL_K9M_HDR_ATMOS_1080P)
+        audio = resolve_profile_pack_image(
+            config_dir, profile, "audio",
+            filename="Movie.2020.2160p.TrueHD.Atmos.x265-GROUP.mkv",
+            all_k9m=self._ALL_K9M_HDR_ATMOS_1080P)
+        assert len(hdr) == 1
+        assert audio == []
+
+
 class TestResolveProfilePackSampleImage:
     """"Sample data" (operator-reported 2026-10-27): the editor's placeholder
     values ("HDR10", "Atmos", ...) have no real k9/filename match to resolve
@@ -291,6 +359,22 @@ class TestResolveProfilePackSampleImage:
         profile = {"packs": ["nonexistent_pack"]}
         images = resolve_profile_pack_sample_image(config_dir, profile, "hdr", "HDR10")
         assert images == []
+
+    def test_combined_resolution_pack_shows_a_sample_image(self, config_dir):
+        """Regression: a pack whose ONLY category is 'combined_resolution'
+        (pete2583-style) used to show nothing at all for Sample data on the
+        resolution element -- 'combined_resolution' was missing from
+        ELEMENT_CATEGORY_ALIASES['resolution'], so no alias ever found it.
+        hdr/audio correctly still show nothing (no literal hdr/audio/
+        dynamic_range/video_codec/audio_codec category exists in this pack),
+        matching the real suppression a resolve would apply."""
+        profile = {"packs": ["combo_res_pack"]}
+        resolution = resolve_profile_pack_sample_image(config_dir, profile, "resolution", "4K")
+        hdr = resolve_profile_pack_sample_image(config_dir, profile, "hdr", "HDR10")
+        audio = resolve_profile_pack_sample_image(config_dir, profile, "audio", "Atmos")
+        assert len(resolution) == 1
+        assert hdr == []
+        assert audio == []
 
     def test_category_with_no_keys_skipped(self, config_dir):
         """A pack whose category exists but declares no keys at all must not
