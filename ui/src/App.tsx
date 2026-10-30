@@ -13,6 +13,10 @@ import ErrorBoundary from './ErrorBoundary';
 
 type Page = 'main' | 'settings' | 'account';
 
+// Pagination fix (2026-10-30): /items/light pages at Jellyfin now (bounded
+// 1-500 server-side) -- this is just the UI's own "Load more" chunk size.
+const LIBRARY_PAGE_SIZE = 200;
+
 export default function App() {
   const [unauthed, setUnauthed] = useState(false);
   const [page, setPage] = useState<Page>('main');
@@ -43,7 +47,12 @@ export default function App() {
   const [libName, setLibName] = useState<string>('');
   const [items, setItems] = useState<LibItemsLightResp | null>(null);
   const [itemsLoading, setItemsLoading] = useState(false);
+  const [itemsLoadingMore, setItemsLoadingMore] = useState(false);
   const [itemsError, setItemsError] = useState<string | null>(null);
+  const [itemsSearch, setItemsSearch] = useState('');
+  // Invalidates an in-flight search/page response that a newer one has
+  // already superseded (fast typing, or switching libraries mid-request).
+  const itemsReqIdRef = useRef(0);
 
   const [selected, setSelected] = useState<ItemLightView | null>(null);
   const [plan, setPlan] = useState<PlanResp | null>(null);
@@ -106,10 +115,11 @@ export default function App() {
   // demand for whichever one you actually select (see refreshPlan below).
   const loadLibraryItems = useCallback((
     name: string, isCancelled: () => boolean, onComplete?: (d: LibItemsLightResp) => void,
+    search?: string,
   ) => {
     setItemsLoading(true);
     setItemsError(null);
-    getItemsLight(name)
+    getItemsLight(name, { limit: LIBRARY_PAGE_SIZE, offset: 0, search: search || undefined })
       .then((d) => {
         if (isCancelled()) return;
         setItems(d);
@@ -125,12 +135,45 @@ export default function App() {
 
   useEffect(() => {
     if (!libName || unauthed) return;
-    let cancelled = false;
-    loadLibraryItems(libName, () => cancelled, (d) => {
+    setItemsSearch('');
+    const reqId = ++itemsReqIdRef.current;
+    loadLibraryItems(libName, () => itemsReqIdRef.current !== reqId, (d) => {
       setSelected((prev) => (prev && d.items.some((i) => i.item_id === prev.item_id) ? prev : null));
     });
-    return () => { cancelled = true; };
   }, [libName, unauthed, loadLibraryItems]);
+
+  // Server-side search (Jellyfin SearchTerm via /items/light?search=) --
+  // LibraryBrowser debounces keystrokes before calling this, so typing
+  // doesn't fire a request per character. Replaces the current page with
+  // the first page of matches; clearing the query reloads the unfiltered
+  // library the same way.
+  const handleSearch = useCallback((query: string) => {
+    setItemsSearch(query);
+    if (!libName) return;
+    const reqId = ++itemsReqIdRef.current;
+    loadLibraryItems(libName, () => itemsReqIdRef.current !== reqId, undefined, query);
+  }, [libName, loadLibraryItems]);
+
+  // "Load more": fetch the next page and append -- the list never refetches
+  // pages it already has.
+  const loadMoreItems = useCallback(() => {
+    if (!libName || !items || !items.has_more || itemsLoadingMore) return;
+    const reqId = ++itemsReqIdRef.current;
+    setItemsLoadingMore(true);
+    getItemsLight(libName, {
+      limit: LIBRARY_PAGE_SIZE, offset: items.items.length, search: itemsSearch || undefined,
+    })
+      .then((d) => {
+        if (itemsReqIdRef.current !== reqId) return;
+        setItems((prev) => (prev ? { ...d, items: [...prev.items, ...d.items] } : d));
+      })
+      .catch((e: any) => {
+        if (itemsReqIdRef.current !== reqId) return;
+        if (e?.isUnauthorized) setUnauthed(true);
+        else setItemsError(e.message);
+      })
+      .finally(() => { if (itemsReqIdRef.current === reqId) setItemsLoadingMore(false); });
+  }, [libName, items, itemsLoadingMore, itemsSearch]);
 
   // Switching selection fast (e.g. Breaking Bad -> The Office before Breaking
   // Bad's plan has even come back) used to let whichever response arrived
@@ -323,6 +366,9 @@ export default function App() {
             libraryRun={libraryRuns[libName] ?? EMPTY_LIBRARY_RUN}
             onStartLibraryRun={(kind) => startLibraryRun(libName, kind)}
             onEditOverlayProfile={openOverlayEditor}
+            onSearch={handleSearch}
+            onLoadMore={loadMoreItems}
+            loadingMore={itemsLoadingMore}
           />
           <PreviewPane
             item={selected}

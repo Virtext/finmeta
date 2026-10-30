@@ -31,6 +31,12 @@ class FakeJf:
                   fields=None) -> List[Item]:
         return [it for it in self._items if it.type in (include_item_types or [it.type])]
 
+    def iter_items(self, *, parent_id=None, recursive=True, include_item_types=None,
+                   fields=None, user_id=None, page_size=200):
+        for it in self._items:
+            if it.type in (include_item_types or [it.type]):
+                yield it
+
 
 def _movie(item_id: str, rating: Optional[float]) -> Item:
     return Item(id=item_id, name=item_id, type="Movie", community_rating=rating)

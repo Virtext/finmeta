@@ -107,6 +107,7 @@ button { font: inherit; cursor: pointer; }
 .browser-head h2 { font-size: 1rem; }
 .summary { font-size: 0.74rem; }
 .item-list { display: flex; flex-direction: column; gap: 2px; padding: 0 8px; }
+.load-more-btn { margin: 8px 2px 4px; align-self: center; font-size: 0.82rem; }
 .item-row {
   display: flex; align-items: center; gap: 8px;
   padding: 8px 10px; border-radius: 8px; cursor: pointer;

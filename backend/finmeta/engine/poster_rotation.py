@@ -18,10 +18,14 @@ def top_rated_item_ids(
     jf_lib = jf.get_library(library)
     if jf_lib is None:
         return []
-    items = jf.get_items(
+    # Pagination fix (2026-10-30): this used to be an unbounded get_items()
+    # call -- the same ReadTimeout risk on a large library as the other
+    # library-scale call sites, just not yet reported since scheduled
+    # rotation runs in the background. iter_items() pages it the same way.
+    items = list(jf.iter_items(
         parent_id=jf_lib.item_id, recursive=True, include_item_types=list(item_types),
         fields="CommunityRating",
-    )
+    ))
     rated = [it for it in items if it.community_rating is not None]
     rated.sort(key=lambda it: it.community_rating, reverse=True)
     return [it.id for it in rated[:item_count]]

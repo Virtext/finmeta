@@ -1,6 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ItemLightView, LibItemsLightResp } from '../types';
 import BulkApplyPanel, { type LibraryRunState } from './BulkApplyPanel';
+
+const SEARCH_DEBOUNCE_MS = 300; // SPEC S9 §D's debounce convention, reused here.
 
 interface Props {
   library: string;
@@ -14,6 +16,11 @@ interface Props {
   onStartLibraryRun: (kind: 'plan' | 'apply') => void;
   /** "Edit overlay profile" -> Settings, Overlays tab, this library preselected. */
   onEditOverlayProfile?: (library: string) => void;
+  /** Debounced server-side search (Jellyfin SearchTerm via /items/light?search=). */
+  onSearch: (query: string) => void;
+  /** Fetch and append the next page. */
+  onLoadMore: () => void;
+  loadingMore: boolean;
 }
 
 function ItemRow({ item, selected, onSelect }: {
@@ -67,21 +74,35 @@ function invalidInstanceRefs(data: LibItemsLightResp): string[] {
 }
 
 export default function LibraryBrowser({
-  library, data, selectedId, onSelect, loading, error, dryRun, libraryRun, onStartLibraryRun, onEditOverlayProfile,
+  library, data, selectedId, onSelect, loading, error, dryRun, libraryRun, onStartLibraryRun,
+  onEditOverlayProfile, onSearch, onLoadMore, loadingMore,
 }: Props) {
+  // Local input value updates every keystroke; onSearch (which hits the
+  // server) only fires after SEARCH_DEBOUNCE_MS of no typing, and again
+  // immediately on unmount/library-switch via the effect's cleanup timer.
   const [query, setQuery] = useState('');
-  const filtered = useMemo(() => {
-    if (!data) return [];
-    const q = query.trim().toLowerCase();
-    if (!q) return data.items;
-    return data.items.filter((it) => it.item_name.toLowerCase().includes(q));
-  }, [data, query]);
+  const debounceRef = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (debounceRef.current !== undefined) window.clearTimeout(debounceRef.current);
+    debounceRef.current = window.setTimeout(() => onSearch(query.trim()), SEARCH_DEBOUNCE_MS);
+    return () => { if (debounceRef.current !== undefined) window.clearTimeout(debounceRef.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query]);
+  // Switching libraries clears the search box too (App.tsx resets the
+  // server-side query the same way when `library` changes).
+  useEffect(() => { setQuery(''); }, [library]);
+
+  const items = data?.items ?? [];
 
   return (
     <aside className="browser">
       <div className="browser-head">
         <h2>Library</h2>
-        {data && <span className="summary">{data.items.length} items</span>}
+        {data && (
+          <span className="summary">
+            {items.length} of {data.total_items} item{data.total_items === 1 ? '' : 's'}
+          </span>
+        )}
       </div>
 
       {loading && <div className="muted pad">Loading items…</div>}
@@ -103,12 +124,12 @@ export default function LibraryBrowser({
           <input
             className="config-input library-search"
             type="text"
-            placeholder={`Search ${data.items.length} title${data.items.length === 1 ? '' : 's'}…`}
+            placeholder={`Search ${data.total_items} title${data.total_items === 1 ? '' : 's'}…`}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
           <div className="item-list">
-            {filtered.map((it) => (
+            {items.map((it) => (
               <ItemRow
                 key={it.item_id}
                 item={it}
@@ -116,8 +137,13 @@ export default function LibraryBrowser({
                 onSelect={() => onSelect(it)}
               />
             ))}
-            {query && filtered.length === 0 && (
+            {query && items.length === 0 && (
               <div className="muted pad">No titles match "{query}".</div>
+            )}
+            {data.has_more && (
+              <button className="btn load-more-btn" onClick={onLoadMore} disabled={loadingMore}>
+                {loadingMore ? 'Loading…' : `Load more (${items.length}/${data.total_items})`}
+              </button>
             )}
           </div>
         </>

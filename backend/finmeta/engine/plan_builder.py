@@ -188,12 +188,14 @@ def _overlay_poster(
         if streams is None:
             target_id = item.id
             if media_type == "tvshow":
-                eps = [e for e in jf.get_items(parent_id=item.id, recursive=True)
-                       if e.type == "Episode"]
-                if eps:
-                    eps.sort(key=lambda e: ((e.parent_index_number or 0),
-                                            (e.index_number or 0)))
-                    target_id = eps[0].id
+                first_ep = jf.get_items_page(
+                    parent_id=item.id, recursive=True,
+                    include_item_types=["Episode"],
+                    sort_by=["ParentIndexNumber", "IndexNumber"],
+                    sort_order="Ascending", limit=1,
+                ).items
+                if first_ep:
+                    target_id = first_ep[0].id
             streams = list(jf.get_item_media_streams_raw(target_id))
     except Exception as exc:
         logger.warning("media-stream fetch failed for %s: %s", item.name, exc)
@@ -1490,6 +1492,19 @@ def build_plan(
     lib_name: Optional[str] = None
     lib_cfg = None
 
+    # Pagination (single-library browse scope only): bound the expensive
+    # per-item work below (TMDb/fanart/etc. lookups) to one page, BEFORE any
+    # of it runs -- slicing after the fact wouldn't save anything. Profiled
+    # 2026-10-23: ~7s/item cold (network-bound), so an unbounded library view
+    # does not scale past a handful of titles without this. Pagination fix
+    # (2026-10-30): the Movie/Series filter and the Limit/StartIndex now both
+    # happen AT Jellyfin via get_items_page()/iter_items() -- a whole-library
+    # fetch with no type filter or limit also pulls every season/episode with
+    # Path/ProviderIds/Overview, and that unbounded response is what timed
+    # out on a tester's large library (ReadTimeout even with limit=1, since
+    # the old code fetched everything before slicing locally).
+    total_items: Optional[int] = None
+
     if item_id:
         item = jf.get_item(item_id)
         items = [item]
@@ -1521,31 +1536,35 @@ def build_plan(
         jf_lib = jf.get_library(library)
         if jf_lib is None:
             raise ValueError(f"Jellyfin library {library!r} not found")
-        items = jf.get_items(parent_id=jf_lib.item_id, recursive=True)
+        if limit is not None:
+            page = jf.get_items_page(
+                parent_id=jf_lib.item_id, recursive=True,
+                include_item_types=["Movie", "Series"],
+                limit=limit, start_index=offset,
+            )
+            items = page.items
+            total_items = page.total_record_count
+        else:
+            items = list(jf.iter_items(
+                parent_id=jf_lib.item_id, recursive=True,
+                include_item_types=["Movie", "Series"],
+            ))
     else:
         # All libraries
         for name, lc in cfg.libraries.items():
             jf_lib = jf.get_library(name)
             if jf_lib is None:
                 continue
-            lib_items = jf.get_items(parent_id=jf_lib.item_id, recursive=True)
+            lib_items = list(jf.iter_items(
+                parent_id=jf_lib.item_id, recursive=True,
+                include_item_types=["Movie", "Series"],
+            ))
             for it in lib_items:
                 it._lib_name = name  # type: ignore[attr-defined]
             items.extend(lib_items)
 
     # Determine if we have a multi-library plan
     is_multi = library is None and item_id is None
-
-    # Pagination (single-library browse scope only): bound the expensive
-    # per-item work below (TMDb/fanart/etc. lookups) to one page, BEFORE any
-    # of it runs -- slicing after the fact wouldn't save anything. Profiled
-    # 2026-10-23: ~7s/item cold (network-bound), so an unbounded library view
-    # does not scale past a handful of titles without this.
-    total_items: Optional[int] = None
-    if limit is not None and item_id is None and not is_multi:
-        items = [it for it in items if it.type in ("Movie", "Series")]
-        total_items = len(items)
-        items = items[offset:offset + limit]
 
     if lib_cfg is None and cfg.libraries:
         fallback_name = next(iter(cfg.libraries))
@@ -1595,12 +1614,14 @@ def build_plan(
         if it.type == "Movie":
             return it.id
         if it.type == "Series":
-            eps = [e for e in jf.get_items(parent_id=it.id, recursive=True)
-                   if e.type == "Episode"]
-            if eps:
-                eps.sort(key=lambda e: ((e.parent_index_number or 0),
-                                        (e.index_number or 0)))
-                return eps[0].id
+            first_ep = jf.get_items_page(
+                parent_id=it.id, recursive=True,
+                include_item_types=["Episode"],
+                sort_by=["ParentIndexNumber", "IndexNumber"],
+                sort_order="Ascending", limit=1,
+            ).items
+            if first_ep:
+                return first_ep[0].id
         return None
 
     streams_by_id: Dict[str, List[Dict[str, Any]]] = {}

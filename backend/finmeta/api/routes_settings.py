@@ -327,12 +327,14 @@ def _overlay_preview_source(
                 mt = _media_type(item)
                 target_id = item.id
                 if mt == "tvshow":
-                    eps = [e for e in jf.get_items(parent_id=item.id, recursive=True)
-                           if e.type == "Episode"]
-                    if eps:
-                        eps.sort(key=lambda e: ((e.parent_index_number or 0),
-                                                (e.index_number or 0)))
-                        target_id = eps[0].id
+                    first_ep = jf.get_items_page(
+                        parent_id=item.id, recursive=True,
+                        include_item_types=["Episode"],
+                        sort_by=["ParentIndexNumber", "IndexNumber"],
+                        sort_order="Ascending", limit=1,
+                    ).items
+                    if first_ep:
+                        target_id = first_ep[0].id
                 # RAW MediaStreams keep every field K9 detection needs (DisplayTitle,
                 # IsForced, ChannelLayout, ColorTransfer); /Items?Ids= accepts the API key.
                 try:
@@ -438,11 +440,14 @@ def _preview_streams(ctx: AppContext, item_id: str) -> list:
         item = jf.get_item(item_id)
         target_id = item.id
         if _media_type(item) == "tvshow":
-            eps = [e for e in jf.get_items(parent_id=item.id, recursive=True)
-                   if e.type == "Episode"]
-            if eps:
-                eps.sort(key=lambda e: ((e.parent_index_number or 0), (e.index_number or 0)))
-                target_id = eps[0].id
+            first_ep = jf.get_items_page(
+                parent_id=item.id, recursive=True,
+                include_item_types=["Episode"],
+                sort_by=["ParentIndexNumber", "IndexNumber"],
+                sort_order="Ascending", limit=1,
+            ).items
+            if first_ep:
+                target_id = first_ep[0].id
         try:
             return list(jf.get_item_media_streams_raw(target_id))
         except Exception:

@@ -8,7 +8,7 @@ import httpx
 from finmeta.jellyfin_client import (
     JellyfinClient, JellyfinError, ServerResetRequired,
     PathMapper, translate_path,
-    Item, Library,
+    Item, Library, ItemPage,
 )
 
 BASE = "http://testserver"
@@ -332,6 +332,174 @@ class TestGetItems:
         with JellyfinClient(BASE, token="tok", user_id="uid") as c:
             count = c.count_items("lib1")
         assert count == 10
+
+
+# ---------------------------------------------------------------------------
+# get_items_page / iter_items (pagination fix)
+# ---------------------------------------------------------------------------
+
+class TestGetItemsPage:
+    @respx.mock
+    def test_sends_limit_start_index_types_sort(self):
+        route = respx.get(f"{BASE}/Items").mock(
+            return_value=httpx.Response(200, json={
+                "Items": [{"Id": "1", "Name": "A", "Type": "Movie"}],
+                "TotalRecordCount": 1,
+            })
+        )
+        with JellyfinClient(BASE, token="tok", user_id="uid") as c:
+            page = c.get_items_page(
+                parent_id="lib1", include_item_types=["Movie", "Series"],
+                limit=50, start_index=100, sort_by=["SortName", "Id"],
+                sort_order="Ascending",
+            )
+        assert route.called
+        req = route.calls[0].request
+        qs = dict(httpx.QueryParams(req.url.query))
+        assert qs["limit"] == "50"
+        assert qs["startIndex"] == "100"
+        assert qs["includeItemTypes"] == "Movie,Series"
+        assert qs["sortBy"] == "SortName,Id"
+        assert qs["sortOrder"] == "Ascending"
+        assert qs["enableTotalRecordCount"] == "true"
+        assert isinstance(page, ItemPage)
+        assert page.total_record_count == 1
+        assert page.start_index == 100
+
+    @respx.mock
+    def test_total_falls_back_to_page_length_when_missing(self):
+        respx.get(f"{BASE}/Items").mock(
+            return_value=httpx.Response(200, json={
+                "Items": [{"Id": "1", "Name": "A", "Type": "Movie"},
+                         {"Id": "2", "Name": "B", "Type": "Movie"}],
+                # No TotalRecordCount key at all.
+            })
+        )
+        with JellyfinClient(BASE, token="tok", user_id="uid") as c:
+            page = c.get_items_page(parent_id="lib1", limit=2)
+        assert page.total_record_count == 2
+
+    @respx.mock
+    def test_get_items_wrapper_still_returns_plain_list(self):
+        """get_items() stays a backward-compatible List[Item] wrapper."""
+        respx.get(f"{BASE}/Items").mock(
+            return_value=httpx.Response(200, json={
+                "Items": [{"Id": "1", "Name": "A", "Type": "Movie"}],
+                "TotalRecordCount": 1,
+            })
+        )
+        with JellyfinClient(BASE, token="tok", user_id="uid") as c:
+            items = c.get_items(parent_id="lib1")
+        assert isinstance(items, list)
+        assert items[0].id == "1"
+
+
+class TestIterItems:
+    def _pages(self, all_items, page_size):
+        """Build a side_effect that slices `all_items` by startIndex/limit."""
+        def _responder(request):
+            qs = dict(httpx.QueryParams(request.url.query))
+            start = int(qs.get("startIndex", "0"))
+            limit = int(qs.get("limit", str(page_size)))
+            chunk = all_items[start:start + limit]
+            return httpx.Response(200, json={
+                "Items": chunk, "TotalRecordCount": len(all_items),
+            })
+        return _responder
+
+    @respx.mock
+    def test_pages_with_offsets_0_n_2n_no_duplicates(self):
+        all_items = [{"Id": str(i), "Name": f"Item {i}", "Type": "Movie"}
+                    for i in range(7)]
+        respx.get(f"{BASE}/Items").mock(side_effect=self._pages(all_items, 3))
+        with JellyfinClient(BASE, token="tok", user_id="uid") as c:
+            result = list(c.iter_items(parent_id="lib1", page_size=3))
+        assert [it.id for it in result] == [str(i) for i in range(7)]
+        assert len(set(it.id for it in result)) == 7
+
+    @respx.mock
+    def test_sends_stable_sort_every_page(self):
+        all_items = [{"Id": str(i), "Name": f"Item {i}", "Type": "Movie"}
+                    for i in range(5)]
+        route = respx.get(f"{BASE}/Items").mock(side_effect=self._pages(all_items, 2))
+        with JellyfinClient(BASE, token="tok", user_id="uid") as c:
+            list(c.iter_items(parent_id="lib1", page_size=2))
+        for call in route.calls:
+            qs = dict(httpx.QueryParams(call.request.url.query))
+            assert qs["sortBy"] == "SortName,Id"
+            assert qs["sortOrder"] == "Ascending"
+
+    @respx.mock
+    def test_stops_on_empty_page(self):
+        respx.get(f"{BASE}/Items").mock(
+            return_value=httpx.Response(200, json={"Items": [], "TotalRecordCount": 0})
+        )
+        with JellyfinClient(BASE, token="tok", user_id="uid") as c:
+            result = list(c.iter_items(parent_id="lib1", page_size=10))
+        assert result == []
+
+    @respx.mock
+    def test_stops_when_offset_reaches_total(self):
+        all_items = [{"Id": str(i), "Name": f"Item {i}", "Type": "Movie"}
+                    for i in range(4)]
+        route = respx.get(f"{BASE}/Items").mock(side_effect=self._pages(all_items, 4))
+        with JellyfinClient(BASE, token="tok", user_id="uid") as c:
+            result = list(c.iter_items(parent_id="lib1", page_size=4))
+        assert len(result) == 4
+        assert route.call_count == 1
+
+    @respx.mock
+    def test_stops_on_short_page(self):
+        all_items = [{"Id": str(i), "Name": f"Item {i}", "Type": "Movie"}
+                    for i in range(3)]
+
+        def _responder(request):
+            qs = dict(httpx.QueryParams(request.url.query))
+            start = int(qs.get("startIndex", "0"))
+            limit = int(qs.get("limit", "10"))
+            chunk = all_items[start:start + limit]
+            # Deliberately omit/garble TotalRecordCount so the "short page"
+            # stop condition is exercised independently of the total check.
+            return httpx.Response(200, json={"Items": chunk, "TotalRecordCount": 999})
+
+        route = respx.get(f"{BASE}/Items").mock(side_effect=_responder)
+        with JellyfinClient(BASE, token="tok", user_id="uid") as c:
+            result = list(c.iter_items(parent_id="lib1", page_size=10))
+        assert len(result) == 3
+        assert route.call_count == 1
+
+    @respx.mock
+    def test_stops_on_page_with_no_new_ids(self):
+        """A page that repeats only already-seen IDs stops the walk (dedupe)."""
+        page1 = [{"Id": "1", "Name": "A", "Type": "Movie"},
+                {"Id": "2", "Name": "B", "Type": "Movie"}]
+        call_count = {"n": 0}
+
+        def _responder(request):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                return httpx.Response(200, json={"Items": page1, "TotalRecordCount": 999})
+            # Second page repeats id "2" only -- no new IDs -> must stop.
+            return httpx.Response(200, json={
+                "Items": [{"Id": "2", "Name": "B", "Type": "Movie"}],
+                "TotalRecordCount": 999,
+            })
+
+        respx.get(f"{BASE}/Items").mock(side_effect=_responder)
+        with JellyfinClient(BASE, token="tok", user_id="uid") as c:
+            result = list(c.iter_items(parent_id="lib1", page_size=2))
+        assert [it.id for it in result] == ["1", "2"]
+        assert call_count["n"] == 2
+
+    @respx.mock
+    def test_page_size_is_clamped(self):
+        respx.get(f"{BASE}/Items").mock(
+            return_value=httpx.Response(200, json={"Items": [], "TotalRecordCount": 0})
+        )
+        with JellyfinClient(BASE, token="tok", user_id="uid") as c:
+            list(c.iter_items(parent_id="lib1", page_size=99999))
+            list(c.iter_items(parent_id="lib1", page_size=0))
+        # No crash, no assertion on the exact clamp value beyond "it ran".
 
 
 # ---------------------------------------------------------------------------

@@ -16,6 +16,7 @@ from PIL import Image
 
 from finmeta.api import AppContext, create_app
 from finmeta.engine.plan import WritePlan
+from finmeta.jellyfin_client import ItemPage
 from finmeta.sources.candidate import Candidate
 from fastapi.testclient import TestClient
 
@@ -86,6 +87,11 @@ class _FakeJF:
 
     def get_items(self, parent_id=None, recursive=False):
         return []
+
+    def get_items_page(self, *, parent_id=None, recursive=True, include_item_types=None,
+                       fields=None, user_id=None, limit=None, start_index=None,
+                       sort_by=None, sort_order=None, search_term=None) -> ItemPage:
+        return ItemPage(items=[], total_record_count=0, start_index=start_index or 0)
 
     def get_media_streams_raw_or_objects(self, item_id):
         from finmeta.jellyfin_client.types import MediaStream
