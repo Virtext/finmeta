@@ -832,12 +832,12 @@ function InstalledPacksSection({
   // instead of a separate "download" panel elsewhere on the page.
   const sourceKeyByPackName: Record<string, string> = {};
   for (const [key, src] of Object.entries(sources)) sourceKeyByPackName[src.default_pack_name] = key;
-  // 2026-10-27: protects a hand-built pack with no re-downloadable source
-  // from accidental deletion (no Update button either, since there's
-  // nothing to re-fetch) -- empty now that ichimoku gained a real
-  // MANIFEST_SOURCES entry (2026-10-30) and picks up the sourceKey branch
-  // below on its own. Kept around for the next hand-built, sourceless pack.
-  const PROTECTED_NO_SOURCE = new Set<string>([]);
+  // "ichimoku" has no known source to re-download from (hand-built, not via
+  // Kometa-import), but the operator wants it protected from accidental
+  // deletion the same way jmxd-media-info is -- 2026-10-27, after it
+  // vanished from disk once already (cause still unexplained). No Update
+  // button for it (nothing to re-fetch), just no Delete either.
+  const PROTECTED_NO_SOURCE = new Set(['ichimoku']);
   const installedPackNames = new Set(availPacks.filter((x) => x.valid).map((x) => x.name));
   const notYetInstalled = Object.entries(sources).filter(([, src]) => !installedPackNames.has(src.default_pack_name));
   return (
