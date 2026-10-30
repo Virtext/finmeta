@@ -445,6 +445,49 @@ def test_all_fourteen_elements_together_change_poster():
         f"only {diffs}/{total}px differ ({100*diffs/total:.1f}%) - elements missing")
 
 
+def _edge_columns_touched(ov: Image.Image, base: Image.Image) -> tuple[bool, bool]:
+    """Whether the leftmost/rightmost pixel columns differ from the base poster."""
+    left = any(ov.getpixel((0, y)) != base.getpixel((0, y)) for y in range(ov.height))
+    right = any(ov.getpixel((ov.width - 1, y)) != base.getpixel((ov.width - 1, y)) for y in range(ov.height))
+    return left, right
+
+
+def _status_doc(full_width: bool | None) -> dict:
+    elements = {k: {"enabled": False} for k in ELEMENT_KEYS_ALL}
+    el = {"enabled": True, "position": "top_center"}
+    if full_width is not None:
+        el["full_width"] = full_width
+    elements["status"] = el
+    return {
+        "base_position": "top_left", "margin": 20, "font_size": 30,
+        "bg": "#000000B0", "fg": "#FFFFFF", "radius": 10,
+        "elements": elements,
+    }
+
+
+def test_status_band_defaults_to_full_width_edge_to_edge():
+    """Operator-reported (2026-10-30): no toggle existed for this, so the
+    "status" ribbon always spanned the whole poster. Omitting ``full_width``
+    (an old style doc, or a brand new element) must keep that exact
+    long-standing behaviour -- it reaches both edge columns."""
+    out = render_overlay_png(_poster(1000, 1500), _status_doc(None), values={"status": "ENDED"})
+    ov = Image.open(io.BytesIO(out)).convert("RGB")
+    base = Image.open(io.BytesIO(_poster(1000, 1500))).convert("RGB")
+    left, right = _edge_columns_touched(ov, base)
+    assert left and right, "status ribbon with no full_width set must still be edge-to-edge"
+
+
+def test_status_full_width_false_renders_pill_not_edge_to_edge():
+    """New ``full_width: false`` option: falls through to the same
+    position-anchored text-pill path every other element uses, so a
+    top_center status badge sits in the middle and never touches either edge."""
+    out = render_overlay_png(_poster(1000, 1500), _status_doc(False), values={"status": "ENDED"})
+    ov = Image.open(io.BytesIO(out)).convert("RGB")
+    base = Image.open(io.BytesIO(_poster(1000, 1500))).convert("RGB")
+    left, right = _edge_columns_touched(ov, base)
+    assert not left and not right, "full_width: false must not touch either edge column"
+    # still actually drew something, just not edge-to-edge.
+    assert _pixel_diff(base, ov) > 50
 
 
 # ------------------------------------------------- S9c8: logo packs --------

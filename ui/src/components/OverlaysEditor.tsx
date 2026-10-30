@@ -103,6 +103,7 @@ interface DocElementState {
   color?: string; back_color?: string; radius?: number | null;
   padding_x?: number; padding_y?: number; opacity?: number;
   group?: string; weight?: number;
+  full_width?: boolean;   // "status"/"trending_rank" only — see ElementControls
 }
 export interface OverlayDoc {
   base_position: string; margin: number; font_size: number; bg: string; fg: string;
@@ -178,15 +179,36 @@ export default function OverlaysEditor({ initialLibrary }: Props) {
   // option was removed 2026-10-22) -- any stray "custom" left in an old
   // config is simply dropped from display state here, not an error.
   const [logoPacks, setLogoPacks] = useState<'kometa'[]>([]);
+  // Global config snapshot, kept around just so the "status" element's date
+  // style (status_overlay.date_style — not part of the per-profile style
+  // doc, same setting the Settings page edits) can be changed right here
+  // where the operator is already looking at the TV status element, instead
+  // of only in Settings. Round-tripped through the same PUT /api/config the
+  // Settings page uses — patch one field, re-dump the whole parsed doc.
+  const [globalConfig, setGlobalConfig] = useState<any>(null);
+  const [dateStyleErr, setDateStyleErr] = useState<string | null>(null);
   useEffect(() => {
     getConfig()
       .then((d) => {
+        setGlobalConfig(d.parsed);
         const v = (d.parsed?.overlays?.logo_packs as string[])
           ?? (typeof d.parsed?.overlays?.logo_pack === 'string' ? [d.parsed.overlays.logo_pack] : []);
         setLogoPacks((v ?? []).filter((x): x is 'kometa' => x === 'kometa'));
       })
       .catch(()=>{ /* keep default */ });
   }, []);
+
+  async function setDateStyle(v: string): Promise<void> {
+    if (!globalConfig) return;
+    const updated = {...globalConfig, status_overlay: {...(globalConfig.status_overlay||{}), date_style: v}};
+    setDateStyleErr(null);
+    try {
+      await putConfig(yamlDump(updated, {noRefs:true}));
+      setGlobalConfig(updated);
+    } catch (e: any) {
+      setDateStyleErr(e?.message ?? 'save failed');
+    }
+  }
 
   // S9d4c/2026-10-20: per-profile image packs (category-based matching, e.g.
   // an imported Kometa setup) + "Import Kometa overlay" live together here,
@@ -420,6 +442,7 @@ export default function OverlaysEditor({ initialLibrary }: Props) {
       if (typeof e.padding_x === 'number') el.padding_x = e.padding_x;
       if (typeof e.padding_y === 'number') el.padding_y = e.padding_y;
       if (typeof e.opacity === 'number' && e.opacity < 1.0) el.opacity = e.opacity;
+      if ((key === 'status' || key === 'trending_rank') && e.full_width === false) el.full_width = false;
       payloadElements[key] = el;
     }
     return {...d, elements: payloadElements};
@@ -633,7 +656,9 @@ export default function OverlaysEditor({ initialLibrary }: Props) {
           ) : (
             <ElementControls doc={el} updateElement={updateElement} setRibbonText={(v)=>patchBase('ribbon_text', v)}
                               updateStatusColor={updateStatusColor}
-                              collectionType={scope !== 'global' ? (jfLibs.find((l)=>l.name===scope)?.collection_type ?? null) : null}/>
+                              collectionType={scope !== 'global' ? (jfLibs.find((l)=>l.name===scope)?.collection_type ?? null) : null}
+                              dateStyle={globalConfig?.status_overlay?.date_style ?? 'relative'}
+                              onDateStyleChange={setDateStyle} dateStyleErr={dateStyleErr}/>
           )}
 
           <fieldset className="overlay-fieldset">
@@ -877,10 +902,12 @@ function InstalledPacksSection({
 
 // ---------------------------------------------------------------------------
 
-function ElementControls({doc, updateElement, setRibbonText, updateStatusColor, collectionType}:{
+function ElementControls({doc, updateElement, setRibbonText, updateStatusColor, collectionType,
+                          dateStyle, onDateStyleChange, dateStyleErr}:{
   doc:OverlayDoc; updateElement:(k:string,p:any)=>void; setRibbonText:(v:string|null)=>void;
   updateStatusColor:(statusKey:string, color:string|null)=>void;
   collectionType?: string | null;
+  dateStyle: string; onDateStyleChange: (v: string) => void; dateStyleErr: string | null;
 }) {
   const [openKey, setOpenKey] = useState<string|''>('imdb');
   // Hide elements that can never do anything for this library's type (e.g.
@@ -923,10 +950,30 @@ function ElementControls({doc, updateElement, setRibbonText, updateStatusColor, 
                 <NumField label="Pad Y" value={e.padding_y??6} min={0} max={60} onCommit={(v)=>updateElement(key,{padding_y:v})}/>
                 <RangeSlider label="Opacity" value={e.opacity??1.0} step={0.05} onChange={(v)=>updateElement(key,{opacity:v})}/>
 
+                {(key==='status' || key==='trending_rank') && (
+                  <label className="full-width-toggle">
+                    <input type="checkbox" checked={e.full_width !== false}
+                           onChange={(ev)=>updateElement(key,{full_width:ev.target.checked})}/>
+                    <span>Full-width bar <span className="field-hint muted">(uncheck for a pill sized to the text, using Pad X/Y above)</span></span>
+                  </label>
+                )}
+
                 {key==='ribbon' && (
                   <label className="form-label overlay-ribbon-text">Ribbon text
                     <input type="text" maxLength={120} value={doc.ribbon_text ?? ''} placeholder="(empty = no ribbon)"
                            onChange={(ev)=>setRibbonText(ev.target.value || null)}/>
+                  </label>
+                )}
+
+                {key==='status' && (
+                  <label className="form-label" style={{gridColumn:'span 2'}}>
+                    Date style <span className="field-hint muted">(applies everywhere this element is used, not just this profile)</span>
+                    <select value={dateStyle} onChange={(ev)=>onDateStyleChange(ev.target.value)}>
+                      <option value="relative">relative (TODAY / TOMORROW / weekday / DD.MM)</option>
+                      <option value="classic">classic (always DD.MM)</option>
+                      <option value="weekday">weekday (always a day name, never a date)</option>
+                    </select>
+                    {dateStyleErr && <span className="error">{dateStyleErr}</span>}
                   </label>
                 )}
 

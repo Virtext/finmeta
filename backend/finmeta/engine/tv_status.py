@@ -109,9 +109,17 @@ def _fmt_relative(dt: datetime, now: datetime, date_style: str = "relative") -> 
 
     Operator request (2026-10-26): offer the plain DD.MM-always behaviour
     this replaced as a selectable alternative (``date_style="classic"``),
-    not just the new relative wording -- see config ``status_overlay.date_style``."""
+    not just the new relative wording -- see config ``status_overlay.date_style``.
+
+    Operator request (2026-10-30): a third alternative, ``date_style="weekday"``,
+    always shows the weekday name -- never TODAY/TOMORROW, never a numeric
+    date, even past *_aired dates or dates more than a week out (where the
+    name alone is ambiguous between this week and next -- accepted trade-off,
+    the operator wants names only)."""
     if date_style == "classic":
         return _fmt_date(dt) or ""
+    if date_style == "weekday":
+        return _WEEKDAYS[dt.weekday()].upper()
     delta_days = (dt.date() - now.date()).days
     if delta_days == 0:
         return "TODAY"

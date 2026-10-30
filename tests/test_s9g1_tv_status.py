@@ -223,3 +223,36 @@ def test_classic_date_style_always_uses_date_even_for_today_tomorrow():
     out2 = compute_tv_status(series2, episodes2, now=NOW, date_style="classic")
     expected_date2 = (NOW + timedelta(days=4)).strftime("%d.%m")
     assert out2.label == f"NEW EPISODE {expected_date2}"
+
+
+def test_weekday_date_style_always_uses_a_day_name():
+    """Operator request (2026-10-30): date_style='weekday' always shows the
+    weekday name -- never TODAY/TOMORROW, never a numeric date, regardless
+    of how near or far the date is (unlike 'relative', which falls back to
+    DD.MM beyond a week)."""
+    import calendar
+
+    series = {"status": "continuing", "nextAiring": _dt(0)}
+    episodes = [_ep(2, 1, -20), _ep(2, 2, 0, has_file=False), _ep(2, 3, 10, has_file=False)]
+    out = compute_tv_status(series, episodes, now=NOW, date_style="weekday")
+    assert out.label == f"NEW EPISODE {calendar.day_name[NOW.weekday()].upper()}"
+
+    far = NOW + timedelta(days=20)
+    series2 = {"status": "continuing", "nextAiring": _dt(20)}
+    episodes2 = [_ep(2, 1, -20), _ep(2, 2, 20, has_file=False), _ep(2, 3, 30, has_file=False)]
+    out2 = compute_tv_status(series2, episodes2, now=NOW, date_style="weekday")
+    assert out2.label == f"NEW EPISODE {calendar.day_name[far.weekday()].upper()}"
+
+
+def test_weekday_date_style_also_applies_to_past_aired_dates():
+    """Unlike 'relative' (test_season_finale_aired_recently_still_uses_date_not_relative
+    above, DD.MM for past dates), 'weekday' names every date including the
+    *_aired statuses -- no numeric-date exception."""
+    import calendar
+
+    series = {"status": "continuing", "previousAiring": _dt(-5)}
+    episodes = [_ep(2, 1, -40), _ep(2, 2, -5, finale_type="season")]
+    out = compute_tv_status(series, episodes, now=NOW, recent_days=14, date_style="weekday")
+    assert out.status == "season_finale_aired"
+    past = NOW + timedelta(days=-5)
+    assert out.label == f"SEASON FINALE {calendar.day_name[past.weekday()].upper()}"

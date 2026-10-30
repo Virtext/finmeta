@@ -378,7 +378,11 @@ def _collect_placed(
             if not value:
                 continue  # missing data -> no badge (SPEC §8)
             text = value
-            kind = "band"  # full-width ribbon, drawn separately -- see render_overlay_png
+            # full_width (default True, preserves prior behaviour): a flush
+            # edge-to-edge band, drawn separately below. When off, this falls
+            # through to the normal position-anchored text pill instead
+            # (padding_x/padding_y/radius/position already apply to that path).
+            kind = "band" if el.full_width else "text"
             if key == "status":
                 from finmeta.engine.tv_status import STATUS_COLORS
                 default_bg = (doc.status_colors or {}).get(status_key or "") or STATUS_COLORS.get(status_key or "")

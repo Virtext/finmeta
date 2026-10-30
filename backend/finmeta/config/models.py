@@ -611,12 +611,13 @@ class StatusOverlayConfig(_Strict):
         "season_finale_aired, final_episode_aired): an episode that aired more than this many days "
         "ago no longer counts as 'just happened' and the show falls back to a plain status "
         "(returning/ended) instead. Default 14."})
-    date_style: Literal["relative", "classic"] = Field(
+    date_style: Literal["relative", "classic", "weekday"] = Field(
         default="relative",
         description="How a dated status (e.g. 'NEW SEASON') shows its date on the badge.",
         json_schema_extra={"help": "`relative` (default): TODAY/TOMORROW for the next two days, "
         "the weekday name for days 2-6 out, else DD.MM. `classic`: always DD.MM, regardless of how "
-        "far away the date is."})
+        "far away the date is. `weekday`: always the weekday name (e.g. 'MONDAY'), never a numeric "
+        "date or TODAY/TOMORROW -- ambiguous beyond a week out (operator's choice to accept that)."})
     create_collections: bool = Field(
         default=False,
         description="Also create a Jellyfin collection per status (e.g. 'New Season Soon').",

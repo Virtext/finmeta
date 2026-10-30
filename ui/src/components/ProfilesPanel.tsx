@@ -429,6 +429,8 @@ export default function ProfilesPanel({ onSaved, onEditInOverlays }: Props) {
         forever. Turning this on forces artwork selection to {'`'}random_top_n{'`'} (with at
         least 2 candidates) for the library above — otherwise there is nothing to rotate between.
         Requires the {'`'}poster{'`'} artwork kind to be on and {'`'}dry_run{'`'} off.
+        {' '}Not sure about the cron syntax?{' '}
+        <a href="https://crontab.guru/" target="_blank" rel="noreferrer" className="link">crontab.guru</a>.
       </p>
       <table className="profiles-table">
         <thead><tr><th>Library</th><th>Enabled</th><th>Top N items</th><th>Cron</th></tr></thead>
