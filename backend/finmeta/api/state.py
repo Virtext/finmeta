@@ -66,6 +66,7 @@ class AppContext:
         self._cfg_lock = threading.RLock()
         self._claim_lock = threading.Lock()
         self._active_run: Optional[str] = None
+        self._active_run_scope: Optional[Dict[str, Optional[str]]] = None
         # Jellyfin webhook (ItemAdded): items that arrived while a run was
         # already active, drained one at a time as each run finishes (see
         # run_service._worker) -- never dropped, never piled into one giant
@@ -122,7 +123,7 @@ class AppContext:
         local = getattr(getattr(cfg, "sources", None), "local", None)
         if local is not None and getattr(local, "path", None):
             roots.append(Path(local.path))
-        for sub in ("assets", "backups", "trash", "jellyfin_originals", "cache"):
+        for sub in ("assets", "backups", "trash", "cache"):
             roots.append(self._config_dir / sub)
         for m in getattr(cfg, "path_mappings", []) or []:
             if getattr(m, "local", None):
@@ -421,17 +422,31 @@ class AppContext:
         with self._claim_lock:
             return self._active_run
 
-    def claim_run(self, run_id: str) -> bool:
+    @property
+    def active_run_scope(self) -> Optional[Dict[str, Optional[str]]]:
+        """``{action, library, item_id}`` for whatever ``active_run`` is, or
+        ``None`` when no run is active -- lets a client that reconnects after
+        a page reload (job status was otherwise only ever held in the
+        frontend's own in-memory state, see STATE.md "job status lost on
+        page reload") work out WHICH panel to resume polling into, not just
+        that something is running."""
+        with self._claim_lock:
+            return dict(self._active_run_scope) if self._active_run_scope else None
+
+    def claim_run(self, run_id: str, *, action: Optional[str] = None,
+                  library: Optional[str] = None, item_id: Optional[str] = None) -> bool:
         with self._claim_lock:
             if self._active_run is not None:
                 return False
             self._active_run = run_id
+            self._active_run_scope = {"action": action, "library": library, "item_id": item_id}
             return True
 
     def release_run(self, run_id: str) -> None:
         with self._claim_lock:
             if self._active_run == run_id:
                 self._active_run = None
+                self._active_run_scope = None
 
     def queue_webhook_item(self, item_id: str) -> None:
         """A run was active when the webhook fired -- remember this item so

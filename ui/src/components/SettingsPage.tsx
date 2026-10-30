@@ -497,19 +497,14 @@ function GeneralTab({ configParsed, secrets, helpFor, saveConfigPatch }: {
           onChange={(e) => void saveConfigPatch(['artwork_selection', 'top_n'], Math.max(1, Number(e.target.value) || 1)).catch(() => {})}
         />
       </div>
-      {/* S9d5: global artwork write method (sidecar files vs Jellyfin API upload) */}
+      {/* 2026-10-26: jellyfin_api removed (Jellyfin kept re-asserting a local
+          poster/backdrop/logo file over an API-uploaded one) -- sidecar is
+          now the only write method, so there's nothing left to choose here. */}
       <div className="field-row">
         <label className="field-label">
           artwork_write_method <HelpIcon help={helpFor('artwork_write_method')} />
         </label>
-        <select
-          className="login-input config-input"
-          value={configParsed?.artwork_write_method ?? 'sidecar'}
-          onChange={(e) => void saveConfigPatch(['artwork_write_method'], e.target.value).catch(() => {})}
-        >
-          <option value="sidecar">sidecar</option>
-          <option value="jellyfin_api">jellyfin_api</option>
-        </select>
+        <input className="login-input config-input" value="sidecar" disabled readOnly />
       </div>
       {/* S9d5: backup trash retention (days a superseded backup is kept before deletion) */}
       <div className="field-row">
@@ -523,6 +518,13 @@ function GeneralTab({ configParsed, secrets, helpFor, saveConfigPatch }: {
           onChange={(e) => void saveConfigPatch(['backup_retention_days'], Math.max(0, Number(e.target.value) || 0)).catch(() => {})}
         />
       </div>
+      {/* 2026-10-26 operator request: Sonarr/Radarr-style log download --
+          deliberately a one-shot file, not a live browsable/searchable
+          view, to avoid adding an always-on cost for something used rarely. */}
+      <div className="field-row">
+        <label className="field-label">Download log</label>
+        <a className="btn" href="/api/logs/export">Download log</a>
+      </div>
       {/* S9g1/K7a: TV show status (Sonarr) — recent-days window + optional per-status collections */}
       <div className="field-row">
         <label className="field-label">
@@ -534,6 +536,21 @@ function GeneralTab({ configParsed, secrets, helpFor, saveConfigPatch }: {
           value={configParsed?.status_overlay?.recent_days ?? 14}
           onChange={(e) => void saveConfigPatch(['status_overlay', 'recent_days'], Math.max(0, Number(e.target.value) || 0)).catch(() => {})}
         />
+      </div>
+      {/* 2026-10-26 operator request: pick between the relative wording
+          (TODAY/TOMORROW/weekday) and the plain DD.MM date it replaced. */}
+      <div className="field-row">
+        <label className="field-label">
+          status_overlay.date_style <HelpIcon help={helpFor('status_overlay.date_style')} />
+        </label>
+        <select
+          className="login-input config-input"
+          value={configParsed?.status_overlay?.date_style ?? 'relative'}
+          onChange={(e) => void saveConfigPatch(['status_overlay', 'date_style'], e.target.value).catch(() => {})}
+        >
+          <option value="relative">relative (TODAY / TOMORROW / weekday / DD.MM)</option>
+          <option value="classic">classic (always DD.MM)</option>
+        </select>
       </div>
       <div className="field-row">
         <label className="field-label">

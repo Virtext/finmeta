@@ -231,35 +231,6 @@ class TestExecutorLocksOnFirstApply:
         assert lock["ref"] == "/original/poster.jpg"
         assert lock["sha256"] == "z" * 64
 
-    def test_jellyfin_api_upload_locks_the_kind(self, tmp_path: Path):
-        content = b"LOGO BYTES"
-        sha = hashlib.sha256(content).hexdigest()
-        plan = WritePlan(items=[
-            ItemPlan(
-                item_id="mov001", item_name="Test Movie",
-                media_type="movie", tmdb_id=123, matched_by="provider_id",
-                files=[FileWrite(
-                    target_path="jellyfin-api://mov001/logo",
-                    kind="logo", source_ref=str(tmp_path / "logo.png"),
-                    content_sha256=sha, write_method="jellyfin_api",
-                    meta={"lock_ref": "https://example/logo.png", "lock_sha256": "y" * 64},
-                )],
-            ),
-        ])
-        (tmp_path / "logo.png").write_bytes(content)
-        cfg = _make_config(dry_run=False)
-        jf, tmdb = MagicMock(), MagicMock()
-        db = tmp_path / "jobs.db"
-        cfg_dir = tmp_path / "config"
-        cfg_dir.mkdir()
-
-        apply_plan(plan, "r1", cfg, jf, tmdb, config_dir=cfg_dir, db_path=db, poll_timeout=0.1)
-
-        store = OverrideStore(cfg_dir / "overrides.db")
-        lock = store.get_lock("mov001", "logo")
-        assert lock is not None
-        assert lock["ref"] == "https://example/logo.png"
-
     def test_existing_lock_is_never_overwritten(self, tmp_path: Path):
         content = b"POSTER BYTES"
         sha = hashlib.sha256(content).hexdigest()

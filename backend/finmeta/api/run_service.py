@@ -32,7 +32,7 @@ def submit_run(
 ) -> Tuple[Optional[str], Optional[str]]:
     """Claim the run slot and start a worker. Returns (run_id, error)."""
     run_id = _new_run_id()
-    if not context.claim_run(run_id):
+    if not context.claim_run(run_id, action=action, library=library, item_id=item_id):
         return None, "a run is already in progress"
     import threading
     t = threading.Thread(

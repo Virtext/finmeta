@@ -79,6 +79,7 @@ def health(ctx: AppContext = Depends(get_ctx)) -> dict:
         "config_error": ctx.config_error,
         "dry_run": ctx.config.dry_run,
         "active_run": ctx.active_run,
+        "active_run_scope": ctx.active_run_scope,
     }
 
 

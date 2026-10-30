@@ -204,3 +204,22 @@ def test_season_finale_aired_recently_still_uses_date_not_relative():
     assert out.status == "season_finale_aired"
     expected_date = (NOW + timedelta(days=-5)).strftime("%d.%m")
     assert out.label == f"SEASON FINALE {expected_date}"
+
+
+def test_classic_date_style_always_uses_date_even_for_today_tomorrow():
+    """Operator request (2026-10-26): date_style='classic' opts back into the
+    plain DD.MM wording the relative TODAY/TOMORROW/weekday format replaced,
+    for today/tomorrow/within-the-week cases too, not just the far-out case
+    (which already prints a date either way)."""
+    series = {"status": "continuing", "nextAiring": _dt(0)}
+    episodes = [_ep(2, 1, -20), _ep(2, 2, 0, has_file=False), _ep(2, 3, 10, has_file=False)]
+    out = compute_tv_status(series, episodes, now=NOW, date_style="classic")
+    assert out.status == "upcoming_episode"
+    expected_date = NOW.strftime("%d.%m")
+    assert out.label == f"NEW EPISODE {expected_date}"
+
+    series2 = {"status": "continuing", "nextAiring": _dt(4)}
+    episodes2 = [_ep(2, 1, -20), _ep(2, 2, 4, has_file=False), _ep(2, 3, 10, has_file=False)]
+    out2 = compute_tv_status(series2, episodes2, now=NOW, date_style="classic")
+    expected_date2 = (NOW + timedelta(days=4)).strftime("%d.%m")
+    assert out2.label == f"NEW EPISODE {expected_date2}"

@@ -138,6 +138,24 @@ def test_health(client):
     assert body["version"] == "0.1.0"
     assert body["dry_run"] is True
     assert body["active_run"] is None
+    assert body["active_run_scope"] is None
+
+
+def test_health_reports_active_run_scope_for_page_reload_resume(client):
+    """Job status lost on page reload: a reconnecting client needs to know
+    not just THAT a run is active but which library/item it targets, so it
+    can resume into the right panel."""
+    ctx = client.app.state.context
+    assert ctx.claim_run("resume-test-run", action="apply", library="Movies", item_id=None)
+    try:
+        r = client.get("/api/health")
+        body = r.json()
+        assert body["active_run"] == "resume-test-run"
+        assert body["active_run_scope"] == {"action": "apply", "library": "Movies", "item_id": None}
+    finally:
+        ctx.release_run("resume-test-run")
+    r2 = client.get("/api/health")
+    assert r2.json()["active_run_scope"] is None
 
 
 def test_libraries(client):
@@ -563,12 +581,46 @@ def test_run_invalid_action(client):
 
 # test_runs_list / test_run_undo_no_manifest / test_run_undo_with_manifest were
 # removed with GET /api/runs and POST /api/runs/undo themselves (2026-10-22,
-# operator request -- see docs/SECURITY_REVIEW.md "D1"). Undo as a FEATURE is
+# operator request -- see docs/SECURITY_REVIEW.md "D2"). Undo as a FEATURE is
 # unaffected and still covered at engine level by tests/test_runs.py
 # (restore/delete/manifest) -- the routes were thin wrappers with no caller.
 def test_job_404(client):
     r = client.get("/api/jobs/no-such-run")
     assert r.status_code == 404
+
+
+def test_logs_export_empty(client):
+    """No runs yet -> still a well-formed (non-error) download, not a crash."""
+    r = client.get("/api/logs/export")
+    assert r.status_code == 200
+    assert "attachment" in r.headers["content-disposition"]
+    assert "finmeta-logs-" in r.headers["content-disposition"]
+    assert "no runs logged yet" in r.text
+
+
+def test_logs_export_redacts_secrets_and_includes_run_content(client, context):
+    """Operator request (2026-10-26): a downloadable log, same convention as
+    Sonarr/Radarr's Log Files -- every line must go through the same
+    redact() used elsewhere (D2/secrets.py), even for a secret that leaked
+    into a log line unredacted at write time."""
+    from finmeta.engine.jobs import finish_run, init_db, log, start_run
+    context.secrets.set("jellyfin_api_key", "super-secret-value-123")
+    init_db(context.db_path)
+    start_run(context.db_path, "run-export-test")
+    log(context.db_path, "run-export-test", "info",
+        "apply started scope=lib:Movies")
+    # Deliberately NOT pre-redacted -- this is exactly the case the export's
+    # own redact() pass (not just the write-time one) exists to still catch.
+    log(context.db_path, "run-export-test", "error",
+        "upstream call failed with key=super-secret-value-123")
+    finish_run(context.db_path, "run-export-test", "ok")
+
+    r = client.get("/api/logs/export")
+    assert r.status_code == 200
+    assert "super-secret-value-123" not in r.text
+    assert "run-export-test" in r.text
+    assert "apply started scope=lib:Movies" in r.text
+    assert "upstream call failed with key=" in r.text
 
 
 

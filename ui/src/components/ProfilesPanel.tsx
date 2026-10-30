@@ -25,13 +25,10 @@ export default function ProfilesPanel({ onSaved, onEditInOverlays }: Props) {
   // Which artwork KINDS (poster/backdrop/logo/...) this library writes --
   // libraries.<lib>.artwork.<kind>, all false by default (SPEC: "off by
   // default"). There was previously no UI control for this at all; only
-  // artwork_selection (which candidate wins) and artwork_write_method
-  // (sidecar vs jellyfin_api) had one, both of which are moot with every
-  // kind off -- reported live as "nothing shows, not even a poster" for a
-  // library whose kinds were in fact all still false.
+  // artwork_selection (which candidate wins) had one, which is moot with
+  // every kind off -- reported live as "nothing shows, not even a poster"
+  // for a library whose kinds were in fact all still false.
   const [artworkKinds, setArtworkKinds] = useState<Record<string, Record<string, boolean>>>({});
-  // S9d5: per-library artwork_write_method override (null = inherit global).
-  const [writeMethod, setWriteMethodState] = useState<Record<string, string | null>>({});
   // S9d6: per-library scheduled poster rotation (always present on the
   // model with enabled=false, so no inherit/null case here).
   const [posterRotation, setPosterRotationState] = useState<Record<string, any>>({});
@@ -67,12 +64,6 @@ export default function ProfilesPanel({ onSaved, onEditInOverlays }: Props) {
         ak[n] = (lib?.artwork && typeof lib.artwork === 'object') ? lib.artwork : {};
       }
       setArtworkKinds(ak);
-      // S9d5: per-library artwork_write_method overrides (inherit when unset).
-      const wm: Record<string, string | null> = {};
-      for (const [n, lib] of Object.entries<any>(c.parsed?.libraries ?? {})) {
-        wm[n] = lib?.artwork_write_method ?? null;
-      }
-      setWriteMethodState(wm);
       // S9d6: per-library poster rotation (default off, 5 items, Sun 04:00).
       const pr: Record<string, any> = {};
       for (const [n, lib] of Object.entries<any>(c.parsed?.libraries ?? {})) {
@@ -189,17 +180,6 @@ export default function ProfilesPanel({ onSaved, onEditInOverlays }: Props) {
       else lib.artwork_selection = value;
     });
     if (ok) flash(value ? `“${libName}” artwork selection updated` : `“${libName}” inherits global artwork selection`);
-  }
-
-  // S9d5: set/clear a library's artwork_write_method override.
-  async function setWriteMethod(libName: string, value: string | null) {
-    const ok = await saveConfigWith((doc) => {
-      const lib = doc.libraries?.[libName];
-      if (!lib) throw new Error(`library “${libName}” not in config — add it in Advanced first`);
-      if (value === null) delete lib.artwork_write_method;
-      else lib.artwork_write_method = value;
-    });
-    if (ok) flash(value ? `“${libName}” write method → ${value}` : `“${libName}” inherits global write method`);
   }
 
   // S9d6: merge-patch a library's poster_rotation block.
@@ -434,41 +414,6 @@ export default function ProfilesPanel({ onSaved, onEditInOverlays }: Props) {
                       void setArtworkSelection(l.name, { preset: ov.preset, top_n: n });
                     }}
                   />
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-
-      {/* S9d5: per-library artwork write method override (inherit = global). */}
-      <h3>Artwork write method</h3>
-      <p className="field-hint muted" style={{ marginTop: 0 }}>
-        Per-library override of the global write method ({'`'}libraries.&lt;lib&gt;.artwork_write_method{'`'}).
-        “sidecar” writes poster.jpg/etc. into the media folder; “jellyfin_api” uploads straight to
-        Jellyfin instead. “inherit” uses the General tab value.
-      </p>
-      <table className="profiles-table">
-        <thead><tr><th>Library</th><th>Write method</th></tr></thead>
-        <tbody>
-          {jlibs.map((l) => {
-            const wm = l.configured ? writeMethod[l.name] : null;
-            return (
-              <tr key={l.id}>
-                <td>{l.name}</td>
-                <td>
-                  <select
-                    disabled={!l.configured || busy}
-                    value={wm ?? 'inherit'}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      void setWriteMethod(l.name, v === 'inherit' ? null : v);
-                    }}
-                    title={l.configured ? 'Override the global artwork write method' : 'Add this library in the Advanced tab first'}>
-                    <option value="inherit">inherit</option>
-                    <option value="sidecar">sidecar</option>
-                    <option value="jellyfin_api">jellyfin_api</option>
-                  </select>
                 </td>
               </tr>
             );

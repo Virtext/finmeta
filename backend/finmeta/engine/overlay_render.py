@@ -16,7 +16,7 @@ import io
 import os
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -28,6 +28,7 @@ _ROW_WORDS = ("top", "bottom")          # unambiguous row words
 _COL_WORDS = ("left", "right")          # unambiguous column words
 _BAND_PAD_Y = 10     # extra height (beyond raw text height) for a full-width ribbon band
 _BAND_GAP = 2        # vertical gap between stacked full-width bands
+_BAND_SIDE_PAD = 16  # reference-width px of breathing room on each side of band text
 
 # Operator-reported (2026-10-25): every pixel-based style field (font_size,
 # margin, padding, radius, x/y offset) was applied as a literal pixel value
@@ -333,6 +334,7 @@ def _collect_placed(
     k9m: Optional[Mapping[str, Any]] = None,
     filename: str = "",
     rating_value: Optional[float] = None,
+    sample_keys: Optional[Set[str]] = None,
 ) -> List[_Placed]:
     """Turn style document + item values into placed badges in render order.
 
@@ -394,6 +396,15 @@ def _collect_placed(
                     k9_result=(k9m or {}).get(key), filename=filename,
                     rating_value=rating_value,
                 )
+                logo = _imgs[0] if _imgs else None
+            if logo is None and key in (sample_keys or ()) and packs_profile and config_dir is not None:
+                # "Sample data" placeholder (e.g. "HDR10") has no real k9/filename
+                # match to resolve against -- pick a representative image from the
+                # active pack by name instead, same illustration purpose the legacy
+                # logo_pack fallback below already serves for real (non-sample)
+                # values. Never reached by apply or by a real, non-sample preview.
+                from finmeta.engine.image_pack_resolve import resolve_profile_pack_sample_image
+                _imgs = resolve_profile_pack_sample_image(config_dir, packs_profile, key, value)
                 logo = _imgs[0] if _imgs else None
             if logo is None and key == "network" and config_dir is not None:
                 # Open vocabulary (280+ possible names) -- no flat logo_pack
@@ -469,7 +480,8 @@ def _render_overlay_image(poster_bytes: bytes, style_doc_json: Mapping,
                           packs_profile: Optional[Mapping[str, Any]] = None,
                           k9m: Optional[Mapping[str, Any]] = None,
                           filename: str = "",
-                          rating_value: Optional[float] = None) -> "Image.Image":
+                          rating_value: Optional[float] = None,
+                          sample_keys: Optional[Set[str]] = None) -> "Image.Image":
     """Render ``poster_bytes`` with the posted style document; RGBA PIL image.
 
     The shared core behind both :func:`render_overlay_png` (editor preview,
@@ -483,8 +495,8 @@ def _render_overlay_image(poster_bytes: bytes, style_doc_json: Mapping,
     Deterministic in its inputs and never writes to disk. Missing item values
     simply omit their badges ("missing data → no badge", SPEC §8).
 
-    ``packs_profile``/``k9m``/``filename``/``rating_value`` are passed straight
-    through to ``_collect_placed`` -- see its docstring.
+    ``packs_profile``/``k9m``/``filename``/``rating_value``/``sample_keys`` are
+    passed straight through to ``_collect_placed`` -- see its docstring.
     """
     doc = OverlayStyleDoc(**(dict(style_doc_json or {})))
     base = Image.open(io.BytesIO(poster_bytes)).convert("RGBA")
@@ -503,7 +515,7 @@ def _render_overlay_image(poster_bytes: bytes, style_doc_json: Mapping,
     placed = _collect_placed(doc, dict(values or {}), config_dir, assets_root,
                           logo_pack=(logo_pack or "none"), status_key=status_key,
                           packs_profile=packs_profile, k9m=k9m, filename=filename,
-                          rating_value=rating_value)
+                          rating_value=rating_value, sample_keys=sample_keys)
 
     # Scale every pixel-based field to this poster's actual width (see
     # _poster_scale) so a style tuned at _REFERENCE_WIDTH looks the same
@@ -553,22 +565,29 @@ def _render_overlay_image(poster_bytes: bytes, style_doc_json: Mapping,
         band_placed = sorted(band_placed, key=lambda q: ELEMENT_KEYS.index(q.el_key))
         band_pad_y = max(round(_BAND_PAD_Y * poster_scale), 1)
         band_gap = max(round(_BAND_GAP * poster_scale), 0)
+        band_side_pad = max(round(_BAND_SIDE_PAD * poster_scale), 4)
+        max_text_w = max(pw - 2 * band_side_pad, 10)
+        # Operator-reported (2026-10-26): a band's font_size was applied raw --
+        # raising it enough on a long label (e.g. "SEASON FINALE SATURDAY")
+        # made the text wider than the poster itself, running off both edges.
+        # _fit_band_font shrinks that one element's font just enough to fit,
+        # instead of ever drawing text wider than the poster.
+        fonts_fitted = [_fit_band_font(font, p.size, p.text or "", max_text_w) for p in band_placed]
         heights = []
-        for p in band_placed:
-            fnt = font(p.size)
+        for p, fnt in zip(band_placed, fonts_fitted):
             tb = fnt.getbbox(p.text or "")
             heights.append((tb[3] - tb[1]) + band_pad_y)
         row0, _col0 = _normalize_anchor(band_placed[0].anchor)
         top = row0 == "top"
         y = 0 if top else ph
-        for p, h in zip(band_placed, heights):
+        for p, h, fnt in zip(band_placed, heights, fonts_fitted):
             if not top:
                 y -= h
             # p.y_off nudges this band away from the edge it's flush with
             # (down-positive, same convention as the normal badge stack
             # above) -- the stacking cursor itself (y) is unaffected, so
             # multiple bands keep their relative order regardless of offset.
-            _draw_band(work, p.text or "", font(p.size), y + p.y_off, h, pw, p.bg, p.fg)
+            _draw_band(work, p.text or "", fnt, y + p.y_off, h, pw, p.bg, p.fg)
             y += (h + band_gap) if top else -band_gap
 
     return work
@@ -583,17 +602,24 @@ def render_overlay_png(poster_bytes: bytes, style_doc_json: Mapping,
                        packs_profile: Optional[Mapping[str, Any]] = None,
                        k9m: Optional[Mapping[str, Any]] = None,
                        filename: str = "",
-                       rating_value: Optional[float] = None) -> bytes:
+                       rating_value: Optional[float] = None,
+                       sample_keys: Optional[Set[str]] = None) -> bytes:
     """Render ``poster_bytes`` with the posted style document; PNG output.
 
     Thin encoding wrapper around :func:`_render_overlay_image` -- see its
     docstring for the shared layout engine this and ``render_overlay_jpeg``
-    both use.
+    both use. ``sample_keys`` (preview's "Sample data" toggle only --
+    ``render_overlay_jpeg``/a real apply never has this) names which
+    elements carry a synthetic placeholder value with no real detection to
+    back it; those get a representative pack image by name instead of
+    silently falling to plain text, see ``image_pack_resolve.
+    resolve_profile_pack_sample_image``.
     """
     work = _render_overlay_image(
         poster_bytes, style_doc_json, values=values, config_dir=config_dir,
         assets_root=assets_root, logo_pack=logo_pack, status_key=status_key,
-        packs_profile=packs_profile, k9m=k9m, filename=filename, rating_value=rating_value)
+        packs_profile=packs_profile, k9m=k9m, filename=filename, rating_value=rating_value,
+        sample_keys=sample_keys)
     buf = io.BytesIO()
     work.convert("RGB").save(buf, format="PNG")
     return buf.getvalue()
@@ -672,6 +698,25 @@ def _badge_size(p: _Placed, font) -> Tuple[int, int]:
     tb = font.getbbox(p.text or "")
     tw, th = tb[2] - tb[0], tb[3] - tb[1]
     return (tw + 2 * p.pad_x, th + 2 * p.pad_y)
+
+
+def _fit_band_font(font_loader, size: int, text: str, max_width: int) -> ImageFont.ImageFont:
+    """Largest font no bigger than ``size`` whose rendering of ``text`` fits
+    within ``max_width`` px, down to the same 8px floor the rest of the
+    engine uses (see ``_scale_placed``). Raising a band's configured size
+    beyond what the poster can hold now shrinks the text back down instead
+    of letting it run off the poster's edges."""
+    size = max(int(size), 8)
+    fnt = font_loader(size)
+    if not text:
+        return fnt
+    while size > 8:
+        tb = fnt.getbbox(text)
+        if (tb[2] - tb[0]) <= max_width:
+            return fnt
+        size -= 1
+        fnt = font_loader(size)
+    return fnt
 
 
 def _draw_band(work: Image.Image, text: str, font, y: int, height: int,

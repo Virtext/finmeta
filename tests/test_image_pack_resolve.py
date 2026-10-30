@@ -11,7 +11,9 @@ from pathlib import Path
 
 import pytest
 
-from finmeta.engine.image_pack_resolve import resolve_profile_packs, resolve_profile_pack_image
+from finmeta.engine.image_pack_resolve import (
+    resolve_profile_packs, resolve_profile_pack_image, resolve_profile_pack_sample_image,
+)
 from finmeta.engine.image_pack_matchers import MatchContext
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -246,3 +248,57 @@ class TestCombinedCodec:
             config_dir, profile, "audio", filename="Movie.2020.Atmos.x265-GROUP.mkv")
         assert len(hdr) == 1
         assert len(audio) == 1
+
+
+class TestResolveProfilePackSampleImage:
+    """"Sample data" (operator-reported 2026-10-27): the editor's placeholder
+    values ("HDR10", "Atmos", ...) have no real k9/filename match to resolve
+    a pack image against, so hdr/audio/resolution silently fell back to a
+    text pill even though the Kometa logo pack's own, unrelated sample path
+    (info_pack_key -- maps the TEXT value straight to a file) kept working,
+    making it look like only that pack supported Sample data. This resolver
+    is name-matching only -- never real detection -- and is reached ONLY
+    when the caller (overlay_render._collect_placed) has already marked the
+    element as a sample."""
+
+    def test_matches_key_by_name(self, config_dir):
+        profile = {"packs": ["test_pack"]}
+        images = resolve_profile_pack_sample_image(config_dir, profile, "hdr", "HDR10")
+        assert len(images) == 1
+
+    def test_falls_back_to_first_key_when_nothing_matches(self, config_dir):
+        """No key in the category's vocabulary relates to the placeholder ->
+        still show something (the category's first declared key) rather than
+        nothing, since the whole point is "what would this pack's badge look
+        like", not an exact simulation."""
+        profile = {"packs": ["test_pack"]}
+        images = resolve_profile_pack_sample_image(config_dir, profile, "hdr", "SDR")
+        assert len(images) == 1  # falls back to hdr's first key (hdr10), which has an image
+
+    def test_resolves_via_element_alias(self, config_dir):
+        """jmxd-style packs declare 'video_codec'/'audio_codec', not
+        'hdr'/'audio' -- the alias table must apply here too."""
+        profile = {"packs": ["jmxd_style_pack"]}
+        images = resolve_profile_pack_sample_image(config_dir, profile, "hdr", "HDR10")
+        assert len(images) == 1
+
+    def test_no_packs_configured_returns_empty(self, config_dir):
+        profile = {"elements": ["resolution"]}
+        images = resolve_profile_pack_sample_image(config_dir, profile, "hdr", "HDR10")
+        assert images == []
+
+    def test_unknown_pack_ignored(self, config_dir):
+        profile = {"packs": ["nonexistent_pack"]}
+        images = resolve_profile_pack_sample_image(config_dir, profile, "hdr", "HDR10")
+        assert images == []
+
+    def test_category_with_no_keys_skipped(self, config_dir):
+        """A pack whose category exists but declares no keys at all must not
+        crash -- just skip to the next alias/pack."""
+        profile = {"packs": ["test_pack"]}
+        images = resolve_profile_pack_sample_image(config_dir, profile, "rating", "8.5")
+        # "rating" isn't one of resolution/hdr/audio's aliases, so this pack's
+        # own "rating" category IS tried directly (element name == category
+        # name) -- real keys (gold/silver/bronze) exist, "8.5" matches none
+        # of them by name, falls back to the first declared key.
+        assert len(images) == 1

@@ -177,4 +177,65 @@ def resolve_profile_pack_image(
     return []
 
 
-__all__ = ["resolve_profile_packs", "resolve_profile_pack_image", "ELEMENT_CATEGORY_ALIASES"]
+def _norm(s: str) -> str:
+    return "".join(ch for ch in s.upper() if ch.isalnum())
+
+
+def resolve_profile_pack_sample_image(
+    config_dir: Path,
+    profile: Mapping[str, Any],
+    element: str,
+    placeholder: str,
+) -> List[bytes]:
+    """Preview-only "Sample data" illustration: a representative image from
+    whichever active pack defines this element's category, picked by name
+    alone -- never by real detection.
+
+    The legacy ``logo_pack`` fallback (``info_pack_key``/``load_pack_image_
+    bytes`` in ``overlay_render.py``) already shows a badge under Sample data
+    because it maps the rendered placeholder TEXT (e.g. "HDR10") straight to
+    an image file -- no stream/filename matching involved. The newer pack
+    system (this module) only ever matches real ``k9_result``/``filename``,
+    which Sample data never fakes, so an operator previewing a profile with
+    only a Kometa-import pack active (no "HDR10"-worthy file available) saw
+    the Kometa logo pack "working" under Sample data while jmxd/ichimoku
+    silently didn't (operator-reported 2026-10-27). This gives those packs
+    the same sample-illustration behavior: pick the category key whose name
+    best matches ``placeholder`` (case-insensitive, punctuation-insensitive,
+    substring either direction), else just the category's first declared
+    key, and return that exact image -- no matcher involved, so it works
+    for ``format_rule`` and ``filename_regex`` categories alike.
+
+    Never used by a real apply or by non-sample preview -- those always go
+    through :func:`resolve_profile_pack_image`'s real detection.
+    """
+    pack_names: List[str] = list(profile.get("packs") or [])
+    if not pack_names:
+        return []
+    all_packs = pack_defs(config_dir)
+    aliases = ELEMENT_CATEGORY_ALIASES.get(element, [element])
+    ph = _norm(placeholder)
+    for pname in pack_names:
+        pack = all_packs.get(pname)
+        if pack is None:
+            continue
+        for cat_name in aliases:
+            cat_def = pack.categories.get(cat_name)
+            if cat_def is None or not cat_def.keys:
+                continue
+            chosen = None
+            if ph:
+                for k in cat_def.keys:
+                    kn = _norm(k)
+                    if kn and (kn in ph or ph in kn):
+                        chosen = k
+                        break
+            chosen = chosen or cat_def.keys[0]
+            data = resolve_pack_image(config_dir, pname, cat_name, chosen)
+            if data is not None:
+                return [data]
+    return []
+
+
+__all__ = ["resolve_profile_packs", "resolve_profile_pack_image",
+           "resolve_profile_pack_sample_image", "ELEMENT_CATEGORY_ALIASES"]

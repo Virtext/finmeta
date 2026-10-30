@@ -94,7 +94,7 @@ def _fmt_date(dt: Optional[datetime]) -> Optional[str]:
 _WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
 
-def _fmt_relative(dt: datetime, now: datetime) -> str:
+def _fmt_relative(dt: datetime, now: datetime, date_style: str = "relative") -> str:
     """Operator request (2026-10-21): "today"/"tomorrow" for the next two
     days, the weekday name for days 2-6 out (within one calendar week, so
     "Monday" is never ambiguous between this week and next), DD.MM beyond
@@ -105,7 +105,13 @@ def _fmt_relative(dt: datetime, now: datetime) -> str:
     "NEW EPISODE") -- lowercase/title-case here read as noticeably smaller
     next to that prefix purely from case (no cap-height), not an actual
     font-size difference. Matching the case makes the whole label read as
-    one size."""
+    one size.
+
+    Operator request (2026-10-26): offer the plain DD.MM-always behaviour
+    this replaced as a selectable alternative (``date_style="classic"``),
+    not just the new relative wording -- see config ``status_overlay.date_style``."""
+    if date_style == "classic":
+        return _fmt_date(dt) or ""
     delta_days = (dt.date() - now.date()).days
     if delta_days == 0:
         return "TODAY"
@@ -156,6 +162,7 @@ def compute_tv_status(
     *,
     now: Optional[datetime] = None,
     recent_days: int = 14,
+    date_style: str = "relative",
 ) -> Optional[TvStatus]:
     """Compute one :class:`TvStatus` for a Sonarr series, or ``None`` when
     nothing is worth showing (deleted series, or a stable "continuing" show
@@ -187,7 +194,7 @@ def compute_tv_status(
     if raw_status == "upcoming" or not aired:
         dt = _parse_date(next_airing) or _parse_date(
             min((e.get("airDateUtc") for e in episodes if e.get("airDateUtc")), default=None))
-        return TvStatus("new_series", _label("new_series", dt, now), _iso(dt))
+        return TvStatus("new_series", _label("new_series", dt, now, date_style), _iso(dt))
 
     if raw_status == "ended":
         last_aired = max(
@@ -195,7 +202,7 @@ def compute_tv_status(
         if _is_series_finale(last_aired):
             dt = _parse_date(last_aired.get("airDateUtc"))
             if dt is not None and now - dt <= timedelta(days=recent_days):
-                return TvStatus("final_episode_aired", _label("final_episode_aired", dt, now), _iso(dt))
+                return TvStatus("final_episode_aired", _label("final_episode_aired", dt, now, date_style), _iso(dt))
         return TvStatus("ended", STATUS_LABELS["ended"], None)
 
     # raw_status == "continuing"
@@ -206,10 +213,10 @@ def compute_tv_status(
             season = next_ep.get("seasonNumber") or 0
             num = next_ep.get("episodeNumber") or 0
             if num == 1 and season > 1:
-                return TvStatus("new_season_soon", _label("new_season_soon", dt, now), _iso(dt))
+                return TvStatus("new_season_soon", _label("new_season_soon", dt, now, date_style), _iso(dt))
             if _is_season_finale(next_ep, episodes):
-                return TvStatus("upcoming_finale", _label("upcoming_finale", dt, now), _iso(dt))
-        return TvStatus("upcoming_episode", _label("upcoming_episode", dt, now), _iso(dt))
+                return TvStatus("upcoming_finale", _label("upcoming_finale", dt, now, date_style), _iso(dt))
+        return TvStatus("upcoming_episode", _label("upcoming_episode", dt, now, date_style), _iso(dt))
 
     if prev_airing:
         prev_ep = _episode_for(episodes, prev_airing)
@@ -218,17 +225,17 @@ def compute_tv_status(
             season = prev_ep.get("seasonNumber") or 0
             num = prev_ep.get("episodeNumber") or 0
             if num == 1 and season > 1:
-                return TvStatus("new_season_started", _label("new_season_started", dt, now), _iso(dt))
+                return TvStatus("new_season_started", _label("new_season_started", dt, now, date_style), _iso(dt))
             if _is_season_finale(prev_ep, episodes):
-                return TvStatus("season_finale_aired", _label("season_finale_aired", dt, now), _iso(dt))
+                return TvStatus("season_finale_aired", _label("season_finale_aired", dt, now, date_style), _iso(dt))
 
     return TvStatus("returning", STATUS_LABELS["returning"], None)
 
 
-def _label(status: str, dt: Optional[datetime], now: datetime) -> str:
+def _label(status: str, dt: Optional[datetime], now: datetime, date_style: str = "relative") -> str:
     base = STATUS_LABELS[status]
     if status in _DATED and dt is not None:
-        return f"{base} {_fmt_relative(dt, now)}"
+        return f"{base} {_fmt_relative(dt, now, date_style)}"
     return base
 
 

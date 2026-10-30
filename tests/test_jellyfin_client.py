@@ -582,35 +582,3 @@ class TestClientConnectionOptions:
         assert kw["timeout"] == 30.0
         assert kw["verify"] is True
         assert c.base_path == ""
-
-
-# ---------------------------------------------------------------------------
-# upload_image: real servers Base64-decode the POST body despite the spec
-# saying raw binary (confirmed against Jellyfin 13.0.0 -- raw bytes 500 with
-# "System.FormatException: One of the identified items was in an invalid
-# format."). get_image_bytes (GET) stays raw.
-# ---------------------------------------------------------------------------
-
-class TestUploadImage:
-    @respx.mock
-    def test_body_is_base64_encoded(self):
-        import base64
-        raw = b"\xff\xd8\xff\xe0not-really-a-jpeg"
-        route = respx.post(f"{BASE}/Items/item1/Images/Primary").mock(
-            return_value=httpx.Response(204)
-        )
-        with JellyfinClient(BASE, token="tok", user_id="uid") as c:
-            c.upload_image("item1", "Primary", raw, content_type="image/jpeg")
-        assert route.called
-        sent = route.calls.last.request
-        assert sent.content == base64.b64encode(raw)
-        assert sent.headers["Content-Type"] == "image/jpeg"
-
-    @respx.mock
-    def test_raises_on_non_2xx(self):
-        respx.post(f"{BASE}/Items/item1/Images/Primary").mock(
-            return_value=httpx.Response(500, text="Error processing request.")
-        )
-        with JellyfinClient(BASE, token="tok", user_id="uid") as c:
-            with pytest.raises(JellyfinError):
-                c.upload_image("item1", "Primary", b"abc")

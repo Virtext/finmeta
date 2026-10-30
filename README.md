@@ -133,30 +133,27 @@ written to disk or Jellyfin until you explicitly apply.
 
 ### Media volumes
 
-**`artwork_write_method: sidecar` is the default and the recommended
-setting** — it writes `poster.jpg`/`backdrop.jpg`/etc. straight into the
-media folder next to the video file, the same convention Kometa/TRaSH use.
-It needs two things set up correctly, not just one: `path_mappings` (see
-above) to translate the folder paths Jellyfin reports into paths Finmeta can
-read, *and* your actual media library mounted into the container at that
-same `local:` path — e.g. if `path_mappings` maps Jellyfin's `/data/Movies`
-to local `/media/Movies`, your compose file needs
-`- /path/on/host/Movies:/media/Movies` (or a parent directory covering it),
-writable by the container's user. Skip either one and `sidecar` fails with a
-permission or not-found error on every write.
+**`artwork_write_method: sidecar` is the only write method** — it writes
+`poster.jpg`/`backdrop.jpg`/etc. straight into the media folder next to the
+video file, the same convention Kometa/TRaSH use. It needs two things set up
+correctly, not just one: `path_mappings` (see above) to translate the folder
+paths Jellyfin reports into paths Finmeta can read, *and* your actual media
+library mounted into the container at that same `local:` path — e.g. if
+`path_mappings` maps Jellyfin's `/data/Movies` to local `/media/Movies`,
+your compose file needs `- /path/on/host/Movies:/media/Movies` (or a parent
+directory covering it), writable by the container's user. Skip either one
+and `sidecar` fails with a permission or not-found error on every write.
 
-`jellyfin_api` uploads artwork straight to Jellyfin's own API instead, so
-Finmeta never needs filesystem access to your media — no volume mount, no
-`path_mappings` for writes to work. **Caveat found running against a real
-library:** if the item's media folder already has a local
-poster/backdrop/logo/fanart file sitting next to the video (common for
-scene-release folders, or any library previously scraped by Kodi/Emby-style
-local artwork), Jellyfin's own library scanning keeps re-asserting that
-local file as authoritative — the upload silently "succeeds" every single
-apply, Finmeta's own log says so, but Jellyfin never actually serves the new
-image. Only use `jellyfin_api` for a library you've confirmed has no local
-artwork files already in its media folders; `sidecar` doesn't have this
-failure mode.
+An earlier alternative, `jellyfin_api` (uploading artwork straight to
+Jellyfin's own API, so Finmeta never needed filesystem access to your
+media), was removed 2026-10-26: confirmed running against a real library
+that if the item's media folder already has a local poster/backdrop/logo/
+fanart file sitting next to the video (common for scene-release folders, or
+any library previously scraped by Kodi/Emby-style local artwork), Jellyfin's
+own library scanning keeps re-asserting that local file as authoritative —
+the upload silently "succeeded" every single apply, Finmeta's own log said
+so, but Jellyfin never actually served the new image. That made it
+unreliable for most real libraries.
 
 ### Configuration
 

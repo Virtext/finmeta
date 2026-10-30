@@ -246,3 +246,115 @@ class TestPackDefsCache:
         Image.new("RGB", (4, 4)).save(img)
         pack = next(p for p in load_packs(tmp_path) if p.name == "p1")
         assert pack.missing_images == []
+
+
+# ---------------------------------------------------------------------------
+# DELETE /api/packs/{name} (2026-10-20, operator request to remove an
+# installed pack from the Overlays tab's "Installed packs" list). Moved here
+# from the now-deleted local-path Kometa import test file (2026-10-27) --
+# these never actually needed the Kometa import pipeline, just *some* pack on
+# disk to delete, so they build one directly instead of importing it.
+# ---------------------------------------------------------------------------
+
+class TestDeletePackApi:
+    CONFIG_YAML = "\n".join([
+        "dry_run: true",
+        "server:",
+        "  url: http://fake:8096",
+        "  api_key_env: JELLYFIN_API_KEY",
+        "path_mappings:",
+        "  - jellyfin: /media",
+        "    local: /tmp/fake-media",
+        "libraries:",
+        "  Movies:",
+        "    type: movies",
+        "    metadata:",
+        "      enabled: true",
+    ]) + "\n"
+
+    @pytest.fixture
+    def context(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("JELLYFIN_API_KEY", "fake-key")
+        monkeypatch.setenv("TMDB_KEY", "fake-tmdb-key")
+        monkeypatch.setenv("FINMETA_AUTH", "off")
+        cfg_dir = tmp_path / "config"
+        cfg_dir.mkdir()
+        (cfg_dir / "config.yml").write_text(self.CONFIG_YAML)
+        from finmeta.api import AppContext
+        from finmeta.engine.plan import WritePlan
+        ctx = AppContext(
+            str(cfg_dir / "config.yml"), config_dir=str(cfg_dir),
+            db_path=str(cfg_dir / "jobs.db"), overrides_path=str(cfg_dir / "overrides.db"),
+            plan_builder=lambda *a, **k: WritePlan(items=[]),
+        )
+        return ctx
+
+    @pytest.fixture
+    def client(self, context):
+        from fastapi.testclient import TestClient
+        from finmeta.api import create_app
+        app = create_app(context)
+        with TestClient(app) as c:
+            yield c
+
+    def _write_pack_with_image(self, context, name="media-info-pack"):
+        """A real pack on disk: pack.yml + one image, no Kometa import involved."""
+        d = context.config_dir / "assets" / "packs" / name
+        (d / "images" / "resolution").mkdir(parents=True, exist_ok=True)
+        (d / "pack.yml").write_text(
+            f"name: {name}\ncategories:\n  resolution:\n    matcher: format_rule\n    keys: [res_4k]\n"
+        )
+        from PIL import Image
+        Image.new("RGB", (4, 4)).save(d / "images" / "resolution" / "res_4k.png")
+        return d
+
+    def test_delete_pack_removes_files_and_listing(self, client, context):
+        target = self._write_pack_with_image(context)
+        assert target.is_dir()
+
+        r = client.delete("/api/packs/media-info-pack")
+        assert r.status_code == 200, r.text
+        assert r.json() == {"ok": True, "name": "media-info-pack"}
+        assert not target.exists()
+        assert client.get("/api/packs").json()["packs"] == []
+
+    def test_delete_unknown_pack_404(self, client, context):
+        r = client.delete("/api/packs/does-not-exist")
+        assert r.status_code == 404
+
+    def test_delete_bad_name_400(self, client, context):
+        # A literal "/" in the path segment never reaches our handler at all --
+        # the HTTP layer normalizes "/api/packs/.." away before routing, and
+        # Starlette's {name} path param doesn't match an embedded "/" either.
+        # Either way the real property holds: no traversal ever succeeds (never
+        # a 200, nothing outside assets/packs/ is touched).
+        for bad in ("/api/packs/..%2F..%2Fetc", "/api/packs/.."):
+            r = client.delete(bad)
+            assert r.status_code in (400, 404, 405)
+        # "%2e%2e" (urlencoded ".." with no literal slash) DOES reach the
+        # handler unnormalized -- rejected there by the explicit "." / ".." check.
+        r2 = client.delete("/api/packs/%2e%2e")
+        assert r2.status_code == 400
+        assert context.config_dir.is_dir(), "traversal must never touch anything outside assets/packs/"
+
+    def test_delete_pack_scrubs_profile_references(self, client, context):
+        self._write_pack_with_image(context)
+        cfg_with_profile = self.CONFIG_YAML + "\n".join([
+            "overlays:",
+            "  profiles:",
+            "    Movies-auto:",
+            "      packs: [media-info-pack]",
+            "      pack_overrides:",
+            "        media-info-pack:",
+            "          resolution: {enabled: false}",
+            "",
+        ])
+        r = client.put("/api/config", json={"yaml": cfg_with_profile})
+        assert r.status_code == 200, r.text
+
+        r = client.delete("/api/packs/media-info-pack")
+        assert r.status_code == 200, r.text
+
+        prof = client.get("/api/config").json()["parsed"]["overlays"]["profiles"]["Movies-auto"]
+        assert prof["packs"] == []
+        assert "pack_overrides" not in prof or prof["pack_overrides"] in (None, {})
