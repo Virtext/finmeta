@@ -7,7 +7,6 @@ comma-joined strings.
 """
 from __future__ import annotations
 
-import base64
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence
@@ -386,45 +385,6 @@ class JellyfinClient:
     def count_items(self, parent_id: str, *, recursive: bool = True) -> int:
         return self.get_items_page(parent_id=parent_id, recursive=recursive,
                                    fields=None, limit=1).total_record_count
-
-    # -- images (S9d5: artwork_write_method = "jellyfin_api") ---------------
-    def get_image_bytes(self, item_id: str, image_type: str) -> Optional[bytes]:
-        """Raw bytes of an item's CURRENT image (``GET /Items/{id}/Images/
-        {imageType}``), or ``None`` when the item has no image of that type.
-
-        Used to capture the pre-Finmeta original ONCE for ``jellyfin_api``
-        write mode, the equivalent of ``find_original_backup`` for sidecar
-        files -- there is no local file to back up in this mode, so the
-        original has to be fetched from Jellyfin itself before Finmeta ever
-        uploads anything.
-        """
-        full_path = self.base_path + f"/Items/{item_id}/Images/{image_type}"
-        resp = self._client.get(full_path, headers=self._headers())
-        if resp.status_code == 404:
-            return None
-        self._raise_for(resp)
-        return resp.content
-
-    def upload_image(self, item_id: str, image_type: str, data: bytes,
-                     content_type: str = "image/jpeg") -> None:
-        """Set (overwrite) an item's image (``POST /Items/{id}/Images/
-        {imageType}``). Jellyfin returns 204 on success.
-
-        Despite the OpenAPI spec listing the body as raw ``image/*`` binary,
-        the server unconditionally Base64-decodes it
-        (``MediaBrowser.Providers.Manager.ImageSaver.SaveImageToLocation``
-        pipes the request stream through a ``FromBase64Transform``) -- a
-        spec/implementation mismatch confirmed against a real server
-        (13.0.0), which raw bytes fail with ``System.FormatException: One of
-        the identified items was in an invalid format.`` Content-Type stays
-        the real image mime type; only the body needs encoding.
-        """
-        full_path = self.base_path + f"/Items/{item_id}/Images/{image_type}"
-        headers = self._headers()
-        headers["Content-Type"] = content_type
-        resp = self._client.post(full_path, headers=headers,
-                                 content=base64.b64encode(data))
-        self._raise_for(resp)
 
     def refresh_item(self, item_id: str, *,
                      metadata_refresh_mode: str = "FullRefresh",

@@ -29,7 +29,6 @@ from finmeta.engine.nfo import (
     episode_nfo, movie_nfo, nfo_sha256, season_nfo, tvshow_nfo,
 )
 from finmeta.engine import trash
-from finmeta.engine.jellyfin_originals import KIND_TO_IMAGE_TYPE
 from finmeta.engine.overlay import prune_overlay_cache, read_overlay_cache
 from finmeta.engine.plan import ApiAction, FileWrite, ItemPlan, WritePlan
 from finmeta.engine.runs import (
@@ -320,7 +319,7 @@ def apply_plan(
     manifest = Manifest(run_id=run_id)
     item_by_id: Dict[str, ItemPlan] = {ip.item_id: ip for ip in plan.items}
 
-    # -- 1+2: backups + atomic file writes (or Jellyfin API uploads) -------
+    # -- 1+2: backups + atomic file writes ----------------------------------
     for item in plan.items:
         for fw in item.files:
             if fw.status == "unchanged":
@@ -351,35 +350,6 @@ def apply_plan(
                 logger.warning(msg)
                 result.errors.append(msg)
                 log(db_path, run_id, "warn", msg)
-                continue
-
-            if fw.write_method == "jellyfin_api":
-                # S9d5: upload straight to Jellyfin instead of writing a
-                # sidecar file -- no local target, no backup (Jellyfin keeps
-                # its own prior image; O7's "original" is instead handled at
-                # plan-build time via engine.jellyfin_originals).
-                image_type = KIND_TO_IMAGE_TYPE.get(fw.kind)
-                if image_type is None:
-                    msg = f"no Jellyfin ImageType for kind {fw.kind!r} ({fw.target_path})"
-                    logger.error(msg)
-                    result.errors.append(msg)
-                    log(db_path, run_id, "error", msg)
-                    continue
-                content_type = "image/png" if fw.kind == "logo" else "image/jpeg"
-                try:
-                    jf.upload_image(item.item_id, image_type, content, content_type=content_type)
-                except Exception as exc:
-                    msg = f"jellyfin upload failed for {fw.target_path}: {exc}"
-                    logger.error(msg)
-                    result.errors.append(msg)
-                    log(db_path, run_id, "error", msg)
-                    continue
-                manifest.files.append(RunFile(
-                    path=fw.target_path, status="overwrite", backup_relpath=None,
-                ))
-                result.files_written += 1
-                log(db_path, run_id, "info", f"uploaded {fw.kind} {fw.target_path}")
-                _maybe_lock_artwork(fw, item.item_id, config_dir)
                 continue
 
             target = Path(fw.target_path)
@@ -422,11 +392,6 @@ def apply_plan(
     # "unchanged") must not refresh or poll (no 120s timeout).
     image_items: List[str] = []
     theme_items: List[str] = []
-    # Items whose image writes this run were ALL jellyfin_api (no sidecar
-    # image write among them) -- the upload already set the new ImageTag
-    # directly, so the post-write refresh must not ask Jellyfin to re-scan
-    # images from scratch.
-    api_only_image_items: set[str] = set()
     for item in plan.items:
         # Only files actually written this run (status != "unchanged") matter.
         written = [fw for fw in item.files if fw.status != "unchanged"]
@@ -435,8 +400,6 @@ def apply_plan(
         has_theme = any(fw.kind == "theme_song" for fw in written)
         if image_writes:
             image_items.append(item.item_id)
-            if not any(fw.write_method == "sidecar" for fw in image_writes):
-                api_only_image_items.add(item.item_id)
         if has_theme:
             theme_items.append(item.item_id)
 
@@ -452,18 +415,7 @@ def apply_plan(
 
     for iid in set(image_items + theme_items):
         try:
-            if iid in api_only_image_items:
-                # A full image-replacing refresh (the default below) makes
-                # Jellyfin re-scan any LOCAL image files still sitting next
-                # to the media and silently revert straight back to them --
-                # reported live: an item whose folder already has a local
-                # poster.jpg/fanart.jpg/etc. always ended up serving that
-                # unchanged local file, never the just-uploaded overlay,
-                # because this refresh ran with replaceAllImages=true right
-                # after every jellyfin_api upload, every single apply.
-                jf.refresh_item(iid, image_refresh_mode="None", replace_all_images=False)
-            else:
-                jf.refresh_item(iid)
+            jf.refresh_item(iid)
             log(db_path, run_id, "info", f"refresh {iid}")
         except Exception as exc:
             logger.warning("refresh failed for %s: %s", iid, exc)

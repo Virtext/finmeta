@@ -29,11 +29,13 @@ class FileWrite(BaseModel):
     source_ref: str
     content_sha256: str
     status: FileStatus = "create"
-    write_method: Literal["sidecar", "jellyfin_api"] = Field(
+    write_method: Literal["sidecar"] = Field(
         default="sidecar",
-        description="S9d5: 'sidecar' writes target_path on disk (v1 default); "
-                    "'jellyfin_api' instead uploads to Jellyfin -- target_path is then a "
-                    "synthetic 'jellyfin-api://<item_id>/<kind>' identifier, not a real path.")
+        description="S9d5: writes target_path on disk. The only write method -- "
+                    "'jellyfin_api' (API image upload) was removed 2026-10-26: Jellyfin's own "
+                    "library scan kept re-asserting any local poster/backdrop/logo file over an "
+                    "API-uploaded one, so it could never reliably override an item that already "
+                    "had local artwork.")
     meta: Dict[str, Any] = Field(
         default_factory=dict,
         description="Optional metadata (e.g. K9 format-rule detection facts for this file).")

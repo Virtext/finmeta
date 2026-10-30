@@ -31,7 +31,6 @@ from finmeta.engine.artwork_selection import (
     effective_selection, select_candidate,
 )
 from finmeta.engine.runs import DEFAULT_CONFIG_DIR
-from finmeta.engine.jellyfin_originals import get_or_fetch_original, original_cache_path
 from finmeta.engine.tv_status import TvStatus
 from finmeta.engine.collection_presets import (
     KNOWN_PRESETS, SEASONAL_CALENDAR, is_holiday_active_now,
@@ -139,7 +138,6 @@ def _overlay_poster(
     packs_profile: Optional[dict] = None,
     logo_packs: Optional[List[str]] = None,
     assets_root: Optional[str] = None,
-    write_method: str = "sidecar",
     status_label: Optional[str] = None,
     status_key: Optional[str] = None,
     trending_rank: Optional[int] = None,
@@ -149,11 +147,8 @@ def _overlay_poster(
     """Build the overlaid-poster FileWrite for one item, or None on failure.
 
     The poster is always rendered from the original (backup if a prior run
-    saved one, else the candidate) so re-runs never stack badges (O7). In
-    ``"jellyfin_api"`` write mode (S9d5) that original instead comes from
-    ``engine.jellyfin_originals.get_or_fetch_original`` and the FileWrite's
-    ``target_path`` is a synthetic ``jellyfin-api://<item_id>/poster``
-    identifier -- see ``overlay_file_write``'s docstring.
+    saved one, else the candidate) so re-runs never stack badges (O7) -- see
+    ``overlay_file_write``'s docstring.
 
     Rendering goes through ``engine.overlay_render.render_overlay_jpeg`` --
     the SAME per-element layout engine the editor preview uses, driven by
@@ -211,19 +206,16 @@ def _overlay_poster(
     k9m = {"resolution": det.get("resolution"), "hdr": det.get("dynamic_range"), "audio": det.get("audio")}
     item_fc = _item_format_counts(streams, format_rules, det=det)
     fw_target: Any = target
-    original_override: Optional[bytes] = None
-    original_ref_override: Optional[str] = None
-    if write_method == "jellyfin_api":
-        fw_target = f"jellyfin-api://{item.id}/poster"
-        if config_dir is not None and not is_override:
-            orig = get_or_fetch_original(jf, item.id, "poster", config_dir)
-            if orig is not None:
-                original_override = orig
-                original_ref_override = str(original_cache_path(config_dir, item.id, "poster"))
     from finmeta.engine.overlay_render import render_overlay_jpeg
     logo_packs = [p for p in (logo_packs or []) if p and p != "none"]
-    _item_name = getattr(item, "name", None)
-    filename = Path(_item_name).stem if _item_name else ""
+    # filename_regex pack categories (edition/video_codec/audio_codec/...) match
+    # against the actual media FILE's name (scene-release tags like "DV"/"HDR10"/
+    # "TrueHD.7.1.Atmos") -- item.name is Jellyfin's clean display title (e.g. "The
+    # Matrix") and never contains those, so every such badge silently never matched
+    # (found 2026-10-27: jmxd-media-info pack showed only its format_rule-based
+    # resolution badge, nothing filename-based, in both preview and a real apply).
+    _item_path = getattr(item, "path", None)
+    filename = Path(_item_path).stem if _item_path else ""
 
     def _render(poster: bytes) -> bytes:
         return render_overlay_jpeg(
@@ -235,9 +227,7 @@ def _overlay_poster(
 
     fw = overlay_file_write(
         target_path=fw_target, candidate_bytes=poster_bytes, candidate_ref=cand.ref,
-        render_fn=_render, config_dir=config_dir,
-        original_override=original_override, original_ref_override=original_ref_override,
-        write_method=write_method, is_override=is_override,
+        render_fn=_render, config_dir=config_dir, is_override=is_override,
     )
     if item_fc:
         fw.meta["format_counts"] = item_fc
@@ -540,7 +530,6 @@ def _build_movie_plan(
 
     # S9d4a: gather all ranked candidates, then pick per the selection preset.
     sel = _effective_selection(cfg, lib)
-    write_method = _effective_write_method(cfg, lib)
     # S9g2/K7b: top-10 rank on a trending list with rank_overlay on, if any.
     trending_rank = (trending_index or {}).get(match.tmdb_id)
     # S9d5: locked image kinds skip source resolution entirely (no new
@@ -569,7 +558,6 @@ def _build_movie_plan(
                 packs_profile=_profile_for(lib, cfg),
                 logo_packs=list(getattr(cfg.overlays, "logo_packs", None) or []),
                 assets_root=getattr(getattr(cfg.sources, "local", None), "path", None),
-                write_method=write_method,
                 trending_rank=trending_rank,
                 is_override=kind in overridden_kinds,
                 rating_values=rating_values,
@@ -584,22 +572,16 @@ def _build_movie_plan(
         except Exception as exc:
             logger.warning("content hash failed for %s (%s): %s", item.name, kind, exc)
             continue
-        # S9d5: metadata/theme_song are always sidecar (no Jellyfin API for
-        # either) -- only the four image kinds can use jellyfin_api.
-        use_api = write_method == "jellyfin_api" and kind in (
-            "poster", "backdrop", "logo", "landscape")
         meta: Dict[str, Any] = {"overridden": True} if kind in overridden_kinds else {}
         if kind in ("poster", "backdrop", "logo", "landscape"):
             meta["lock_ref"] = cand.ref
             meta["lock_sha256"] = sha
         files.append(FileWrite(
-            target_path=(f"jellyfin-api://{item.id}/{kind}" if use_api
-                        else str(base / fname)),
+            target_path=str(base / fname),
             kind=kind,  # type: ignore[arg-type]
             source_ref=cand.ref,
             content_sha256=sha,
             meta=meta,
-            write_method="jellyfin_api" if use_api else "sidecar",
         ))
 
     format_counts = _aggregate_format_counts(files)
@@ -675,7 +657,8 @@ def _build_tvshow_plan(
     # S9g1/K7a: TV show status from Sonarr (used by the "status" overlay
     # element below and by status-based collections in _build_api_actions).
     tv_status_obj = _tv_status_for_item(
-        item, sonarr_index, config_dir, recent_days=cfg.status_overlay.recent_days)
+        item, sonarr_index, config_dir, recent_days=cfg.status_overlay.recent_days,
+        date_style=cfg.status_overlay.date_style)
 
     # Artwork
     artwork_kinds: List[str] = []
@@ -689,7 +672,6 @@ def _build_tvshow_plan(
         artwork_kinds.append("theme_song")
 
     sel = _effective_selection(cfg, lib)
-    write_method = _effective_write_method(cfg, lib)
     trending_rank = (trending_index or {}).get(match.tmdb_id)
     locked = _locked_candidates(item.id, artwork_kinds, config_dir)
     kinds_to_resolve = [k for k in artwork_kinds if k not in locked]
@@ -717,7 +699,6 @@ def _build_tvshow_plan(
                 packs_profile=_profile_for(lib, cfg),
                 logo_packs=list(getattr(cfg.overlays, "logo_packs", None) or []),
                 assets_root=getattr(getattr(cfg.sources, "local", None), "path", None),
-                write_method=write_method,
                 status_label=tv_status_obj.label if tv_status_obj else None,
                 status_key=tv_status_obj.status if tv_status_obj else None,
                 trending_rank=trending_rank,
@@ -734,20 +715,16 @@ def _build_tvshow_plan(
         except Exception as exc:
             logger.warning("content hash failed for %s (%s): %s", item.name, kind, exc)
             continue
-        use_api = write_method == "jellyfin_api" and kind in (
-            "poster", "backdrop", "logo", "landscape")
         meta: Dict[str, Any] = {"overridden": True} if kind in overridden_kinds else {}
         if kind in ("poster", "backdrop", "logo", "landscape"):
             meta["lock_ref"] = cand.ref
             meta["lock_sha256"] = sha
         files.append(FileWrite(
-            target_path=(f"jellyfin-api://{item.id}/{kind}" if use_api
-                        else str(base / fname)),
+            target_path=str(base / fname),
             kind=kind,  # type: ignore[arg-type]
             source_ref=cand.ref,
             content_sha256=sha,
             meta=meta,
-            write_method="jellyfin_api" if use_api else "sidecar",
         ))
 
     format_counts = _aggregate_format_counts(files)
@@ -763,7 +740,7 @@ def _build_tvshow_plan(
 
 def _tv_status_for_item(
     item: Item, sonarr_index: Optional[Dict[str, Any]], config_dir: Optional[Path],
-    *, recent_days: int = 14,
+    *, recent_days: int = 14, date_style: str = "relative",
 ) -> Optional[TvStatus]:
     """S9g1/K7a: compute this show's TvStatus, or None (no match / no Sonarr
     configured / any failure). Best-effort -- status is a nice-to-have
@@ -780,7 +757,7 @@ def _tv_status_for_item(
     try:
         from finmeta.engine.tv_status import compute_tv_status
         episodes = client.episodes(series_row["id"])
-        return compute_tv_status(series_row, episodes, recent_days=recent_days)
+        return compute_tv_status(series_row, episodes, recent_days=recent_days, date_style=date_style)
     except Exception as exc:
         logger.warning("Sonarr status lookup failed for %s: %s", item.name, exc)
         return None
@@ -885,11 +862,6 @@ def fetch_seasonal_mdblist_items(cfg: Config, secrets) -> List[Any]:
     except Exception as exc:
         logger.warning("seasonal mdblist fetch failed (%r): %s", christmas.mdblist_url, exc)
         return []
-
-
-def _effective_write_method(cfg: Config, lib_cfg) -> str:
-    """S9d5: global artwork_write_method + per-library override (None = inherit)."""
-    return getattr(lib_cfg, "artwork_write_method", None) or cfg.artwork_write_method
 
 
 def _effective_selection(cfg: Config, lib_cfg):

@@ -154,25 +154,26 @@ FEATURES: Dict[str, Dict[str, str]] = {
                      "long": "Mirrors public MDBList lists as Jellyfin collections, optionally "
                              "tagging the top 10 matched items with their rank as an overlay badge. "
                              "Needs an MDBList API key saved under Settings > Secrets."},
-    "feature.kometa_import": {"short": "Import Kometa overlay",
+    "feature.kometa_import": {"short": "Download a known overlay pack",
         "long": "Brings in badge/overlay images (resolution, HDR, audio codec, edition, etc.) "
-                "from an existing Kometa-style overlay setup you already have on disk — Finmeta "
-                "never ships or bundles these itself (they're other people's images, usually "
-                "with no licence file). You need two paths: the overlay YAML file itself (e.g. "
-                "`media_info.yml` — the file that defines which filename/stream pattern maps to "
-                "which image), and the Kometa root folder that holds the actual PNG files those "
-                "rules point at (either the top-level Kometa folder, or directly its `images` "
-                "subfolder). Always run with dry run first — it shows exactly which images would "
-                "be copied and flags any that are missing, without writing anything. A real "
-                "import copies only the referenced images (plus a small `pack.yml` describing "
-                "them) into `config/assets/packs/<pack name>/` — nothing else from the source "
-                "folder is touched or needed again afterward. After importing, activate the pack "
-                "for a profile under Overlays > Installed packs, and make sure the profile's "
-                "elements (Resolution/HDR/Audio) are turned on. Note: HDR/Audio/Edition badges "
-                "are matched against the video file's filename (standard scene-release tags like "
-                "`HDR10` or `Atmos`) — a plainly-named file (e.g. `Movie (2020).mkv`) won't get "
-                "those badges no matter which pack is active. Only Resolution is detected from "
-                "the actual video stream, independent of filename."},
+                "from a known third-party Kometa-style overlay source — Finmeta fetches it for "
+                "you (no local copy needed first) and never ships or bundles these itself "
+                "(they're other people's images, usually with no licence file). Pick a source "
+                "from the list, give the pack a name, and run Preview first — it downloads the "
+                "source, shows exactly which images would be copied, and flags any that are "
+                "missing, without writing anything. Download & Import copies only the referenced "
+                "images (plus a small `pack.yml` describing them) into "
+                "`config/assets/packs/<pack name>/` — nothing else from the source is kept "
+                "afterward. After importing, activate the pack for a profile under Overlays > "
+                "Installed packs, and make sure the profile's elements (Resolution/HDR/Audio) "
+                "are turned on. Note: not every Kometa-style source works — only ones that "
+                "define their own image+condition per badge; sources that just reference "
+                "Kometa's own built-in default overlays by name, or match via Plex collection "
+                "membership, can't be translated and come back empty. Also: HDR/Audio/Edition "
+                "badges are matched against the video file's filename (standard scene-release "
+                "tags like `HDR10` or `Atmos`) — a plainly-named file (e.g. `Movie (2020).mkv`) "
+                "won't get those badges no matter which pack is active. Only Resolution is "
+                "detected from the actual video stream, independent of filename."},
     "auth": {"short": "Authentication",
              "long": "On first run you set an admin password (stored as a bcrypt hash in "
                      "`auth.yml`). Every `/api` route except `/api/health` and login requires a "
@@ -210,24 +211,18 @@ FEATURES: Dict[str, Dict[str, str]] = {
                 "newly-added Jellyfin library can't be written to by surprise. Collections, "
                 "playlists and schedules all reference libraries by this chosen name, not "
                 "Jellyfin's own internal id — renaming a library here breaks those references."},
-    "guide.write_method": {"short": "Artwork write method: sidecar vs. jellyfin_api vs. inherit",
-        "long": "`sidecar` (the default, and the recommended one) writes `poster.jpg`/"
-                "`backdrop.jpg`/etc. straight into the media folder next to the video file — the "
-                "same convention Kometa/TRaSH use; Jellyfin picks these up on its next scan. "
-                "`jellyfin_api` never touches the media folder at all — it uploads the image "
-                "directly into Jellyfin's own database over its API, useful when Finmeta's "
-                "filesystem view of the library doesn't line up with Jellyfin's exactly (different "
-                "mount paths, container volume quirks), or when you simply don't want extra image "
-                "files appearing next to your media. Caveat found running against a real library: "
-                "if the item's media folder already has a local poster/backdrop/logo/fanart file "
-                "sitting next to the video (common for scene-release folders or anything previously "
-                "scraped by Kodi/Emby-style local artwork), Jellyfin's own library scanning keeps "
-                "re-asserting that local file — the upload \"succeeds\" every apply, but Jellyfin "
-                "never actually serves the new image. Only use `jellyfin_api` for a library you've "
-                "confirmed has no local artwork files already in its media folders. Each library can "
-                "override the global choice; leaving a library's override unset (\"inherit\") just "
-                "means that library follows whichever method is set globally — only give a library "
-                "its own value when it genuinely needs to differ from the rest."},
+    "guide.write_method": {"short": "Artwork write method: sidecar",
+        "long": "`sidecar` is the only write method: Finmeta writes `poster.jpg`/`backdrop.jpg`/etc. "
+                "straight into the media folder next to the video file — the same convention "
+                "Kometa/TRaSH use; Jellyfin picks these up on its next scan. An alternative, "
+                "`jellyfin_api`, used to upload the image directly into Jellyfin's own database over "
+                "its API instead of touching the media folder. It was removed 2026-10-26: confirmed "
+                "running against a real library that when the item's media folder already has a "
+                "local poster/backdrop/logo/fanart file sitting next to the video (common for "
+                "scene-release folders or anything previously scraped by Kodi/Emby-style local "
+                "artwork), Jellyfin's own library scanning keeps re-asserting that local file — the "
+                "upload \"succeeded\" every apply, but Jellyfin never actually served the new image. "
+                "That made it unreliable for most real libraries, so sidecar is now the only option."},
 }
 
 

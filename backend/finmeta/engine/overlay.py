@@ -322,9 +322,6 @@ def overlay_file_write(
     style: Optional[OverlayStyle] = None,
     render_fn: Optional[Callable[[bytes], bytes]] = None,
     config_dir: Optional[Path] = None,
-    original_override: Optional[bytes] = None,
-    original_ref_override: Optional[str] = None,
-    write_method: str = "sidecar",
     is_override: bool = False,
 ) -> FileWrite:
     """Produce the overlaid-poster ``FileWrite`` for an item (SPEC \u00a78, O7).
@@ -339,15 +336,9 @@ def overlay_file_write(
     shared-margin/radius engine) when ``render_fn`` is omitted.
 
     The rendered poster is always built from the *original* poster, so
-    re-runs never stack badges (O7). In ``"sidecar"`` write mode (the
-    default) that original is the oldest backup of ``target_path`` when a
-    prior run saved one (via ``find_original_backup``), otherwise the
-    freshly resolved candidate. In ``"jellyfin_api"`` mode there is no local
-    ``target_path`` to look a backup up under -- the caller
-    (``plan_builder._overlay_poster``) instead resolves the original itself
-    via ``engine.jellyfin_originals.get_or_fetch_original`` and passes it as
-    ``original_override``/``original_ref_override``, which take priority over
-    the local-backup lookup and skip it entirely.
+    re-runs never stack badges (O7): that original is the oldest backup of
+    ``target_path`` when a prior run saved one (via ``find_original_backup``),
+    otherwise the freshly resolved candidate.
 
     ``is_override`` (fixed 2026-10-20, operator-reported "picking a new
     poster candidate does nothing"): the stored backup/cache is the
@@ -375,10 +366,7 @@ def overlay_file_write(
     original_ref = candidate_ref
     if is_override:
         pass   # freshly fetched candidate_bytes already ARE the original
-    elif original_override is not None:
-        original_bytes = original_override
-        original_ref = original_ref_override or candidate_ref
-    elif write_method == "sidecar" and config_dir is not None:
+    elif config_dir is not None:
         bk = find_original_backup(Path(target_path), config_dir=config_dir)
         if bk is not None:
             original_bytes = bk.read_bytes()
@@ -397,7 +385,6 @@ def overlay_file_write(
         kind="poster",
         source_ref=original_ref,
         content_sha256=digest,
-        write_method=write_method,  # type: ignore[arg-type]
         # S9d5: the CLEAN (non-overlaid) base this was rendered from -- what
         # engine.executor locks on first successful apply so later runs never
         # re-query sources for this item+kind (see OverrideStore.set_lock).

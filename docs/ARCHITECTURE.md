@@ -118,10 +118,10 @@ dependencies below are all either *data imports the user triggers* or
 Finmeta ships with session-based auth (bcrypt-hashed admin password,
 `HttpOnly`/`SameSite=Strict` cookies), encrypted-at-rest secrets when
 `FINMETA_SECRET_KEY` is set, a locked-down `/api/proxy` that only ever
-fetches from the configured metadata-provider allowlist, and a filesystem
-browse endpoint restricted to `/import` plus whatever extra roots an
-operator explicitly opts in via `FINMETA_FS_BROWSE_ROOTS`. Dependency
-versions are kept current against known CVEs (Pillow and `certifi` in
+fetches from the configured metadata-provider allowlist, and a size-capped,
+http/https-only, zip-slip-safe downloader for the one known third-party
+overlay source an operator can opt into importing. Dependency versions are
+kept current against known CVEs (Pillow and `certifi` in
 particular are pinned to CVE-patched minimums).
 
 ## 5. Testing

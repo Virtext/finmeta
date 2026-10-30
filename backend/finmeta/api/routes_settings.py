@@ -351,7 +351,8 @@ def _overlay_preview_source(
                         sonarr_index = build_sonarr_index(cfg, ctx.secrets)
                     tv_status_obj = _tv_status_for_item(
                         item, sonarr_index, ctx.config_dir,
-                        recent_days=cfg.status_overlay.recent_days)
+                        recent_days=cfg.status_overlay.recent_days,
+                        date_style=cfg.status_overlay.date_style)
                     if tv_status_obj:
                         status_key = tv_status_obj.status
                         status_label = tv_status_obj.label
@@ -409,8 +410,11 @@ def _overlay_preview_source(
     _det = _detect_all(streams or [], rules)
     k9m = {"resolution": _det.get("resolution"), "hdr": _det.get("dynamic_range"),
            "audio": _det.get("audio")}
-    _item_name = getattr(item, "name", None)
-    filename = _Path(_item_name).stem if _item_name else ""
+    # Same fix as plan_builder._overlay_poster (2026-10-27): filename_regex pack
+    # categories match against the actual media FILE's name, not item.name
+    # (Jellyfin's clean display title) -- see that module for the full story.
+    _item_path = getattr(item, "path", None)
+    filename = _Path(_item_path).stem if _item_path else ""
 
     sample: set[str] = set()
     # Preview-only placeholders: ONLY when the editor's explicit "Sample data"
@@ -562,7 +566,8 @@ def overlays_preview(body: OverlayPreviewIn, ctx: AppContext = Depends(get_ctx))
             png = render_overlay_png(
                 poster_bytes, doc_json, values=values,
                 config_dir=ctx.config_dir, assets_root=_local_root, logo_pack=_packs,
-                status_key=status_key, packs_profile=prof, k9m=k9m, filename=filename)
+                status_key=status_key, packs_profile=prof, k9m=k9m, filename=filename,
+                sample_keys=sample)
             b64 = base64.b64encode(png).decode("ascii")
             entry["image"] = f"data:image/png;base64,{b64}"
             # Which overlay cells are synthetic (no real data) so the UI can tag them.

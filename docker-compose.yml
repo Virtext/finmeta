@@ -22,9 +22,6 @@ services:
       - ./config:/config
       # Must match a `path_mappings` entry in config.yml.
       - /path/to/your/media:/media
-      # Optional, read-only: lets you import an existing Kometa config/packs
-      # from the UI without granting write access to it.
-      # - /path/to/kometa:/import/kometa:ro
     ports:
       - "8765:8765"
     restart: unless-stopped

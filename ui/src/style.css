@@ -266,6 +266,9 @@ button { font: inherit; cursor: pointer; }
 .btn {
   padding: 6px 14px; border-radius: 8px; border: 1px solid var(--border);
   background: var(--bg-3); color: var(--fg); cursor: pointer;
+  /* .btn is also used on an <a> (e.g. the log-export download link) --
+     reset the anchor defaults a <button> never had to begin with. */
+  display: inline-block; text-decoration: none;
 }
 /* S9d4b step 5: create/update are status badges, NOT button-styled. */
 .file-status { background: transparent; }
@@ -612,14 +615,6 @@ button { font: inherit; cursor: pointer; }
 .kometa-report { border:1px solid var(--border); border-radius:var(--radius); padding:8px 10px; font-size:0.85rem; }
 .kometa-notes summary { cursor:pointer; font-size:0.85rem; margin-bottom:4px; }
 .kometa-notes ul { margin:4px 0 0 18px; padding:0; }
-
-/* S9e4: fs browse picker in the Kometa import panel */
-.fs-browse { margin-top: 6px; border: 1px solid var(--border, #ccc); border-radius: 6px; padding: 6px; max-height: 220px; overflow-y: auto; }
-.fs-browse-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
-.fs-browse-entry { display: flex; gap: 6px; align-items: center; margin-top: 3px; }
-.fs-browse-dir { max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fs-browse-file { max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: monospace; font-size: 12px; }
-.fs-browse-btn { margin-top: 4px; padding: 1px 8px; font-size: 12px; }
 
 /* ---- General tab: ordered lists + path mappings ---- */
 .ordered-list { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }

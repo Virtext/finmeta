@@ -580,6 +580,55 @@ def test_image_badge_resolution_uses_pack_image_no_text_fallback_on_miss(tmp_pat
     assert res is None or (res.kind=="text" and res.logo is None and res.text=="4K")
 
 
+def test_band_font_shrinks_to_fit_long_text_at_large_size():
+    """Operator-reported (2026-10-26): a status/trending-rank band's font_size
+    was applied raw, so a long label at a large size (e.g. "SEASON FINALE
+    SATURDAY") could render wider than the poster and run off both edges.
+    ``_fit_band_font`` must shrink that one element's font until the text
+    actually fits within the given max width."""
+    from PIL import ImageFont
+    from finmeta.engine.overlay_render import _fit_band_font
+
+    def loader(size):
+        return ImageFont.load_default(size=max(int(size), 8))
+
+    text = "SEASON FINALE SATURDAY"
+    max_width = 300
+    fnt = _fit_band_font(loader, 500, text, max_width)
+    tb = fnt.getbbox(text)
+    assert (tb[2] - tb[0]) <= max_width
+
+
+def test_band_font_floors_at_8px_for_impossibly_long_text():
+    """Even text that can never fit (longer than the poster at any sane
+    size) must stop shrinking at the engine's existing 8px floor rather than
+    loop forever or collapse to nothing."""
+    from PIL import ImageFont
+    from finmeta.engine.overlay_render import _fit_band_font
+
+    def loader(size):
+        return ImageFont.load_default(size=max(int(size), 8))
+
+    fnt = _fit_band_font(loader, 500, "X" * 200, 50)
+    tb = fnt.getbbox("X")
+    # at the 8px floor a single "X" still measures a few px wide -- the point
+    # is the loop terminated instead of hanging, and the font actually shrank.
+    assert 0 < (tb[2] - tb[0]) < 20
+
+
+def test_band_font_leaves_short_text_at_requested_size():
+    """A label that already fits at the requested size must not be shrunk
+    unnecessarily."""
+    from PIL import ImageFont
+    from finmeta.engine.overlay_render import _fit_band_font
+
+    def loader(size):
+        return ImageFont.load_default(size=max(int(size), 8))
+
+    fnt = _fit_band_font(loader, 30, "TODAY", 900)
+    assert fnt.size == 30
+
+
 def test_image_badge_hdr_variant_mapping(tmp_path):
     """HDR / Dolby Vision values map onto distinct pack files by their rendered text."""
     from finmeta.engine.overlay_render import info_pack_key

@@ -36,17 +36,6 @@ def _sha256_file(path: Path) -> Optional[str]:
 
 def diff_file(fw: FileWrite) -> DiffEntry:
     """Diff one FileWrite against disk."""
-    if fw.write_method == "jellyfin_api":
-        # target_path is a synthetic "jellyfin-api://<item_id>/<kind>"
-        # identifier, not a real path -- there is nothing on local disk to
-        # diff against, and checking Jellyfin itself would mean a live API
-        # call during an otherwise-offline diff. S9d5 pragmatic v1: always
-        # report "update" (never "create"/"unchanged") for this write
-        # method -- see CLAUDE.md §7.1.
-        return DiffEntry(
-            target_path=fw.target_path, kind=fw.kind,
-            status="update", source_ref=fw.source_ref,
-        )
     p = Path(fw.target_path)
     if not p.exists():
         return DiffEntry(

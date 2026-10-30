@@ -505,11 +505,13 @@ class _LibraryBase(_Strict):
         json_schema_extra={"help": "Override the global `artwork_selection` for this library. "
         "Leave unset to inherit the global preset/top_n."})
 
-    artwork_write_method: Optional[Literal["sidecar", "jellyfin_api"]] = Field(
+    artwork_write_method: Optional[Literal["sidecar"]] = Field(
         default=None,
         description="Per-library artwork write method override (None = inherit global).",
-        json_schema_extra={"help": "Override the global `artwork_write_method` for this "
-        "library. Leave unset to inherit the global setting."})
+        json_schema_extra={"help": "`sidecar` is the only write method (see the global "
+        "`artwork_write_method` for why `jellyfin_api` was removed 2026-10-26) -- this override "
+        "can no longer actually differ from the global setting. Kept only so an older "
+        "config.yml with this key already set keeps loading."})
 
     poster_rotation: PosterRotation = Field(
         default_factory=PosterRotation,
@@ -609,6 +611,12 @@ class StatusOverlayConfig(_Strict):
         "season_finale_aired, final_episode_aired): an episode that aired more than this many days "
         "ago no longer counts as 'just happened' and the show falls back to a plain status "
         "(returning/ended) instead. Default 14."})
+    date_style: Literal["relative", "classic"] = Field(
+        default="relative",
+        description="How a dated status (e.g. 'NEW SEASON') shows its date on the badge.",
+        json_schema_extra={"help": "`relative` (default): TODAY/TOMORROW for the next two days, "
+        "the weekday name for days 2-6 out, else DD.MM. `classic`: always DD.MM, regardless of how "
+        "far away the date is."})
     create_collections: bool = Field(
         default=False,
         description="Also create a Jellyfin collection per status (e.g. 'New Season Soon').",
@@ -981,25 +989,20 @@ class Config(_Strict):
         description="Global automatic artwork selection settings.",
         json_schema_extra={"help": "How Finmeta automatically chooses among artwork candidates "
         "(preset + top_n). A library can override this under `libraries.<name>.artwork_selection`."})
-    artwork_write_method: Literal["sidecar", "jellyfin_api"] = Field(
+    artwork_write_method: Literal["sidecar"] = Field(
         default="sidecar",
         description="How poster/backdrop/logo/landscape artwork is written (metadata NFO and "
         "theme songs are always sidecar files; Jellyfin has no API for either).",
-        json_schema_extra={"help": "`sidecar` (default, v1 behaviour, and the recommended "
-        "setting) writes poster.jpg/backdrop.jpg/etc. directly into the media folder next to "
-        "the video file. `jellyfin_api` instead uploads images straight to Jellyfin "
-        "(`POST /Items/{id}/Images/{type}`) and never touches the media folder — useful when "
-        "Finmeta's filesystem view of the library differs from Jellyfin's, or sidecar files "
-        "in the media folder aren't wanted. Caveat found running against a real library: if "
-        "the item's media folder already has a local poster/backdrop/logo/fanart file, "
-        "Jellyfin's own library scanning keeps re-asserting that local file as authoritative — "
-        "the upload silently 'succeeds' every apply but Jellyfin never serves the new image. "
-        "Only use `jellyfin_api` for a library confirmed to have no local artwork files already "
-        "in its media folders. In `jellyfin_api` mode the pre-Finmeta original "
-        "(needed so overlay re-renders never stack — SPEC override O7) is captured once, the "
-        "first time Finmeta touches that item, by downloading its CURRENT image from "
-        "Jellyfin; it is cached under `<config>/jellyfin_originals/` and never re-fetched. "
-        "A library can override this under `libraries.<name>.artwork_write_method`."})
+        json_schema_extra={"help": "`sidecar` -- the only write method, and the only value this "
+        "field accepts. Writes poster.jpg/backdrop.jpg/etc. directly into the media folder next "
+        "to the video file. The alternative this field used to also accept, `jellyfin_api` "
+        "(uploads straight to Jellyfin via `POST /Items/{id}/Images/{type}`, never touching the "
+        "media folder), was removed 2026-10-26: confirmed against a real library that Jellyfin's "
+        "own scanning keeps re-asserting a local poster/backdrop/logo/fanart file as "
+        "authoritative over an API-uploaded one, so it could never reliably override an item "
+        "whose media folder already had local artwork -- which is to say, most real libraries. "
+        "Field kept (rather than removed outright) only so an older config.yml with this key "
+        "already set to `sidecar` keeps loading."})
     backup_retention_days: int = Field(
         default=14,
         ge=0,

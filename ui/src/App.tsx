@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getAuthStatus, getItemsLight, getLibraries, getPlan, startRun, getJob } from './api';
+import { getAuthStatus, getItemsLight, getLibraries, getPlan, startRun, getJob, getHealth } from './api';
 import type { JobResp } from './types';
 import type { ItemLightView, LibItemsLightResp, LibrariesResp, PlanResp } from './types';
 import LibraryBrowser from './components/LibraryBrowser';
@@ -77,11 +77,44 @@ export default function App() {
     Object.values(libraryRunTimers.current).forEach((id) => window.clearInterval(id));
   }, []);
 
+  // Job status lost on page reload: a run started from a previous page load
+  // keeps going on the backend (run_service._worker) regardless of what the
+  // UI does -- only the frontend's own in-memory libraryRuns/itemApplyJob
+  // state forgot it ever existed. Holds an item-scoped run until that
+  // library's `items` have loaded and the target item can actually be
+  // selected (see the effect below); a library-scoped run is resumed
+  // immediately since it needs no such wait.
+  const pendingResumeItem = useRef<{ library: string | null; itemId: string; jobId: string } | null>(null);
+  // Indirection so loadLibs (defined before the library-run poller exists)
+  // can resume into it without widening loadLibs's own dependency array --
+  // kept current every render, read only from inside an already-deferred
+  // callback (loadLibs's own .then, which never runs during this render).
+  const resumeLibraryRunRef = useRef<((library: string, jobId: string) => void) | null>(null);
+
   const loadLibs = useCallback(() => {
     getLibraries()
       .then((d) => {
         setLibs(d);
         if (d.libraries.length) setLibName(d.libraries[0].name);
+        return getHealth().catch(() => null);
+      })
+      .then((h) => {
+        if (!h?.active_run || !h.active_run_scope) return;
+        const scope = h.active_run_scope;
+        if (scope.item_id) {
+          pendingResumeItem.current = { library: scope.library, itemId: scope.item_id, jobId: h.active_run! };
+          if (scope.library) setLibName(scope.library);
+        } else if (scope.library) {
+          setLibraryRuns((prev) => ({
+            ...prev,
+            [scope.library!]: {
+              job: { run_id: h.active_run!, status: 'running', started_at: null, finished_at: null,
+                     files_written: 0, files_unchanged: 0, api_calls: 0, log: [] },
+              action: (scope.action === 'plan' ? 'plan' : 'apply'), running: true, error: null,
+            },
+          }));
+          resumeLibraryRunRef.current?.(scope.library, h.active_run!);
+        }
       })
       .catch((e: any) => {
         // ANY 401 from the Finmeta API = expired/invalid session -> show login.
@@ -208,6 +241,32 @@ export default function App() {
 
   const TERMINAL = new Set(['ok', 'partial', 'error', 'refused']);
 
+  // Shared by startLibraryRun (fresh submit) and the mount-time resume path
+  // (reconnecting to a run that was already going when the page loaded) --
+  // both just need to poll an existing job_id into libraryRuns[library].
+  const pollLibraryRun = useCallback((library: string, jobId: string) => {
+    const iv = window.setInterval(async () => {
+      try {
+        const j = await getJob(jobId);
+        setLibraryRuns((prev) => ({ ...prev, [library]: { ...prev[library], job: j } }));
+        if (TERMINAL.has(j.status)) {
+          window.clearInterval(iv);
+          delete libraryRunTimers.current[library];
+          setLibraryRuns((prev) => ({ ...prev, [library]: { ...prev[library], running: false } }));
+          if (library === libName) onRunDone();
+        }
+      } catch (e) {
+        window.clearInterval(iv);
+        delete libraryRunTimers.current[library];
+        setLibraryRuns((prev) => ({
+          ...prev, [library]: { ...prev[library], running: false, error: (e as Error).message },
+        }));
+      }
+    }, 1500);
+    libraryRunTimers.current[library] = iv;
+  }, [libName, onRunDone]);
+  resumeLibraryRunRef.current = pollLibraryRun;
+
   const startLibraryRun = useCallback(async (library: string, kind: 'plan' | 'apply') => {
     setLibraryRuns((prev) => ({ ...prev, [library]: { job: null, action: kind, running: true, error: null } }));
     try {
@@ -220,31 +279,32 @@ export default function App() {
           action: kind, running: true, error: null,
         },
       }));
-      const iv = window.setInterval(async () => {
-        try {
-          const j = await getJob(r.job_id);
-          setLibraryRuns((prev) => ({ ...prev, [library]: { ...prev[library], job: j } }));
-          if (TERMINAL.has(j.status)) {
-            window.clearInterval(iv);
-            delete libraryRunTimers.current[library];
-            setLibraryRuns((prev) => ({ ...prev, [library]: { ...prev[library], running: false } }));
-            if (library === libName) onRunDone();
-          }
-        } catch (e) {
-          window.clearInterval(iv);
-          delete libraryRunTimers.current[library];
-          setLibraryRuns((prev) => ({
-            ...prev, [library]: { ...prev[library], running: false, error: (e as Error).message },
-          }));
-        }
-      }, 1500);
-      libraryRunTimers.current[library] = iv;
+      pollLibraryRun(library, r.job_id);
     } catch (e) {
       setLibraryRuns((prev) => ({
         ...prev, [library]: { job: null, action: kind, running: false, error: (e as Error).message },
       }));
     }
-  }, [libName, onRunDone]);
+  }, [pollLibraryRun]);
+
+  // Shared by startItemApply (fresh submit) and the mount-time resume path.
+  const pollItemJob = useCallback((jobId: string) => {
+    const iv = window.setInterval(async () => {
+      try {
+        const j = await getJob(jobId);
+        setItemApplyJob(j);
+        if (TERMINAL.has(j.status)) {
+          window.clearInterval(iv);
+          setItemApplyRunning(false);
+          onRunDone();
+        }
+      } catch (e) {
+        window.clearInterval(iv);
+        setItemApplyError((e as Error).message);
+        setItemApplyRunning(false);
+      }
+    }, 1500);
+  }, [onRunDone]);
 
   // S9d4b step 6: apply only the selected item (scope item:<id>).
   const startItemApply = useCallback(async () => {
@@ -256,26 +316,29 @@ export default function App() {
       const r = await startRun('apply', selected.item_id, libName || undefined);
       const jobId = r.job_id;
       setItemApplyJob({ run_id: jobId, status: 'running', started_at: null, finished_at: null, files_written: 0, files_unchanged: 0, api_calls: 0, log: [] });
-      const iv = window.setInterval(async () => {
-        try {
-          const j = await getJob(jobId);
-          setItemApplyJob(j);
-          if (TERMINAL.has(j.status)) {
-            window.clearInterval(iv);
-            setItemApplyRunning(false);
-            onRunDone();
-          }
-        } catch (e) {
-          window.clearInterval(iv);
-          setItemApplyError((e as Error).message);
-          setItemApplyRunning(false);
-        }
-      }, 1500);
+      pollItemJob(jobId);
     } catch (e) {
       setItemApplyError((e as Error).message);
       setItemApplyRunning(false);
     }
-  }, [selected, libName, onRunDone]);
+  }, [selected, libName, pollItemJob]);
+
+  // Job status lost on page reload, item-scoped half: loadLibs's resume
+  // check (see above) can only record WHICH item/job to resume into --
+  // actually selecting it has to wait until that library's items have
+  // loaded, which happens asynchronously via the libName effect above.
+  useEffect(() => {
+    const pending = pendingResumeItem.current;
+    if (!pending || !items) return;
+    if (pending.library && pending.library !== libName) return;
+    pendingResumeItem.current = null;
+    const found = items.items.find((i) => i.item_id === pending.itemId);
+    if (found) setSelected(found);
+    setItemApplyRunning(true);
+    setItemApplyJob({ run_id: pending.jobId, status: 'running', started_at: null, finished_at: null,
+                      files_written: 0, files_unchanged: 0, api_calls: 0, log: [] });
+    pollItemJob(pending.jobId);
+  }, [items, libName, pollItemJob]);
 
   // Early return: login screen.
   if (unauthed) {

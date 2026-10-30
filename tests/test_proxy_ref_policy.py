@@ -185,7 +185,7 @@ class TestProxyRootsPolicy:
     def test_artwork_lifecycle_subdirs_are_allowed(self, tmp_path):
         ctx = self._ctx(tmp_path)
         names = {Path(r).name for r in ctx.proxy_roots()}
-        assert {"assets", "backups", "trash", "jellyfin_originals", "cache"} <= names
+        assert {"assets", "backups", "trash", "cache"} <= names
 
     def test_secrets_file_is_refused_under_the_real_policy(self, tmp_path):
         """End-to-end over the policy the route uses: a config-dir file that

@@ -166,6 +166,22 @@ export interface JobResp {
   provider_warnings?: ProviderWarning[];
 }
 
+export interface ActiveRunScope {
+  action: string | null;
+  library: string | null;
+  item_id: string | null;
+}
+
+export interface HealthResp {
+  status: string;
+  version: string;
+  config_loaded: boolean;
+  config_error: string | null;
+  dry_run: boolean;
+  active_run: string | null;
+  active_run_scope: ActiveRunScope | null;
+}
+
 // ---- S9a: auth + settings types ----
 
 export interface AuthStatus {

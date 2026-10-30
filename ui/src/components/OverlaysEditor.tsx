@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import { getConfig, putConfig, getLibraries, getItemsLight, getOverlays,
        installLogoPack, logoPackStatus, previewOverlay, saveOverlay, getHelp,
        getDefaultFormatRules, getJellyfinLibraries,
-       getPacks, deletePack, importKometa, listFs } from '../api';
+       getPacks, deletePack, getKometaSources, importKometaRemote } from '../api';
 import type { JfLibrary, ImagePackInfo } from '../api';
 import type { HelpResp } from '../types';
 import { load as yamlLoad, dump as yamlDump } from 'js-yaml';
@@ -209,56 +209,33 @@ export default function OverlaysEditor({ initialLibrary }: Props) {
   }
   useEffect(() => { void refreshPacks(); }, []);
 
-  // Kometa import panel state.
-  const [kOverlay, setKOverlay] = useState('');
-  const [kRoot, setKRoot] = useState('');
-  const [kPack, setKPack] = useState('');
-  const [kOverwrite, setKOverwrite] = useState(false);
-  const [kPreview, setKPreview] = useState<any | null>(null);
-  const [kErr, setKErr] = useState<string | null>(null);
-  const [kBusy, setKBusy] = useState(false);
-  const [browsePath, setBrowsePath] = useState('/import');
-  const [browseEntries, setBrowseEntries] = useState<{folders:string[];files:string[]}|null>(null);
-  const [browseErr, setBrowseErr] = useState<string|null>(null);
+  // Download+import a known third-party overlay source (Finmeta fetches the
+  // files itself instead of requiring them already on local disk). One known
+  // source -> one fixed pack name (source.default_pack_name, from the
+  // backend) -- no pack-name typing, no separate "download" panel: the
+  // Installed Packs list below IS the single place this lives, same row as
+  // Activate/Deactivate once it's in, operator feedback 2026-10-27 ("don't
+  // show the same pack in two different places").
+  const [sources, setSources] = useState<Record<string, {label:string; zip_url:string; default_pack_name:string}>>({});
+  const [rBusySource, setRBusySource] = useState<string | null>(null);
+  const [rStatus, setRStatus] = useState<string | null>(null);
+  const [rErr, setRErr] = useState<string | null>(null);
+  useEffect(() => { getKometaSources().then((d)=>setSources(d.sources)).catch(()=>{}); }, []);
 
-  async function openBrowse(start?: string) {
-    const p = start && start.startsWith('/') ? start : '/import';
-    setBrowsePath(p); setBrowseErr(null); setBrowseEntries(null);
+  async function downloadSource(sourceKey: string, overwrite: boolean) {
+    setRBusySource(sourceKey); setRErr(null); setRStatus(overwrite ? 'Updating…' : 'Downloading…');
     try {
-      const r = await listFs(p);
-      setBrowseEntries({ folders: r.folders, files: r.files });
-    } catch (e: any) { setBrowseErr(e?.message ?? 'list failed'); }
-  }
-  function browsePick(f: string, isFile: boolean) {
-    if (isFile) {
-      setKOverlay(f);
-      void openBrowse(f.replace(/\/[^/]+$/, '') || '/import');
-    } else {
-      setKRoot(f);
-      void openBrowse(f);
-    }
-  }
-  async function kometaPreview() {
-    setKBusy(true); setKErr(null); setKPreview(null);
-    try {
-      const r = await importKometa({ overlay_file: kOverlay, kometa_root: kRoot, pack_name: kPack, dry_run: true });
-      setKPreview(r);
-    } catch (e: any) { setKErr(e?.message ?? 'preview failed'); }
-    finally { setKBusy(false); }
-  }
-  async function kometaImport() {
-    setKBusy(true); setKErr(null);
-    try {
-      const r = await importKometa({ overlay_file: kOverlay, kometa_root: kRoot, pack_name: kPack, dry_run: false, overwrite: kOverwrite });
-      setKPreview(r);
-      setPacksMsg(`Imported pack “${r.pack_name}” (${r.written?.length ?? 0} images)`);
-      setTimeout(() => setPacksMsg(null), 3500);
+      const r = await importKometaRemote({
+        source: sourceKey, pack_name: sources[sourceKey].default_pack_name,
+        dry_run: false, overwrite,
+      });
+      setRStatus(`Done: ${r.written?.length ?? 0} images.`);
       await refreshPacks();
     } catch (e: any) {
-      const m = e?.message ?? 'import failed';
-      setKErr(m.startsWith('HTTP 409') ? 'pack exists — tick Overwrite to replace' : m);
+      setRErr(e?.message ?? 'download failed');
+      setRStatus(null);
     }
-    finally { setKBusy(false); }
+    finally { setRBusySource(null); }
   }
 
 
@@ -630,28 +607,16 @@ export default function OverlaysEditor({ initialLibrary }: Props) {
           <BaseSettings doc={el} patchBase={patchBase}/>
 
           {scope !== 'global' && (
-            <>
-              <KometaImportSection
-                kOverlay={kOverlay} setKOverlay={setKOverlay}
-                kRoot={kRoot} setKRoot={setKRoot}
-                kPack={kPack} setKPack={setKPack}
-                kOverwrite={kOverwrite} setKOverwrite={setKOverwrite}
-                kBusy={kBusy} kErr={kErr} kPreview={kPreview}
-                browsePath={browsePath} browseEntries={browseEntries} browseErr={browseErr}
-                onBrowse={openBrowse} onBrowsePick={browsePick}
-                onCloseBrowse={() => setBrowseEntries(null)}
-                onPreview={() => void kometaPreview()}
-                onImport={() => void kometaImport()}
-              />
-              <InstalledPacksSection
-                logoPacks={logoPacks} onToggleLogoPack={(v)=>void changeLogoPacks(v)}
-                availPacks={availPacks} selPacks={selPacks}
-                onToggleRichPack={(pn, on) => void toggleRichPack(pn, on)}
-                onDeleteRichPack={(pn) => void deleteRichPack(pn)}
-                profileName={activeName || savingAs || null}
-                packsMsg={packsMsg} packsErr={packsErr}
-              />
-            </>
+            <InstalledPacksSection
+              logoPacks={logoPacks} onToggleLogoPack={(v)=>void changeLogoPacks(v)}
+              availPacks={availPacks} selPacks={selPacks}
+              onToggleRichPack={(pn, on) => void toggleRichPack(pn, on)}
+              onDeleteRichPack={(pn) => void deleteRichPack(pn)}
+              profileName={activeName || savingAs || null}
+              packsMsg={packsMsg} packsErr={packsErr}
+              sources={sources} rBusySource={rBusySource} rStatus={rStatus} rErr={rErr}
+              onDownloadSource={(k, overwrite) => void downloadSource(k, overwrite)}
+            />
           )}
 
           <div className="overlay-subtabs" role="tablist" style={{display:'flex', gap:'4px', margin:'12px 0 8px'}}>
@@ -749,110 +714,13 @@ function BaseSettings({doc, patchBase}:{doc:OverlayDoc; patchBase:(k:keyof Overl
 // ---------------------------------------------------------------------------
 // S9d4c: moved here from the Libraries tab so importing a new Kometa setup
 // and assigning it to the profile being edited above happen in one place.
-function KometaImportSection({kOverlay, setKOverlay, kRoot, setKRoot, kPack, setKPack, kOverwrite, setKOverwrite,
-  kBusy, kErr, kPreview, browsePath, browseEntries, browseErr, onBrowse, onBrowsePick, onCloseBrowse, onPreview, onImport}: {
-  kOverlay: string; setKOverlay: (v: string) => void;
-  kRoot: string; setKRoot: (v: string) => void;
-  kPack: string; setKPack: (v: string) => void;
-  kOverwrite: boolean; setKOverwrite: (v: boolean) => void;
-  kBusy: boolean; kErr: string | null; kPreview: any | null;
-  browsePath: string; browseEntries: {folders:string[];files:string[]} | null; browseErr: string | null;
-  onBrowse: (start?: string) => void; onBrowsePick: (f: string, isFile: boolean) => void;
-  onCloseBrowse: () => void; onPreview: () => void; onImport: () => void;
-}) {
-  return (
-    <fieldset className="overlay-fieldset">
-      <legend>Import Kometa overlay</legend>
-      <p className="field-hint muted" style={{ marginTop: 0 }}>
-        Expand a Kometa overlay YAML file into a new image pack (under assets/packs/) — it appears in
-        “Packs” above as soon as it's imported.
-      </p>
-      <div className="kometa-fields">
-        <label><span>Overlay file path</span>
-          <input type="text" className="config-input" value={kOverlay} placeholder="/abs/path/overlays/media_info.yml"
-                 onChange={(e) => setKOverlay(e.target.value)} disabled={kBusy} />
-          <button type="button" className="btn fs-browse-btn" onClick={() => onBrowse('/import')} title="Browse /import or /work">Browse</button>
-        </label>
-        <label><span>Kometa folder (root or images folder)</span>
-          <input type="text" className="config-input" value={kRoot} placeholder="/abs/path/to/kometa-or-images"
-                 onChange={(e) => setKRoot(e.target.value)} disabled={kBusy} />
-          <button type="button" className="btn fs-browse-btn" onClick={() => onBrowse('/import')} title="Browse /import or /work">Browse</button>
-        </label>
-        <label><span>Pack name</span>
-          <input type="text" className="config-input" value={kPack} placeholder="my-pack"
-                 onChange={(e) => setKPack(e.target.value)} disabled={kBusy} /></label>
-        <label className="pack-cat"><input type="checkbox" checked={kOverwrite} disabled={kBusy}
-                 onChange={(e) => setKOverwrite(e.target.checked)} /> Overwrite</label>
-      </div>
-      {browseEntries !== null && (
-        <div className="fs-browse">
-          <div className="fs-browse-row">
-            <span className="field-hint muted">{browsePath}</span>
-            <button type="button" className="btn" onClick={onCloseBrowse}>Close</button>
-          </div>
-          {browseEntries.folders.map((f) => (
-            <div key={f} className="fs-browse-entry">
-              <button type="button" className="btn fs-browse-dir" onClick={() => onBrowse(f)}>{f}</button>
-              <button type="button" className="btn" onClick={() => onBrowsePick(f, false)}>Use as Kometa folder</button>
-            </div>
-          ))}
-          {browseEntries.files.map((f) => (
-            <div key={f} className="fs-browse-entry">
-              <span className="fs-browse-file">{f}</span>
-              <button type="button" className="btn" onClick={() => onBrowsePick(f, true)}>Use as overlay file</button>
-            </div>
-          ))}
-          {browseEntries.folders.length === 0 && browseEntries.files.length === 0 && (
-            <p className="field-hint muted">Empty folder.</p>
-          )}
-        </div>
-      )}
-      {browseErr && <div className="field-msg err">{browseErr}</div>}
-      <div className="yaml-actions">
-        <button className="btn" onClick={onPreview} disabled={kBusy || !kOverlay || !kRoot || !kPack}>Preview</button>
-        <button className="btn primary" onClick={onImport} disabled={kBusy || !kOverlay || !kRoot || !kPack}>Import</button>
-      </div>
-      {kErr && <div className="field-msg err">{kErr}</div>}
-      {kPreview && (
-        <div className="kometa-report">
-          {(() => {
-            const c = kPreview.report?.counts ?? { ok: 0, partial: 0, skipped: 0 };
-            return (
-              <p>
-                <span className={`count ${c.ok}`}>ok {c.ok ?? 0}</span>{' '}
-                <span className={`count ${c.partial}`}>partial {c.partial ?? 0}</span>{' '}
-                <span className={`count ${c.skipped}`}>skipped {c.skipped ?? 0}</span>
-              </p>
-            );
-          })()}
-          <p className="field-hint">
-            Categories to create: {Object.keys(kPreview.pack_yml?.categories ?? {}).join(', ') || '—'}
-          </p>
-          {kPreview.missing_images.length > 0 && (
-            <div className="pack-missing field-hint" style={{ color: 'var(--update)' }}>
-              missing images: {kPreview.missing_images.join(', ')}
-            </div>
-          )}
-          {(kPreview.report?.items ?? []).filter((i: any) => i.notes.length > 0).length > 0 && (
-            <details className="kometa-notes">
-              <summary>Notes ({(kPreview.report?.items ?? []).filter((i: any) => i.notes.length > 0).length})</summary>
-              <ul>
-                {(kPreview.report!.items as any[]).filter((i) => i.notes.length > 0).map((i) => (
-                  <li key={i.key}><strong>{i.key}</strong> ({i.status}): {i.notes.join('; ')}</li>
-                ))}
-              </ul>
-            </details>
-          )}
-        </div>
-      )}
-    </fieldset>
-  );
-}
-
-// 2026-10-19: download+import a known overlay source by name (operator
-// request — same pipeline as the local-path panel above, but Finmeta fetches
-// the files itself instead of requiring them already on local disk). Shares
-// the same report/preview rendering shape as KometaImportResp.
+// Download+import a known overlay source by name. Finmeta fetches the files
+// itself instead of requiring them already on local disk -- not every
+// Kometa-style source works this way (only ones with self-contained
+// image+condition overlays, e.g. jmxd; sources built around Kometa's own
+// built-in default overlays or Plex-collection matching come back empty, see
+// feature.kometa_import help text), so this stays a pick-a-known-source list
+// rather than an arbitrary URL box.
 // 2026-10-20 operator feedback: "Logo packs" (the global Kometa/custom
 // chooser + install button) and the old "Packs" fieldset (per-profile,
 // per-category checkboxes) were three overlapping pack-related controls
@@ -907,15 +775,32 @@ function KometaLogoRow({active, onToggle}: {active: boolean; onToggle: (on: bool
 }
 
 function InstalledPacksSection({
-  logoPacks, onToggleLogoPack, availPacks, selPacks, onToggleRichPack, onDeleteRichPack, profileName, packsMsg, packsErr}: {
+  logoPacks, onToggleLogoPack, availPacks, selPacks, onToggleRichPack, onDeleteRichPack, profileName, packsMsg, packsErr,
+  sources, rBusySource, rStatus, rErr, onDownloadSource}: {
   logoPacks: 'kometa'[]; onToggleLogoPack: (v: 'kometa'[]) => void;
   availPacks: ImagePackInfo[]; selPacks: string[];
   onToggleRichPack: (pn: string, on: boolean) => void;
   onDeleteRichPack: (pn: string) => void;
   profileName: string | null; packsMsg: string | null; packsErr: string | null;
+  sources: Record<string, {label:string; zip_url:string; default_pack_name:string}>;
+  rBusySource: string | null; rStatus: string | null; rErr: string | null;
+  onDownloadSource: (sourceKey: string, overwrite: boolean) => void;
 }) {
   const toggleKometa = (on: boolean) =>
     onToggleLogoPack(on ? ['kometa'] : []);
+  // One known source -> one fixed pack name: find which source (if any) a
+  // given pack name came from, so its row gets an inline Update button
+  // instead of a separate "download" panel elsewhere on the page.
+  const sourceKeyByPackName: Record<string, string> = {};
+  for (const [key, src] of Object.entries(sources)) sourceKeyByPackName[src.default_pack_name] = key;
+  // "ichimoku" has no known source to re-download from (hand-built, not via
+  // Kometa-import), but the operator wants it protected from accidental
+  // deletion the same way jmxd-media-info is -- 2026-10-27, after it
+  // vanished from disk once already (cause still unexplained). No Update
+  // button for it (nothing to re-fetch), just no Delete either.
+  const PROTECTED_NO_SOURCE = new Set(['ichimoku']);
+  const installedPackNames = new Set(availPacks.filter((x) => x.valid).map((x) => x.name));
+  const notYetInstalled = Object.entries(sources).filter(([, src]) => !installedPackNames.has(src.default_pack_name));
   return (
     <fieldset className="overlay-fieldset">
       <legend>Installed packs</legend>
@@ -934,6 +819,7 @@ function InstalledPacksSection({
       ))}
       {availPacks.filter((x) => x.valid).map((pk) => {
         const checked = selPacks.includes(pk.name);
+        const sourceKey = sourceKeyByPackName[pk.name];
         return (
           <div key={pk.name} className="pack-row">
             <label className="pack-name">
@@ -945,16 +831,44 @@ function InstalledPacksSection({
                 missing images: {pk.missing_images.join(', ')}
               </div>
             )}
-            <div style={{display:'flex', gap:'8px', marginTop:'4px'}}>
+            <div style={{display:'flex', gap:'8px', marginTop:'4px', alignItems:'center', flexWrap:'wrap'}}>
               <button type="button" className={`btn ${checked ? '' : 'primary'}`} disabled={!profileName}
                       onClick={() => onToggleRichPack(pk.name, !checked)}>
                 {checked ? 'Deactivate' : 'Activate'}
               </button>
-              <button type="button" className="btn btn-ghost" onClick={() => onDeleteRichPack(pk.name)}>Delete</button>
+              {sourceKey ? (
+                // Known-source pack: same pattern as the Kometa logo pack
+                // row below -- no Delete at all, just Activate/Deactivate +
+                // Update, so it can't be removed from the UI only to need
+                // re-downloading later (operator feedback 2026-10-27).
+                <button type="button" className="btn" disabled={rBusySource === sourceKey}
+                        onClick={() => onDownloadSource(sourceKey, true)}>
+                  {rBusySource === sourceKey ? 'Updating…' : 'Update'}
+                </button>
+              ) : !PROTECTED_NO_SOURCE.has(pk.name) ? (
+                <button type="button" className="btn btn-ghost" onClick={() => onDeleteRichPack(pk.name)}>Delete</button>
+              ) : null}
+              {sourceKey && rStatus && rBusySource === null && <span className="field-msg ok">{rStatus}</span>}
             </div>
           </div>
         );
       })}
+      {notYetInstalled.map(([key, src]) => (
+        <div key={key} className="pack-row">
+          <label className="pack-name">
+            <strong>{src.label}</strong>
+            <span className="field-hint muted"> — not installed; other people's images, no licence file, fetched on demand into your own config/assets/packs/ only, never bundled with Finmeta</span>
+          </label>
+          <div style={{display:'flex', gap:'8px', marginTop:'4px', alignItems:'center'}}>
+            <button type="button" className="btn primary" disabled={rBusySource === key}
+                    onClick={() => onDownloadSource(key, false)}>
+              {rBusySource === key ? 'Downloading…' : 'Download'}
+            </button>
+            {rStatus && rBusySource === null && <span className="field-msg ok">{rStatus}</span>}
+          </div>
+        </div>
+      ))}
+      {rErr && <span className="error">{rErr}</span>}
       {packsMsg && <span className="field-msg ok">{packsMsg}</span>}
       {packsErr && <span className="error">{packsErr}</span>}
     </fieldset>

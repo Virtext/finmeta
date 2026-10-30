@@ -1,5 +1,5 @@
 import type {
-  AuthStatus, CandidatesResp, HelpResp, JobResp, LibItemsLightResp, LibItemsResp,
+  AuthStatus, CandidatesResp, HealthResp, HelpResp, JobResp, LibItemsLightResp, LibItemsResp,
   LibrariesResp, PlanResp, ProvidersResp, RunResp, SecretsResp, ServiceTestResult,
 } from './types';
 
@@ -92,6 +92,8 @@ export const startRun = (action: string, item?: string, library?: string) =>
   });
 
 export const getJob = (id: string) => j<JobResp>(`/api/jobs/${enc(id)}`);
+
+export const getHealth = () => j<HealthResp>('/api/health');
 
 // Build a proxy URL from a plan source_ref (the browser never calls
 // TMDb/fanart directly — every byte goes through /api/proxy). The token is
@@ -321,13 +323,6 @@ export const getCollectionPresets = () =>
   j<{ presets: CollectionPresetInfo[] }>('/api/collection-presets');
 
 
-export interface KometaImportParams {
-  overlay_file: string;
-  kometa_root: string;
-  pack_name: string;
-  dry_run?: boolean;
-  overwrite?: boolean;
-}
 export interface KometaImportResp {
   dry_run: boolean;
   pack_name: string;
@@ -343,14 +338,22 @@ export interface KometaImportResp {
     items: { key: string; status: string; notes: string[] }[];
   };
 }
-// S9e4: filesystem browser for the import panel (folders + .yml files only,
-// restricted server-side to /import and /work).
-export interface FsListResp { path: string; folders: string[]; files: string[] }
-export const listFs = (path: string) =>
-  j<FsListResp>(`/api/fs/list?path=${enc(path)}`);
 
-export const importKometa = (params: KometaImportParams) =>
-  j<KometaImportResp>('/api/kometa/import', {
+// Download+import a known (or custom) third-party overlay source by URL
+// instead of requiring it already sit on local disk first.
+export interface KometaSourceInfo { label: string; zip_url: string; default_pack_name: string }
+export interface KometaSourcesResp { sources: Record<string, KometaSourceInfo> }
+export const getKometaSources = () => j<KometaSourcesResp>('/api/kometa/sources');
+
+export interface KometaImportRemoteParams {
+  source?: string;
+  source_url?: string; root_dir?: string; overlay_file_rel?: string; kometa_root_rel?: string;
+  pack_name: string;
+  dry_run?: boolean;
+  overwrite?: boolean;
+}
+export const importKometaRemote = (params: KometaImportRemoteParams) =>
+  j<KometaImportResp>('/api/kometa/import-remote', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params),
