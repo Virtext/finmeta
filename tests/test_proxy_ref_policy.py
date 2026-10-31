@@ -251,3 +251,41 @@ class TestProxyRoute:
         r2 = client.get(f"/api/proxy/{encode_token('metadata', str(missing))}")
         assert r1.status_code == r2.status_code == 403
         assert r1.json() == r2.json()
+
+
+class TestOverlayProxyRoute:
+    """GET /api/proxy/overlay/{digest}: the read side of the overlay cache
+    engine.overlay.overlay_file_write writes during build_plan -- the only
+    way the UI's poster preview can show the overlaid render instead of
+    source_ref's deliberately-pre-overlay original (see routes_candidates.py
+    proxy_overlay's docstring)."""
+
+    @pytest.fixture
+    def client(self, tmp_path, monkeypatch):
+        from fastapi.testclient import TestClient
+        from finmeta.api import AppContext, create_app
+        monkeypatch.setenv("FINMETA_AUTH", "off")
+        cfg = tmp_path / "config.yml"
+        cfg.write_text(
+            "dry_run: true\n"
+            "server:\n  url: http://fake:8096\n"
+            "libraries: {}\n"
+        )
+        return TestClient(create_app(AppContext(str(cfg))))
+
+    def test_malformed_digest_is_404(self, client):
+        r = client.get("/api/proxy/overlay/not-a-sha256")
+        assert r.status_code == 404
+
+    def test_uncached_digest_is_404(self, client):
+        r = client.get("/api/proxy/overlay/" + "0" * 64)
+        assert r.status_code == 404
+
+    def test_cached_digest_is_served(self, client, tmp_path):
+        from finmeta.engine.overlay import _write_overlay_cache
+        digest = "a" * 64
+        _write_overlay_cache(digest, b"OVERLAID-JPEG-BYTES", config_dir=tmp_path)
+        r = client.get(f"/api/proxy/overlay/{digest}")
+        assert r.status_code == 200
+        assert r.content == b"OVERLAID-JPEG-BYTES"
+        assert r.headers["content-type"] == "image/jpeg"

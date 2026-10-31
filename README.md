@@ -10,10 +10,10 @@ Plex Meta Manager). It enriches selected libraries with metadata, artwork,
 poster overlays, theme music, collections and playlists, and ships with a
 web UI for configuration, live preview, and plan/apply control.
 
-> Status: actively developed, pre-1.0. Core flows (plan → apply → undo,
+> Status: 1.0, actively developed. Core flows (plan → apply → undo,
 > overlays, collections, trending, TV status) work end-to-end against a
 > real Jellyfin server. See the open items in the repo's issue tracker
-> before relying on it for a production library.
+> for what's still in progress.
 
 ## Screenshots
 

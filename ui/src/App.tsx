@@ -17,6 +17,9 @@ type Page = 'main' | 'settings' | 'account';
 // 1-500 server-side) -- this is just the UI's own "Load more" chunk size.
 const LIBRARY_PAGE_SIZE = 200;
 
+// Shared by the topbar's "Apply all libraries" run.
+const ALL_RUN_TERMINAL = new Set(['ok', 'partial', 'error', 'refused']);
+
 export default function App() {
   const [unauthed, setUnauthed] = useState(false);
   const [page, setPage] = useState<Page>('main');
@@ -64,6 +67,41 @@ export default function App() {
   const [itemApplyJob, setItemApplyJob] = useState<JobResp | null>(null);
   const [itemApplyRunning, setItemApplyRunning] = useState(false);
   const [itemApplyError, setItemApplyError] = useState<string | null>(null);
+
+  // "Apply all libraries": one run with no library/item scope. This is the
+  // same full scope CollectionsPanel's own "Apply (all libraries)" button
+  // already triggers (presets/seasonal collections only ever build on it --
+  // see that component) -- surfaced here too since most applies aren't
+  // about collections and clicking through to Settings -> Collections just
+  // to apply everything at once isn't obvious. Lives in the topbar next to
+  // the dry-run badge rather than as one more per-library button. No
+  // reload-resume for this scope (same gap already exists for Collections'
+  // button); it is a short-lived in-memory state like the rest of this file.
+  const [allRunJob, setAllRunJob] = useState<JobResp | null>(null);
+  const [allRunning, setAllRunning] = useState(false);
+  const [allRunErr, setAllRunErr] = useState<string | null>(null);
+  const allRunTimer = useRef<number | null>(null);
+  useEffect(() => () => { if (allRunTimer.current) window.clearInterval(allRunTimer.current); }, []);
+
+  const startApplyAll = useCallback(() => {
+    setAllRunning(true); setAllRunErr(null); setAllRunJob(null);
+    startRun('apply').then((r) => {
+      allRunTimer.current = window.setInterval(async () => {
+        try {
+          const j = await getJob(r.job_id);
+          setAllRunJob(j);
+          if (ALL_RUN_TERMINAL.has(j.status)) {
+            if (allRunTimer.current) window.clearInterval(allRunTimer.current);
+            setAllRunning(false);
+          }
+        } catch (e) {
+          if (allRunTimer.current) window.clearInterval(allRunTimer.current);
+          setAllRunErr((e as Error).message);
+          setAllRunning(false);
+        }
+      }, 1500);
+    }).catch((e) => { setAllRunErr((e as Error).message); setAllRunning(false); });
+  }, []);
 
   // S9d2: library-wide plan/apply, keyed by library name (not local to
   // BulkApplyPanel) -- switching library tabs flips itemsLoading=true for a
@@ -383,6 +421,26 @@ export default function App() {
           ))}
         </nav>
         <div className={`dryflag ${dryRun ? 'on' : 'off'}`}>{dryRun ? 'DRY RUN' : 'LIVE'}</div>
+        <div className="apply-all">
+          <button
+            className="btn primary"
+            disabled={allRunning || dryRun}
+            title={dryRun ? 'dry_run is true — set it false in config to apply' : 'Apply every configured library in one run'}
+            onClick={() => {
+              if (window.confirm('Apply ALL configured libraries now? Use "Plan library" per library first to see what will change.')) {
+                startApplyAll();
+              }
+            }}
+          >
+            {allRunning ? 'Applying all…' : 'Apply all libraries'}
+          </button>
+          {allRunJob && ALL_RUN_TERMINAL.has(allRunJob.status) && (
+            <span className={`muted apply-all-result ${allRunJob.status}`}>
+              {allRunJob.status} · {allRunJob.files_written} written · {allRunJob.files_unchanged} unchanged
+            </span>
+          )}
+          {allRunErr && <span className="field-msg err">{allRunErr}</span>}
+        </div>
         <button className="btn settings-btn" onClick={() => setPage('settings')}>⚙ Settings</button>
         <button
           className="theme-toggle user-icon"
