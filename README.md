@@ -56,8 +56,9 @@ Kometa is built around Plex first, with Jellyfin support layered on top.
 Finmeta is Jellyfin-native from the ground up: it talks to the Jellyfin API
 directly, understands Jellyfin's own image/NFO conventions, and its UI is
 built for Jellyfin's data model rather than translated from Plex's. It can
-also import an existing Kometa `config.yml` (overlay blocks, defaults with
-`template_variables`, and collection definitions) to ease migration.
+also download a curated set of known Kometa-style overlay sources
+(badge/overlay images) on demand to ease migration — not an arbitrary
+local Kometa `config.yml`.
 
 ## Features
 
@@ -70,7 +71,8 @@ also import an existing Kometa `config.yml` (overlay blocks, defaults with
   assets, with configurable source precedence per field.
 - **Poster overlays** — resolution, HDR, audio codec, ratings, network
   badges, TV show status — rendered in a style compatible with Kometa's
-  defaults, including importing Kometa overlay YAML and image packs.
+  defaults, with known Kometa-style overlay/image packs downloadable
+  on demand (not an arbitrary local config import).
 - **Collections** — preset builders (TMDb collections, genre/year filters,
   curated lists) plus an "Adaptive Seasonal Collections" toggle that
   mirrors Kometa's own seasonal calendar (Halloween, Christmas, etc.).
@@ -252,8 +254,8 @@ Manager community:
 - **[Kometa](https://github.com/Kometa-Team/Kometa)** (MIT License) — the
   original inspiration and compatibility target. Finmeta does not reuse
   Kometa's code, and does not bundle or ship Kometa's overlay images;
-  instead it can *import* a user's own Kometa configuration and, on
-  request, download Kometa's defaults from their public GitHub repo at
+  instead it can download a curated set of known Kometa-style overlay
+  sources and Kometa's own defaults from their public GitHub repos at
   runtime. Finmeta's "Adaptive Seasonal Collections" preset is built
   directly from Kometa's published `defaults/movie/seasonal.yml` logic.
 - **[Kometa-Team/Community-Configs](https://github.com/Kometa-Team/Community-Configs)**
