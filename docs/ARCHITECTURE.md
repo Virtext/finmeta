@@ -50,7 +50,7 @@ allowed to read — the plan is never special-cased per consumer.
 | `sources/` | TMDb, fanart.tv, OMDb, MDBList, local asset directory — all return a common `Candidate`. |
 | `arr/` | Sonarr/Radarr clients (TV status, trending). |
 | `engine/` | Matching, overlay rendering, NFO generation, collections, `WritePlan`, diffing — most of the logic lives here. |
-| `kometa_import/` | Translates a user's Kometa overlay/collection YAML into Finmeta's own format. |
+| `kometa_import/` | Translates a known, curated Kometa-style overlay source's YAML into Finmeta's own format (download-on-demand, not an arbitrary local user config). |
 | `config/` | Pydantic v2 config models, secrets handling, hot reload. |
 | `api/` | FastAPI app: auth/sessions, scheduler, serves the bundled UI. |
 | `cli/` | `finmeta plan \| apply \| undo \| runs`. |
@@ -105,7 +105,7 @@ dependencies below are all either *data imports the user triggers* or
 
 | Source | License | How it's actually used |
 |---|---|---|
-| **Kometa** ([Kometa-Team/Kometa](https://github.com/Kometa-Team/Kometa)) | MIT | `kometa_import/` translates a user's own Kometa overlay/collection YAML into Finmeta's format. Kometa's public overlay images can be downloaded on request into the user's own config directory — never bundled in this repo or the Docker image. No Kometa source code is copied. |
+| **Kometa** ([Kometa-Team/Kometa](https://github.com/Kometa-Team/Kometa)) | MIT | `kometa_import/` translates a known, curated Kometa-style overlay source's YAML into Finmeta's format — a download-on-demand pick from a fixed list, not an arbitrary local config the user points Finmeta at. Images are downloaded on request into the user's own config directory — never bundled in this repo or the Docker image. No Kometa source code is copied. |
 | **Kometa — one exception** | MIT (data, not code) | The date windows and keywords in the built-in "Adaptive Seasonal Collections" preset (Halloween, Christmas, etc.) are copied verbatim from Kometa's own published `defaults/movie/seasonal.yml`. This is configuration data, not executable logic, and it's the only place anything from Kometa is copied literally rather than reimplemented. |
 | **UMTK** (netplexflix/Upcoming-Movies-TV-Shows-for-Kometa) | None published (all rights reserved) | The TV-status overlay feature is a clean-room implementation: built only from a public feature description plus the public Sonarr/Radarr/Jellyfin APIs. UMTK's own source was deliberately never read, copied, or paraphrased. No UMTK code or assets exist anywhere in this project. |
 | **Kometa-Team/Default-Images** | MIT | Network/streaming-service badge logos (Netflix, HBO, …), downloaded on demand into the user's own config directory, same pattern as the main Kometa pack. |

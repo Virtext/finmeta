@@ -121,7 +121,7 @@ FEATURES: Dict[str, Dict[str, str]] = {
                              "share one profile. Badge images come from two independent places: the "
                              "Kometa logo pack (a small fixed set of icons for ratings + the common "
                              "codec/resolution badges — install it once under \"Installed packs\") "
-                             "and/or a locally imported Kometa pack (see \"Import Kometa overlay\" "
+                             "and/or a downloaded known overlay pack (see \"Installed packs\" "
                              "below, for a richer set). Either way, a badge with no matching image "
                              "simply falls back to plain text — nothing ever breaks, it just looks "
                              "plainer."},
