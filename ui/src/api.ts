@@ -105,6 +105,16 @@ export function proxyUrl(kind: string, ref: string): string {
   return `/api/proxy/${b64url}`;
 }
 
+// The rendered-overlay bytes for a poster FileWrite's content_sha256 (see
+// GET /api/proxy/overlay/{digest}) -- NOT the same image proxyUrl(kind,
+// source_ref) would fetch: source_ref deliberately stays pointed at the
+// PRE-overlay original (O7, engine.overlay.overlay_file_write), so that
+// route alone always showed the un-overlaid candidate, never what Apply
+// actually writes.
+export function overlayProxyUrl(digest: string): string {
+  return `/api/proxy/overlay/${digest}`;
+}
+
 export function findFile(files: { kind: string; source_ref: string }[], kind: string) {
   return files.find((f) => f.kind === kind) ?? null;
 }

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Optional, Tuple
 
 import httpx
@@ -220,6 +221,33 @@ def proxy(token: str, ctx: AppContext = Depends(get_ctx)) -> Response:
     # "jumping" every time something nearby changed.
     return Response(content=data, media_type=ctype,
                     headers={"Cache-Control": "public, max-age=86400"})
+
+
+@router.get("/proxy/overlay/{digest}")
+def proxy_overlay(digest: str, ctx: AppContext = Depends(get_ctx)) -> Response:
+    """Serve the rendered-overlay bytes for a poster ``FileWrite``'s content_sha256.
+
+    The plain ``/proxy/{token}`` route above serves ``source_ref``, which
+    ``engine.overlay.overlay_file_write`` deliberately keeps pointed at the
+    PRE-overlay original (O7: so a later re-run never composites badges onto
+    an already-overlaid image). That means the UI's poster preview was
+    showing the un-overlaid candidate even right after a real Apply had
+    written the overlaid version to disk -- reported live 2026-10-31. The
+    overlaid bytes themselves are already cached by this exact digest during
+    ``build_plan`` (every poster ``FileWrite``'s ``content_sha256`` IS an
+    overlay-cache key); this route is the read side of that same cache, not
+    a new render path.
+    """
+    if not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise HTTPException(status_code=404, detail="bad digest")
+    from finmeta.engine.overlay import read_overlay_cache
+    data = read_overlay_cache(digest, config_dir=ctx.config_dir)
+    if data is None:
+        # Pruned, or the plan was built before the cache existed -- the
+        # caller (PreviewPane) falls back to the plain candidate proxy.
+        raise HTTPException(status_code=404, detail="overlay not cached")
+    return Response(content=data, media_type="image/jpeg",
+                    headers={"Cache-Control": "public, max-age=86400, immutable"})
 
 
 __all__ = ["router"]

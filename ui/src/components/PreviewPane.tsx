@@ -1,5 +1,5 @@
 import {
-  findFile, proxyUrl, reshuffleItem, skipItemKind, unskipItemKind,
+  findFile, overlayProxyUrl, proxyUrl, reshuffleItem, skipItemKind, unskipItemKind,
 } from '../api';
 import type { FileWrite, ItemLightView, PlanResp } from '../types';
 import { FileStatusBadge, StatusBadge } from '../badges';
@@ -29,6 +29,17 @@ function posterUrl(files: FileWrite[], kind: string): string | null {
   return f ? proxyUrl(f.kind, f.source_ref) : null;
 }
 
+// The poster card must show what Apply actually writes (the overlaid
+// render), not the plain candidate proxyUrl() above would fetch --
+// source_ref deliberately stays pointed at the pre-overlay original (O7).
+// Falls back to the plain candidate if the overlay cache entry is missing
+// (e.g. a plan built before this existed, or since pruned) via onError.
+function posterOverlayUrl(files: FileWrite[]): { src: string; fallback: string } | null {
+  const f = files.find((x) => x.kind === 'poster');
+  if (!f) return null;
+  return { src: overlayProxyUrl(f.content_sha256), fallback: proxyUrl(f.kind, f.source_ref) };
+}
+
 export default function PreviewPane(p: Props) {
   if (!p.item) {
     return (
@@ -43,7 +54,7 @@ export default function PreviewPane(p: Props) {
 
   const files = p.plan?.plan.files ?? [];
   const backdrop = posterUrl(files, 'backdrop');
-  const poster = posterUrl(files, 'poster');
+  const poster = posterOverlayUrl(files);
   const logo = posterUrl(files, 'logo');
   const themeSong = findFile(files, 'theme_song');
 
@@ -54,7 +65,12 @@ export default function PreviewPane(p: Props) {
           {/* Jellyfin-style poster card (planned / overlaid poster). */}
           <div className="poster-card">
             {poster ? (
-              <img className="poster-img" src={poster} alt={`${p.item.item_name} poster`} />
+              <img
+                className="poster-img" src={poster.src} alt={`${p.item.item_name} poster`}
+                onError={(e) => {
+                  if (e.currentTarget.src !== poster.fallback) e.currentTarget.src = poster.fallback;
+                }}
+              />
             ) : (
               <div className="poster-img poster-fallback">no poster</div>
             )}

@@ -138,6 +138,11 @@ def test_bulk_plan_run_covers_every_item(tmp_path, monkeypatch):
     assert j["status"] == "ok"
     # The plan run log records the item count; it must match the library size.
     assert any("items=12" in line["message"] for line in j["log"])
+    # files_written/files_unchanged/api_calls are apply-only counters (always
+    # 0 for a plan run) -- plan_summary is parsed from that same log line and
+    # is the only place the real counts surface to the UI.
+    assert j["plan_summary"]["items"] == 12
+    assert j["files_written"] == 0
 
 
 def test_dry_run_blocks_apply(tmp_path, monkeypatch):

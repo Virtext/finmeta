@@ -67,9 +67,21 @@ export default function BulkApplyPanel({ library, dryRun, runState, onStart }: P
         <div className={`run-result ${job.status}`}>
           <div className="run-statusline">
             <span className={`run-status ${job.status}`}>{job.status}</span>
-            <span className="muted">
-              {action} · {job.files_written} written · {job.files_unchanged} unchanged · {job.api_calls} api calls
-            </span>
+            {action === 'plan' ? (
+              job.plan_summary ? (
+                <span className="muted">
+                  plan · {job.plan_summary.items} items · {job.plan_summary.files} files would write ·
+                  {' '}{job.plan_summary.unmatched} unmatched · {job.plan_summary.actions} actions
+                  {job.plan_summary.format ? ` · ${job.plan_summary.format}` : ''}
+                </span>
+              ) : (
+                <span className="muted">plan · building…</span>
+              )
+            ) : (
+              <span className="muted">
+                {action} · {job.files_written} written · {job.files_unchanged} unchanged · {job.api_calls} api calls
+              </span>
+            )}
           </div>
           {logTail.length > 0 && (
             <div className="run-log">

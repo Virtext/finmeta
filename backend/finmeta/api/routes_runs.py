@@ -103,6 +103,23 @@ def job(job_id: str, ctx: AppContext = Depends(get_ctx)) -> dict:
         if m:
             warnings.append({"provider": m.group(1), "error": m.group(2),
                              "count": int(m.group(3))})
+    # A plan run never touches files_written/files_unchanged/api_calls (those
+    # are apply-only counters, always 0 here) -- the real counts only exist
+    # as the "plan ok ..." log line _do_plan writes. Parse it out so the UI
+    # can show the actual numbers instead of a misleading 0/0/0 summary.
+    plan_summary = None
+    for line in log:
+        m = re.match(
+            r"plan ok items=(\d+) files=(\d+) unmatched=(\d+) actions=(\d+)"
+            r"(?: format=(.*))? -> \S+$",
+            line["message"],
+        )
+        if m:
+            plan_summary = {
+                "items": int(m.group(1)), "files": int(m.group(2)),
+                "unmatched": int(m.group(3)), "actions": int(m.group(4)),
+                "format": m.group(5) or None,
+            }
     return {
         "run_id": run["run_id"], "status": run["status"],
         "started_at": run["started_at"], "finished_at": run["finished_at"],
@@ -111,6 +128,7 @@ def job(job_id: str, ctx: AppContext = Depends(get_ctx)) -> dict:
         "api_calls": run["api_calls"],
         "log": log,
         "provider_warnings": warnings,
+        "plan_summary": plan_summary,
     }
 
 

@@ -17,7 +17,7 @@ from .types import AuthResult, Item, Library, MediaStream, SystemInfo, Task
 
 _AUTH_HEADER = (
     'MediaBrowser Client="Finmeta", Device="dev", '
-    'DeviceId="finmeta-dev", Version="0.1.0"'
+    'DeviceId="finmeta-dev", Version="1.0.0"'
 )
 DEFAULT_ITEM_FIELDS = "Path,ProviderIds,Overview"
 

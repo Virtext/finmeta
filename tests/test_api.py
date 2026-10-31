@@ -135,7 +135,7 @@ def test_health(client):
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "ok"
-    assert body["version"] == "0.1.0"
+    assert body["version"] == "1.0.0"
     assert body["dry_run"] is True
     assert body["active_run"] is None
     assert body["active_run_scope"] is None

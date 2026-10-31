@@ -164,6 +164,14 @@ export interface JobResp {
   log: Array<{ ts: string; level: string; message: string }>;
   /** S9d2-fix2 step 6b: provider warnings for this run (mirrors plan). */
   provider_warnings?: ProviderWarning[];
+  /** Parsed from the "plan ok ..." log line -- null for apply runs (and for
+   * a plan run that hasn't reached that line yet). files_written/
+   * files_unchanged/api_calls above are always 0 for plan, so this is the
+   * only place the real counts live. */
+  plan_summary?: {
+    items: number; files: number; unmatched: number; actions: number;
+    format: string | null;
+  } | null;
 }
 
 export interface ActiveRunScope {
