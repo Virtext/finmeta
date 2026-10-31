@@ -50,7 +50,6 @@ allowed to read — the plan is never special-cased per consumer.
 | `sources/` | TMDb, fanart.tv, OMDb, MDBList, local asset directory — all return a common `Candidate`. |
 | `arr/` | Sonarr/Radarr clients (TV status, trending). |
 | `engine/` | Matching, overlay rendering, NFO generation, collections, `WritePlan`, diffing — most of the logic lives here. |
-| `kometa_import/` | Translates a known, curated Kometa-style overlay source's YAML into Finmeta's own format (download-on-demand, not an arbitrary local user config). |
 | `config/` | Pydantic v2 config models, secrets handling, hot reload. |
 | `api/` | FastAPI app: auth/sessions, scheduler, serves the bundled UI. |
 | `cli/` | `finmeta plan \| apply \| undo \| runs`. |
@@ -105,11 +104,10 @@ dependencies below are all either *data imports the user triggers* or
 
 | Source | License | How it's actually used |
 |---|---|---|
-| **Kometa** ([Kometa-Team/Kometa](https://github.com/Kometa-Team/Kometa)) | MIT | `kometa_import/` translates a known, curated Kometa-style overlay source's YAML into Finmeta's format — a download-on-demand pick from a fixed list, not an arbitrary local config the user points Finmeta at. Images are downloaded on request into the user's own config directory — never bundled in this repo or the Docker image. No Kometa source code is copied. |
+| **Kometa** ([Kometa-Team/Kometa](https://github.com/Kometa-Team/Kometa)) | MIT | The built-in "Kometa logo pack" downloads a small, fixed set of rating/codec/resolution icons from Kometa's own repo on request, into the user's own config directory — never bundled in this repo or the Docker image. No Kometa source code is copied, and there is no feature that imports a user's own Kometa configuration — one was attempted and removed, after it failed to reliably translate real-world Kometa overlay YAML even for Kometa's own built-in defaults. |
 | **Kometa — one exception** | MIT (data, not code) | The date windows and keywords in the built-in "Adaptive Seasonal Collections" preset (Halloween, Christmas, etc.) are copied verbatim from Kometa's own published `defaults/movie/seasonal.yml`. This is configuration data, not executable logic, and it's the only place anything from Kometa is copied literally rather than reimplemented. |
 | **UMTK** (netplexflix/Upcoming-Movies-TV-Shows-for-Kometa) | None published (all rights reserved) | The TV-status overlay feature is a clean-room implementation: built only from a public feature description plus the public Sonarr/Radarr/Jellyfin APIs. UMTK's own source was deliberately never read, copied, or paraphrased. No UMTK code or assets exist anywhere in this project. |
-| **Kometa-Team/Default-Images** | MIT | Network/streaming-service badge logos (Netflix, HBO, …), downloaded on demand into the user's own config directory, same pattern as the main Kometa pack. |
-| **Kometa-Team/Community-Configs contributors** | — | Real-world shared configs used only as test fixtures during development of Kometa-import compatibility; never shipped as product code. |
+| **Kometa-Team/Default-Images** | MIT | Network/streaming-service badge logos (Netflix, HBO, …), downloaded on demand into the user's own config directory, same pattern as the Kometa logo pack. |
 | Python/TypeScript dependencies (FastAPI, Pydantic, Pillow, httpx, React, Vite, …) | Each library's own (MIT/BSD/Apache) | Ordinary package dependencies, imported and used — not copied in. |
 | TMDb, fanart.tv, OMDb, MDBList, Jellyfin | API terms of service | Metadata/artwork/data sources accessed over their public APIs. Using Finmeta with these sources means agreeing to each one's own terms. |
 
@@ -117,11 +115,9 @@ dependencies below are all either *data imports the user triggers* or
 
 Finmeta ships with session-based auth (bcrypt-hashed admin password,
 `HttpOnly`/`SameSite=Strict` cookies), encrypted-at-rest secrets when
-`FINMETA_SECRET_KEY` is set, a locked-down `/api/proxy` that only ever
-fetches from the configured metadata-provider allowlist, and a size-capped,
-http/https-only, zip-slip-safe downloader for the one known third-party
-overlay source an operator can opt into importing. Dependency versions are
-kept current against known CVEs (Pillow and `certifi` in
+`FINMETA_SECRET_KEY` is set, and a locked-down `/api/proxy` that only ever
+fetches from the configured metadata-provider allowlist. Dependency versions
+are kept current against known CVEs (Pillow and `certifi` in
 particular are pinned to CVE-patched minimums).
 
 ## 5. Testing

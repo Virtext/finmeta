@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import { getConfig, putConfig, getLibraries, getItemsLight, getOverlays,
        installLogoPack, logoPackStatus, previewOverlay, saveOverlay, getHelp,
        getDefaultFormatRules, getJellyfinLibraries,
-       getPacks, deletePack, getKometaSources, importKometaRemote } from '../api';
+       getPacks, deletePack } from '../api';
 import type { JfLibrary, ImagePackInfo } from '../api';
 import type { HelpResp } from '../types';
 import { load as yamlLoad, dump as yamlDump } from 'js-yaml';
@@ -212,17 +212,17 @@ export default function OverlaysEditor({ initialLibrary }: Props) {
     }
   }
 
-  // S9d4c/2026-10-20: per-profile image packs (category-based matching, e.g.
-  // an imported Kometa setup) + "Import Kometa overlay" live together here,
-  // scoped to whichever profile is being edited above. Operator feedback
-  // (2026-10-20): the old separate "Packs" fieldset (per-pack, per-category
-  // checkboxes) was dropped in favour of one Activate/Deactivate button per
-  // installed pack, right inside "Installed packs" -- activating a pack now
-  // turns ALL its categories on (no more granular per-category override).
-  // 2026-10-22: the "Download a known overlay pack" (import-remote/jmxd)
-  // fetch form and the "Custom logos" flat-files option were both removed
-  // (operator decision) -- the Kometa logo pack + local "Import Kometa
-  // overlay" cover the full badge vocabulary on their own.
+  // S9d4c/2026-10-20: per-profile image packs (category-based matching)
+  // live here, scoped to whichever profile is being edited above. Operator
+  // feedback (2026-10-20): the old separate "Packs" fieldset (per-pack,
+  // per-category checkboxes) was dropped in favour of one Activate/Deactivate
+  // button per installed pack, right inside "Installed packs" -- activating a
+  // pack now turns ALL its categories on (no more granular per-category
+  // override).
+  // 2026-10-31: the Kometa overlay-import feature (download-on-demand +
+  // the never-shipped local-path variant) was dropped entirely -- it never
+  // reliably translated real-world Kometa configs (see docs/HISTORY.md).
+  // Packs now only ever arrive by hand under config/assets/packs/<name>/.
   const [availPacks, setAvailPacks] = useState<ImagePackInfo[]>([]);
   const [selPacks, setSelPacks] = useState<string[]>([]);
   const [packsMsg, setPacksMsg] = useState<string | null>(null);
@@ -232,36 +232,6 @@ export default function OverlaysEditor({ initialLibrary }: Props) {
     try { setAvailPacks((await getPacks()).packs ?? []); } catch { /* keep last good */ }
   }
   useEffect(() => { void refreshPacks(); }, []);
-
-  // Download+import a known third-party overlay source (Finmeta fetches the
-  // files itself instead of requiring them already on local disk). One known
-  // source -> one fixed pack name (source.default_pack_name, from the
-  // backend) -- no pack-name typing, no separate "download" panel: the
-  // Installed Packs list below IS the single place this lives, same row as
-  // Activate/Deactivate once it's in, operator feedback 2026-10-27 ("don't
-  // show the same pack in two different places").
-  const [sources, setSources] = useState<Record<string, {label:string; zip_url:string; default_pack_name:string}>>({});
-  const [rBusySource, setRBusySource] = useState<string | null>(null);
-  const [rStatus, setRStatus] = useState<string | null>(null);
-  const [rErr, setRErr] = useState<string | null>(null);
-  useEffect(() => { getKometaSources().then((d)=>setSources(d.sources)).catch(()=>{}); }, []);
-
-  async function downloadSource(sourceKey: string, overwrite: boolean) {
-    setRBusySource(sourceKey); setRErr(null); setRStatus(overwrite ? 'Updating…' : 'Downloading…');
-    try {
-      const r = await importKometaRemote({
-        source: sourceKey, pack_name: sources[sourceKey].default_pack_name,
-        dry_run: false, overwrite,
-      });
-      setRStatus(`Done: ${r.written?.length ?? 0} images.`);
-      await refreshPacks();
-    } catch (e: any) {
-      setRErr(e?.message ?? 'download failed');
-      setRStatus(null);
-    }
-    finally { setRBusySource(null); }
-  }
-
 
   // 2026-10-20: one Activate/Deactivate button per installed pack, persisted
   // immediately (no separate "Save" step) -- replaces the old PacksSection's
@@ -685,8 +655,6 @@ export default function OverlaysEditor({ initialLibrary }: Props) {
               onDeleteRichPack={(pn) => void deleteRichPack(pn)}
               profileName={activeName || savingAs || null}
               packsMsg={packsMsg} packsErr={packsErr}
-              sources={sources} rBusySource={rBusySource} rStatus={rStatus} rErr={rErr}
-              onDownloadSource={(k, overwrite) => void downloadSource(k, overwrite)}
             />
           )}
 
@@ -788,22 +756,17 @@ function BaseSettings({doc, patchBase}:{doc:OverlayDoc; patchBase:(k:keyof Overl
 }
 
 // ---------------------------------------------------------------------------
-// S9d4c: moved here from the Libraries tab so importing a new Kometa setup
-// and assigning it to the profile being edited above happen in one place.
-// Download+import a known overlay source by name. Finmeta fetches the files
-// itself instead of requiring them already on local disk -- not every
-// Kometa-style source works this way (only ones with self-contained
-// image+condition overlays, e.g. jmxd; sources built around Kometa's own
-// built-in default overlays or Plex-collection matching come back empty, see
-// feature.kometa_import help text), so this stays a pick-a-known-source list
-// rather than an arbitrary URL box.
-// 2026-10-20 operator feedback: "Logo packs" (the global Kometa/custom
+// S9d4c: moved here from the Libraries tab so toggling the Kometa logo pack
+// and assigning richer packs to the profile being edited above happen in one
+// place. 2026-10-20 operator feedback: "Logo packs" (the global Kometa/custom
 // chooser + install button) and the old "Packs" fieldset (per-profile,
 // per-category checkboxes) were three overlapping pack-related controls
-// scattered across the tab. Merged into one: download/import stays as
-// before, immediately followed by one Activate/Deactivate button per
-// installed source (Kometa logos, custom flat logos, and any richer
-// imported/downloaded pack) -- no more granular per-category toggles.
+// scattered across the tab. Merged into one: one Activate/Deactivate button
+// per installed source (the Kometa logo pack, plus any richer pack placed by
+// hand under config/assets/packs/) -- no more granular per-category toggles.
+// 2026-10-31: the Kometa overlay-import feature (download-on-demand) was
+// dropped entirely -- see docs/HISTORY.md. Richer packs now only ever arrive
+// by hand; this section no longer offers a download/import path for them.
 function KometaLogoRow({active, onToggle}: {active: boolean; onToggle: (on: boolean) => void}) {
   const [status, setStatus] = useState<string>('');
   const [busy, setBusy] = useState(false);
@@ -851,31 +814,15 @@ function KometaLogoRow({active, onToggle}: {active: boolean; onToggle: (on: bool
 }
 
 function InstalledPacksSection({
-  logoPacks, onToggleLogoPack, availPacks, selPacks, onToggleRichPack, onDeleteRichPack, profileName, packsMsg, packsErr,
-  sources, rBusySource, rStatus, rErr, onDownloadSource}: {
+  logoPacks, onToggleLogoPack, availPacks, selPacks, onToggleRichPack, onDeleteRichPack, profileName, packsMsg, packsErr}: {
   logoPacks: 'kometa'[]; onToggleLogoPack: (v: 'kometa'[]) => void;
   availPacks: ImagePackInfo[]; selPacks: string[];
   onToggleRichPack: (pn: string, on: boolean) => void;
   onDeleteRichPack: (pn: string) => void;
   profileName: string | null; packsMsg: string | null; packsErr: string | null;
-  sources: Record<string, {label:string; zip_url:string; default_pack_name:string}>;
-  rBusySource: string | null; rStatus: string | null; rErr: string | null;
-  onDownloadSource: (sourceKey: string, overwrite: boolean) => void;
 }) {
   const toggleKometa = (on: boolean) =>
     onToggleLogoPack(on ? ['kometa'] : []);
-  // One known source -> one fixed pack name: find which source (if any) a
-  // given pack name came from, so its row gets an inline Update button
-  // instead of a separate "download" panel elsewhere on the page.
-  const sourceKeyByPackName: Record<string, string> = {};
-  for (const [key, src] of Object.entries(sources)) sourceKeyByPackName[src.default_pack_name] = key;
-  // Was ['ichimoku'] (2026-10-27 -> 2026-10-30): a short-lived download
-  // feature for it was tried and reverted (never worked reliably for the
-  // operator), and with it the only reason this guard existed -- the
-  // operator now wants ichimoku deletable like any other hand-placed pack.
-  const PROTECTED_NO_SOURCE = new Set<string>([]);
-  const installedPackNames = new Set(availPacks.filter((x) => x.valid).map((x) => x.name));
-  const notYetInstalled = Object.entries(sources).filter(([, src]) => !installedPackNames.has(src.default_pack_name));
   return (
     <fieldset className="overlay-fieldset">
       <legend>Installed packs</legend>
@@ -894,7 +841,6 @@ function InstalledPacksSection({
       ))}
       {availPacks.filter((x) => x.valid).map((pk) => {
         const checked = selPacks.includes(pk.name);
-        const sourceKey = sourceKeyByPackName[pk.name];
         return (
           <div key={pk.name} className="pack-row">
             <label className="pack-name">
@@ -911,39 +857,11 @@ function InstalledPacksSection({
                       onClick={() => onToggleRichPack(pk.name, !checked)}>
                 {checked ? 'Deactivate' : 'Activate'}
               </button>
-              {sourceKey ? (
-                // Known-source pack: same pattern as the Kometa logo pack
-                // row below -- no Delete at all, just Activate/Deactivate +
-                // Update, so it can't be removed from the UI only to need
-                // re-downloading later (operator feedback 2026-10-27).
-                <button type="button" className="btn" disabled={rBusySource === sourceKey}
-                        onClick={() => onDownloadSource(sourceKey, true)}>
-                  {rBusySource === sourceKey ? 'Updating…' : 'Update'}
-                </button>
-              ) : !PROTECTED_NO_SOURCE.has(pk.name) ? (
-                <button type="button" className="btn btn-ghost" onClick={() => onDeleteRichPack(pk.name)}>Delete</button>
-              ) : null}
-              {sourceKey && rStatus && rBusySource === null && <span className="field-msg ok">{rStatus}</span>}
+              <button type="button" className="btn btn-ghost" onClick={() => onDeleteRichPack(pk.name)}>Delete</button>
             </div>
           </div>
         );
       })}
-      {notYetInstalled.map(([key, src]) => (
-        <div key={key} className="pack-row">
-          <label className="pack-name">
-            <strong>{src.label}</strong>
-            <span className="field-hint muted"> — not installed; other people's images, no licence file, fetched on demand into your own config/assets/packs/ only, never bundled with Finmeta</span>
-          </label>
-          <div style={{display:'flex', gap:'8px', marginTop:'4px', alignItems:'center'}}>
-            <button type="button" className="btn primary" disabled={rBusySource === key}
-                    onClick={() => onDownloadSource(key, false)}>
-              {rBusySource === key ? 'Downloading…' : 'Download'}
-            </button>
-            {rStatus && rBusySource === null && <span className="field-msg ok">{rStatus}</span>}
-          </div>
-        </div>
-      ))}
-      {rErr && <span className="error">{rErr}</span>}
       {packsMsg && <span className="field-msg ok">{packsMsg}</span>}
       {packsErr && <span className="error">{packsErr}</span>}
     </fieldset>

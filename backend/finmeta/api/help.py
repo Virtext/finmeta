@@ -121,8 +121,9 @@ FEATURES: Dict[str, Dict[str, str]] = {
                              "share one profile. Badge images come from two independent places: the "
                              "Kometa logo pack (a small fixed set of icons for ratings + the common "
                              "codec/resolution badges — install it once under \"Installed packs\") "
-                             "and/or a downloaded known overlay pack (see \"Installed packs\" "
-                             "below, for a richer set). Either way, a badge with no matching image "
+                             "and/or a richer image pack placed by hand under "
+                             "`config/assets/packs/<name>/` and activated under \"Installed packs\" "
+                             "below. Either way, a badge with no matching image "
                              "simply falls back to plain text — nothing ever breaks, it just looks "
                              "plainer."},
     "tab.collections": {"short": "Collections",
@@ -154,26 +155,6 @@ FEATURES: Dict[str, Dict[str, str]] = {
                      "long": "Mirrors public MDBList lists as Jellyfin collections, optionally "
                              "tagging the top 10 matched items with their rank as an overlay badge. "
                              "Needs an MDBList API key saved under Settings > Secrets."},
-    "feature.kometa_import": {"short": "Download a known overlay pack",
-        "long": "Brings in badge/overlay images (resolution, HDR, audio codec, edition, etc.) "
-                "from a known third-party Kometa-style overlay source — Finmeta fetches it for "
-                "you (no local copy needed first) and never ships or bundles these itself "
-                "(they're other people's images, usually with no licence file). Pick a source "
-                "from the list, give the pack a name, and run Preview first — it downloads the "
-                "source, shows exactly which images would be copied, and flags any that are "
-                "missing, without writing anything. Download & Import copies only the referenced "
-                "images (plus a small `pack.yml` describing them) into "
-                "`config/assets/packs/<pack name>/` — nothing else from the source is kept "
-                "afterward. After importing, activate the pack for a profile under Overlays > "
-                "Installed packs, and make sure the profile's elements (Resolution/HDR/Audio) "
-                "are turned on. Note: not every Kometa-style source works — only ones that "
-                "define their own image+condition per badge; sources that just reference "
-                "Kometa's own built-in default overlays by name, or match via Plex collection "
-                "membership, can't be translated and come back empty. Also: HDR/Audio/Edition "
-                "badges are matched against the video file's filename (standard scene-release "
-                "tags like `HDR10` or `Atmos`) — a plainly-named file (e.g. `Movie (2020).mkv`) "
-                "won't get those badges no matter which pack is active. Only Resolution is "
-                "detected from the actual video stream, independent of filename."},
     "auth": {"short": "Authentication",
              "long": "On first run you set an admin password (stored as a bcrypt hash in "
                      "`auth.yml`). Every `/api` route except `/api/health` and login requires a "
