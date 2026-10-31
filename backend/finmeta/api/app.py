@@ -25,7 +25,6 @@ from finmeta.api.routes_logo_packs import router as logo_packs_router
 from finmeta.api.routes_profiles import router as profiles_router
 from finmeta.api.routes_image_packs import router as image_packs_router
 from finmeta.api.routes_collections import router as collections_router
-from finmeta.api.routes_kometa import router as kometa_router
 from finmeta.api.routes_webhooks import router as webhooks_router
 
 # Where the built UI lives relative to this package (D1: resolved, not hardcoded
@@ -172,7 +171,6 @@ def create_app(context: AppContext) -> FastAPI:
     app.include_router(profiles_router)
     app.include_router(image_packs_router)
     app.include_router(collections_router)
-    app.include_router(kometa_router)
     app.include_router(webhooks_router)
 
     # Serve the UI last so /api/* and /api/docs win.

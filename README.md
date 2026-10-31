@@ -55,10 +55,11 @@ rendered poster before anything is written
 Kometa is built around Plex first, with Jellyfin support layered on top.
 Finmeta is Jellyfin-native from the ground up: it talks to the Jellyfin API
 directly, understands Jellyfin's own image/NFO conventions, and its UI is
-built for Jellyfin's data model rather than translated from Plex's. It can
-also download a curated set of known Kometa-style overlay sources
-(badge/overlay images) on demand to ease migration — not an arbitrary
-local Kometa `config.yml`.
+built for Jellyfin's data model rather than translated from Plex's. Its
+overlay badges are rendered in a style compatible with Kometa's own
+defaults, but Finmeta does not import a Kometa `config.yml` or any other
+Kometa configuration — image packs are placed by hand under
+`config/assets/packs/`.
 
 ## Features
 
@@ -71,8 +72,8 @@ local Kometa `config.yml`.
   assets, with configurable source precedence per field.
 - **Poster overlays** — resolution, HDR, audio codec, ratings, network
   badges, TV show status — rendered in a style compatible with Kometa's
-  defaults, with known Kometa-style overlay/image packs downloadable
-  on demand (not an arbitrary local config import).
+  defaults, with richer image packs placed by hand under
+  `config/assets/packs/`.
 - **Collections** — preset builders (TMDb collections, genre/year filters,
   curated lists) plus an "Adaptive Seasonal Collections" toggle that
   mirrors Kometa's own seasonal calendar (Halloween, Christmas, etc.).
@@ -254,14 +255,12 @@ Manager community:
 - **[Kometa](https://github.com/Kometa-Team/Kometa)** (MIT License) — the
   original inspiration and compatibility target. Finmeta does not reuse
   Kometa's code, and does not bundle or ship Kometa's overlay images;
-  instead it can download a curated set of known Kometa-style overlay
-  sources and Kometa's own defaults from their public GitHub repos at
-  runtime. Finmeta's "Adaptive Seasonal Collections" preset is built
-  directly from Kometa's published `defaults/movie/seasonal.yml` logic.
-- **[Kometa-Team/Community-Configs](https://github.com/Kometa-Team/Community-Configs)**
-  contributors, including **bullmoose20**, **Adam-Pope** and
-  **JJJonesJr33**, whose shared configs were used as real-world test
-  cases for Finmeta's Kometa-import compatibility.
+  the built-in "Kometa logo pack" instead downloads a small, fixed set of
+  rating/codec/resolution icons from Kometa's own public GitHub repo at
+  runtime, on request. Finmeta's "Adaptive Seasonal Collections" preset is
+  built directly from Kometa's published `defaults/movie/seasonal.yml`
+  logic. There is no feature that imports a user's own Kometa
+  configuration.
 - **[Jellyfin](https://jellyfin.org)** — the media server Finmeta is
   built for.
 - **[TMDb](https://www.themoviedb.org)** — the primary metadata and
@@ -271,10 +270,10 @@ Manager community:
   and **[MDBList](https://mdblist.com)** — optional additional metadata,
   ratings and artwork sources.
 
-Third-party overlay/logo packs and any Kometa assets a user imports
-through Finmeta are kept local to that user's own config directory and
-are never committed to this repository or shipped in the Docker image —
-see `.gitignore`.
+Third-party overlay/logo packs — hand-placed ones and anything Finmeta
+downloads on request (the Kometa logo pack, network badge logos) — are
+kept local to that user's own config directory and are never committed to
+this repository or shipped in the Docker image — see `.gitignore`.
 
 ## License
 

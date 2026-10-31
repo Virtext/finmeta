@@ -333,38 +333,3 @@ export const getCollectionPresets = () =>
   j<{ presets: CollectionPresetInfo[] }>('/api/collection-presets');
 
 
-export interface KometaImportResp {
-  dry_run: boolean;
-  pack_name: string;
-  pack_yml: { name: string; description?: string | null; categories: Record<string, PackCategoryDef> };
-  image_copies: [string, string][];
-  missing_images: string[];
-  written?: string[];
-  report?: {
-    source: string;
-    counts: Record<string, number>;
-    missing_templates: string[];
-    errors: string[];
-    items: { key: string; status: string; notes: string[] }[];
-  };
-}
-
-// Download+import a known (or custom) third-party overlay source by URL
-// instead of requiring it already sit on local disk first.
-export interface KometaSourceInfo { label: string; zip_url: string; default_pack_name: string }
-export interface KometaSourcesResp { sources: Record<string, KometaSourceInfo> }
-export const getKometaSources = () => j<KometaSourcesResp>('/api/kometa/sources');
-
-export interface KometaImportRemoteParams {
-  source?: string;
-  source_url?: string; root_dir?: string; overlay_file_rel?: string; kometa_root_rel?: string;
-  pack_name: string;
-  dry_run?: boolean;
-  overwrite?: boolean;
-}
-export const importKometaRemote = (params: KometaImportRemoteParams) =>
-  j<KometaImportResp>('/api/kometa/import-remote', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params),
-  });
