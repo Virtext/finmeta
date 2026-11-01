@@ -1139,6 +1139,13 @@ def _profile_style(lib_cfg, cfg: Config):
             raw["position"] = raw.pop("base_position")
         raw.pop("elements", None)
         raw.pop("ribbon_text", None)
+        # Operator-reported (2026-11-01): status_colors is also an
+        # OverlayStyleDoc-only field (missing from this same drop list), so
+        # ANY profile whose saved style carries it -- even `{}`, which the
+        # editor always saves -- failed this TypeAdapter validation on every
+        # single preview request and silently fell back to the global style,
+        # discarding the profile's own position/margin/font/bg/fg/radius.
+        raw.pop("status_colors", None)
         merged = dict(base.model_dump())
         merged.update(raw)
         return TypeAdapter(type(base)).validate_python(merged)

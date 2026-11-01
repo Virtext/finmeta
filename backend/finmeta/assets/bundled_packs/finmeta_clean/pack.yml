@@ -1,0 +1,18 @@
+# Finmeta badge pack: "clean" -- flat off-white wordmarks, no chips, no
+# gradients. Original artwork (2026-11-01); not a copy of any third-party
+# pack's pixels. The "double-D" glyph on Dolby-licensed formats (DV, Atmos,
+# DD/DD+, TrueHD) is Finmeta's own redrawn take on that family mark, used
+# under the same self-hosted/non-commercial convention as every Kometa- and
+# jmxd-style overlay pack; never applied to DTS, which is a different vendor.
+name: finmeta_clean
+description: Flat off-white badges, no gradients -- minimal, jmxd-adjacent.
+categories:
+  resolution:
+    matcher: format_rule
+    keys: [res_4k, res_1080p, res_720p, res_576p, res_480p]
+  dynamic_range:
+    matcher: format_rule
+    keys: [dv_hdr_plus, dv_hdr, dv, hdr10plus, hdr10, hlg]
+  audio:
+    matcher: format_rule
+    keys: [truehd_atmos, ddplus_atmos, truehd, ddplus, dd, dtsx, dtshd_ma, dts, aac]

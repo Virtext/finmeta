@@ -472,6 +472,8 @@ class AppContext:
 
     # -- lifecycle ----------------------------------------------------------
     def start(self) -> None:
+        from finmeta.engine.image_packs import seed_bundled_packs
+        seed_bundled_packs(self._config_dir)
         from finmeta.api import scheduler as sched
         sched.start(self)
 

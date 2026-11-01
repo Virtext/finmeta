@@ -1,0 +1,15 @@
+# Finmeta badge pack: "dynamic" -- per-family diagonal gradients (own hex
+# stops, not copied from Kometa). Original artwork (2026-11-01). Same
+# double-D glyph/attribution note as finmeta_clean's pack.yml applies here.
+name: finmeta_dynamic
+description: Per-family gradient badges -- colourful, Kometa-adjacent.
+categories:
+  resolution:
+    matcher: format_rule
+    keys: [res_4k, res_1080p, res_720p, res_576p, res_480p]
+  dynamic_range:
+    matcher: format_rule
+    keys: [dv_hdr_plus, dv_hdr, dv, hdr10plus, hdr10, hlg]
+  audio:
+    matcher: format_rule
+    keys: [truehd_atmos, ddplus_atmos, truehd, ddplus, dd, dtsx, dtshd_ma, dts, aac]
