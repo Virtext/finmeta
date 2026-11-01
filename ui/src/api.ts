@@ -313,6 +313,7 @@ export interface ImagePackInfo {
   description?: string | null;
   categories: Record<string, PackCategoryDef>;
   missing_images: string[];
+  warnings: string[];
   valid: boolean;
   error?: string | null;
 }
@@ -320,6 +321,16 @@ export interface PacksResp { packs: ImagePackInfo[] }
 export const getPacks = () => j<PacksResp>('/api/packs');
 export const deletePack = (name: string) =>
   j<{ ok: boolean; name: string }>(`/api/packs/${enc(name)}`, { method: 'DELETE' });
+// 2026-11-01: the only way to start a new pack now that Kometa overlay-import
+// is gone -- writes a pack.yml pre-filled with K9's own format_rule keys for
+// the chosen categories (default: all three) so it resolves as soon as
+// matching images are dropped in. See docs/BADGE_PACKS.md.
+export const scaffoldPack = (name: string, categories?: string[]) =>
+  j<ImagePackInfo>('/api/packs/scaffold', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(categories ? { name, categories } : { name }),
+  });
 
 // S9f2: built-in preset collections (seasonal + chart) catalog.
 export interface CollectionPresetInfo {

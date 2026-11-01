@@ -58,6 +58,92 @@ class TestPackLoader:
         assert packs == []
 
 
+# ---------------------------------------------------------------------------
+# Flat auto-detected packs (2026-11-01): a directory with NO pack.yml but a
+# flat images/<key>.png layout (no per-category subfolder) is auto-detected
+# by matching each filename against K9's own format_rule vocabulary --
+# operator-requested simplification after writing pack.yml by hand (and
+# getting its category names/subfolders right) turned out to be the actual
+# blocker on a real first attempt. See docs/BADGE_PACKS.md.
+# ---------------------------------------------------------------------------
+
+class TestFlatAutoPack:
+    def _make_flat_pack(self, tmp_path, name: str, keys: list[str], size=(300, 150)):
+        from PIL import Image
+        d = tmp_path / "assets" / "packs" / name / "images"
+        d.mkdir(parents=True)
+        for key in keys:
+            Image.new("RGBA", size).save(d / f"{key}.png")
+        return d
+
+    def test_detected_and_categorised_purely_from_filenames(self, tmp_path):
+        self._make_flat_pack(tmp_path, "flat-demo", ["res_4k", "dv_hdr", "dtsx"])
+        packs = load_packs(tmp_path)
+        p = next(pk for pk in packs if pk.name == "flat-demo")
+        assert p.valid is True
+        assert set(p.categories.keys()) == {"resolution", "dynamic_range", "audio"}
+        for cat_def in p.categories.values():
+            assert cat_def.matcher == "format_rule"
+
+    def test_unrecognised_filenames_are_ignored_not_a_category(self, tmp_path):
+        self._make_flat_pack(tmp_path, "flat-demo", ["res_4k", "totally_made_up"])
+        packs = load_packs(tmp_path)
+        p = next(pk for pk in packs if pk.name == "flat-demo")
+        assert set(p.categories.keys()) == {"resolution"}
+
+    def test_no_recognised_keys_at_all_is_not_a_pack(self, tmp_path):
+        self._make_flat_pack(tmp_path, "random-folder", ["vacation_photo", "poster_v2"])
+        packs = load_packs(tmp_path)
+        assert "random-folder" not in [p.name for p in packs]
+
+    def test_empty_images_dir_is_not_a_pack(self, tmp_path):
+        (tmp_path / "assets" / "packs" / "empty" / "images").mkdir(parents=True)
+        packs = load_packs(tmp_path)
+        assert "empty" not in [p.name for p in packs]
+
+    def test_missing_images_reports_the_full_k9_vocabulary(self, tmp_path):
+        self._make_flat_pack(tmp_path, "flat-demo", ["res_4k"])
+        packs = load_packs(tmp_path)
+        p = next(pk for pk in packs if pk.name == "flat-demo")
+        assert "resolution/res_4k" not in p.missing_images
+        assert "resolution/res_1080p" in p.missing_images   # present as a key, just not as a file
+
+    def test_resolve_pack_image_reads_the_flat_layout(self, tmp_path):
+        self._make_flat_pack(tmp_path, "flat-demo", ["res_4k"])
+        data = resolve_pack_image(tmp_path, "flat-demo", "resolution", "res_4k")
+        assert data is not None
+        assert resolve_pack_image(tmp_path, "flat-demo", "resolution", "res_1080p") is None
+
+    def test_pack_yml_present_wins_over_flat_detection(self, tmp_path):
+        """A real pack.yml always takes priority -- flat auto-detection only
+        ever applies when there's no pack.yml at all."""
+        d = self._make_flat_pack(tmp_path, "explicit", ["res_4k"])
+        (d.parent / "pack.yml").write_text(
+            "name: explicit\ndescription: hand-written\ncategories: {}\n"
+        )
+        packs = load_packs(tmp_path)
+        p = next(pk for pk in packs if pk.name == "explicit")
+        assert p.description == "hand-written"
+        assert p.categories == {}   # the hand-written (empty) categories, not the auto-detected ones
+
+    def test_cache_invalidates_when_a_file_is_added(self, tmp_path, monkeypatch):
+        """Same signature-based cache as pack.yml packs -- adding a PNG to a
+        flat pack must be picked up once the TTL passes, not stuck forever."""
+        import finmeta.engine.image_packs as ip
+        monkeypatch.setattr(ip, "_SIG_TTL", 0.0)
+        self._make_flat_pack(tmp_path, "flat-demo", ["res_4k"])
+        first = load_packs(tmp_path)
+        p1 = next(pk for pk in first if pk.name == "flat-demo")
+        assert "resolution/res_1080p" in p1.missing_images
+
+        from PIL import Image
+        Image.new("RGBA", (300, 150)).save(
+            tmp_path / "assets" / "packs" / "flat-demo" / "images" / "res_1080p.png")
+        second = load_packs(tmp_path)
+        p2 = next(pk for pk in second if pk.name == "flat-demo")
+        assert "resolution/res_1080p" not in p2.missing_images
+
+
 class TestPackDef:
     def test_valid_def(self):
         d = PackDef(
@@ -256,7 +342,12 @@ class TestPackDefsCache:
 # disk to delete, so they build one directly instead of importing it.
 # ---------------------------------------------------------------------------
 
-class TestDeletePackApi:
+class _PackApiFixtures:
+    """Shared context/client fixtures for the pack-mutation API tests below.
+
+    Deliberately NOT named Test* -- pytest would otherwise collect (and
+    re-run) every test method inherited from it under each subclass too.
+    """
     CONFIG_YAML = "\n".join([
         "dry_run: true",
         "server:",
@@ -308,6 +399,8 @@ class TestDeletePackApi:
         Image.new("RGB", (4, 4)).save(d / "images" / "resolution" / "res_4k.png")
         return d
 
+
+class TestDeletePackApi(_PackApiFixtures):
     def test_delete_pack_removes_files_and_listing(self, client, context):
         target = self._write_pack_with_image(context)
         assert target.is_dir()
@@ -316,7 +409,11 @@ class TestDeletePackApi:
         assert r.status_code == 200, r.text
         assert r.json() == {"ok": True, "name": "media-info-pack"}
         assert not target.exists()
-        assert client.get("/api/packs").json()["packs"] == []
+        # Not an empty list any more: AppContext.start() (which TestClient's
+        # lifespan triggers) seeds Finmeta's own bundled packs on first run --
+        # this test only asserts the ONE pack it made is gone, not that every
+        # pack is gone (see engine.image_packs.seed_bundled_packs).
+        assert "media-info-pack" not in [p["name"] for p in client.get("/api/packs").json()["packs"]]
 
     def test_delete_unknown_pack_404(self, client, context):
         r = client.delete("/api/packs/does-not-exist")
@@ -358,3 +455,46 @@ class TestDeletePackApi:
         prof = client.get("/api/config").json()["parsed"]["overlays"]["profiles"]["Movies-auto"]
         assert prof["packs"] == []
         assert "pack_overrides" not in prof or prof["pack_overrides"] in (None, {})
+
+
+# ---------------------------------------------------------------------------
+# POST /api/packs/scaffold (2026-11-01): the only path to a new pack now that
+# the Kometa overlay-import feature is gone -- generates a pack.yml with K9's
+# own format_rule keys pre-filled, so the operator only has to drop images in.
+# ---------------------------------------------------------------------------
+
+class TestScaffoldPackApi(_PackApiFixtures):
+    def test_scaffold_creates_pack_with_all_categories_by_default(self, client, context):
+        r = client.post("/api/packs/scaffold", json={"name": "my-new-pack"})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["name"] == "my-new-pack"
+        assert set(body["categories"]) == {"resolution", "dynamic_range", "audio"}
+        assert len(body["missing_images"]) == 5 + 6 + 9   # every key, no images yet
+        pack_dir = context.config_dir / "assets" / "packs" / "my-new-pack"
+        assert (pack_dir / "pack.yml").is_file()
+        assert (pack_dir / "images" / "resolution").is_dir()
+
+    def test_scaffold_resolves_via_format_rule_once_images_dropped_in(self, client, context):
+        from PIL import Image
+        r = client.post("/api/packs/scaffold", json={"name": "p2", "categories": ["resolution"]})
+        assert r.status_code == 200, r.text
+        img_dir = context.config_dir / "assets" / "packs" / "p2" / "images" / "resolution"
+        Image.new("RGBA", (200, 150)).save(img_dir / "res_4k.png")
+        body = client.get("/api/packs").json()
+        p2 = next(p for p in body["packs"] if p["name"] == "p2")
+        assert "resolution/res_4k" not in p2["missing_images"]
+        assert "resolution/res_1080p" in p2["missing_images"]
+
+    def test_scaffold_rejects_existing_pack_name(self, client, context):
+        self._write_pack_with_image(context, name="taken")
+        r = client.post("/api/packs/scaffold", json={"name": "taken"})
+        assert r.status_code == 409
+
+    def test_scaffold_rejects_unknown_category(self, client, context):
+        r = client.post("/api/packs/scaffold", json={"name": "p3", "categories": ["not_a_real_category"]})
+        assert r.status_code == 400
+
+    def test_scaffold_rejects_bad_name(self, client, context):
+        r = client.post("/api/packs/scaffold", json={"name": "../etc"})
+        assert r.status_code == 400

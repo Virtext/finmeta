@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import { getConfig, putConfig, getLibraries, getItemsLight, getOverlays,
        installLogoPack, logoPackStatus, previewOverlay, saveOverlay, getHelp,
        getDefaultFormatRules, getJellyfinLibraries,
-       getPacks, deletePack } from '../api';
+       getPacks, deletePack, scaffoldPack } from '../api';
 import type { JfLibrary, ImagePackInfo } from '../api';
 import type { HelpResp } from '../types';
 import { load as yamlLoad, dump as yamlDump } from 'js-yaml';
@@ -232,6 +232,22 @@ export default function OverlaysEditor({ initialLibrary }: Props) {
     try { setAvailPacks((await getPacks()).packs ?? []); } catch { /* keep last good */ }
   }
   useEffect(() => { void refreshPacks(); }, []);
+
+  // 2026-11-01: "New pack" scaffold -- the only path to a new pack now that
+  // Kometa overlay-import is gone. Writes pack.yml (format_rule, K9's own
+  // keys) + empty images/<category>/ dirs; no image files. See
+  // docs/BADGE_PACKS.md for what to drop into those directories afterwards.
+  async function scaffoldNewPack(name: string, categories: string[]): Promise<void> {
+    setPacksErr(null); setPacksMsg(null);
+    try {
+      await scaffoldPack(name, categories);
+      await refreshPacks();
+      setPacksMsg(`"${name}" created — drop images into assets/packs/${name}/images/<category>/`);
+      setTimeout(() => setPacksMsg(null), 6000);
+    } catch (e: any) {
+      setPacksErr(e?.message ?? 'create failed');
+    }
+  }
 
   // 2026-10-20: one Activate/Deactivate button per installed pack, persisted
   // immediately (no separate "Save" step) -- replaces the old PacksSection's
@@ -653,6 +669,7 @@ export default function OverlaysEditor({ initialLibrary }: Props) {
               availPacks={availPacks} selPacks={selPacks}
               onToggleRichPack={(pn, on) => void toggleRichPack(pn, on)}
               onDeleteRichPack={(pn) => void deleteRichPack(pn)}
+              onScaffoldPack={(name, cats) => void scaffoldNewPack(name, cats)}
               profileName={activeName || savingAs || null}
               packsMsg={packsMsg} packsErr={packsErr}
             />
@@ -813,12 +830,92 @@ function KometaLogoRow({active, onToggle}: {active: boolean; onToggle: (on: bool
   );
 }
 
+// `id` is the literal folder name on disk (assets/packs/<pack>/images/<id>/)
+// -- it must stay visible next to the friendly `label`, not replace it.
+// Real operator mistake (2026-11-01): typed the friendly label itself
+// ("Dynamic range (HDR)") as a folder name, so nothing in it was ever found.
+const SCAFFOLD_CATEGORIES: { id: string; label: string; exampleKey: string }[] = [
+  { id: 'resolution', label: 'Resolution', exampleKey: 'res_4k' },
+  { id: 'dynamic_range', label: 'Dynamic range (HDR)', exampleKey: 'hdr10' },
+  { id: 'audio', label: 'Audio', exampleKey: 'dts' },
+];
+
+// 2026-11-01: the only way to start a new pack now that Kometa overlay-import
+// is gone -- writes pack.yml pre-filled with K9's own format_rule keys (see
+// docs/BADGE_PACKS.md), the operator then drops images into the folders it
+// creates. Own small form, not a modal -- matches this fieldset's existing
+// inline-row style.
+function NewPackForm({ onCreate }: { onCreate: (name: string, categories: string[]) => void }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState('');
+  const [cats, setCats] = useState<string[]>(SCAFFOLD_CATEGORIES.map((c) => c.id));
+
+  if (!open) {
+    return (
+      <div style={{marginTop:'6px'}}>
+        <button type="button" className="btn btn-ghost" onClick={() => setOpen(true)}>
+          + New pack
+        </button>
+        <p className="field-hint muted" style={{margin:'4px 0 0'}}>
+          Tip: for a resolution/HDR/audio-only pack you can skip this form entirely — create{' '}
+          <code>assets/packs/&lt;name&gt;/images/</code> yourself and drop correctly-named PNGs
+          straight into it, no pack.yml or subfolders needed. See docs/BADGE_PACKS.md.
+        </p>
+      </div>
+    );
+  }
+  const valid = /^[A-Za-z0-9_.-]+$/.test(name.trim());
+  return (
+    <div className="pack-row" style={{border:'1px dashed var(--border)', padding:'10px'}}>
+      <label className="form-label">Pack name
+        <input type="text" value={name} placeholder="my-badges"
+               onChange={(e) => setName(e.target.value)} className="config-input"/>
+      </label>
+      <div style={{display:'flex', gap:'14px', margin:'8px 0', flexWrap:'wrap'}}>
+        {SCAFFOLD_CATEGORIES.map((c) => (
+          <label key={c.id} style={{display:'flex', gap:'4px', alignItems:'center'}}>
+            <input type="checkbox" checked={cats.includes(c.id)}
+                   onChange={(e) => setCats(e.target.checked
+                     ? [...cats, c.id] : cats.filter((x) => x !== c.id))}/>
+            {c.label} <code className="field-hint muted">({c.id})</code>
+          </label>
+        ))}
+      </div>
+      <div style={{display:'flex', gap:'8px', alignItems:'center'}}>
+        <button type="button" className="btn primary" disabled={!valid || cats.length === 0}
+                onClick={() => { onCreate(name.trim(), cats); setOpen(false); setName(''); }}>
+          Create
+        </button>
+        <button type="button" className="btn btn-ghost" onClick={() => setOpen(false)}>Cancel</button>
+      </div>
+      <div className="field-hint muted" style={{marginBottom:0}}>
+        <p style={{margin:'0 0 4px'}}>
+          Creates an empty pack.yml with the right keys pre-filled. Then drop <strong>PNG</strong> files
+          (not SVG — the renderer only reads PNG) into the exact folder named in parentheses above, using
+          the exact key names from docs/BADGE_PACKS.md, e.g.:
+        </p>
+        {cats.length > 0 ? (
+          <ul style={{margin:0, paddingLeft:'18px'}}>
+            {SCAFFOLD_CATEGORIES.filter((c) => cats.includes(c.id)).map((c) => (
+              <li key={c.id}>
+                <code>assets/packs/{name.trim() || '…'}/images/{c.id}/{c.exampleKey}.png</code>
+              </li>
+            ))}
+          </ul>
+        ) : <p style={{margin:0}}>(pick at least one category above to see example paths)</p>}
+      </div>
+    </div>
+  );
+}
+
 function InstalledPacksSection({
-  logoPacks, onToggleLogoPack, availPacks, selPacks, onToggleRichPack, onDeleteRichPack, profileName, packsMsg, packsErr}: {
+  logoPacks, onToggleLogoPack, availPacks, selPacks, onToggleRichPack, onDeleteRichPack,
+  onScaffoldPack, profileName, packsMsg, packsErr}: {
   logoPacks: 'kometa'[]; onToggleLogoPack: (v: 'kometa'[]) => void;
   availPacks: ImagePackInfo[]; selPacks: string[];
   onToggleRichPack: (pn: string, on: boolean) => void;
   onDeleteRichPack: (pn: string) => void;
+  onScaffoldPack: (name: string, categories: string[]) => void;
   profileName: string | null; packsMsg: string | null; packsErr: string | null;
 }) {
   const toggleKometa = (on: boolean) =>
@@ -852,6 +949,11 @@ function InstalledPacksSection({
                 missing images: {pk.missing_images.join(', ')}
               </div>
             )}
+            {pk.warnings?.length > 0 && (
+              <div className="pack-missing field-hint" style={{ color: 'var(--update)' }}>
+                {pk.warnings.join(' · ')}
+              </div>
+            )}
             <div style={{display:'flex', gap:'8px', marginTop:'4px', alignItems:'center', flexWrap:'wrap'}}>
               <button type="button" className={`btn ${checked ? '' : 'primary'}`} disabled={!profileName}
                       onClick={() => onToggleRichPack(pk.name, !checked)}>
@@ -862,9 +964,100 @@ function InstalledPacksSection({
           </div>
         );
       })}
+      <NewPackForm onCreate={onScaffoldPack}/>
+      <PackNamingHelp/>
       {packsMsg && <span className="field-msg ok">{packsMsg}</span>}
       {packsErr && <span className="error">{packsErr}</span>}
     </fieldset>
+  );
+}
+
+// 2026-11-01: every key format_rule actually matches on, with a plain-
+// language description, grouped the same way images/<category>/ is on
+// disk. The single most-requested piece of info once an operator starts
+// dropping their own PNGs in -- "what do I name this file, exactly."
+const KEY_REFERENCE: { category: string; label: string; rows: { key: string; means: string }[] }[] = [
+  { category: 'resolution', label: 'Resolution', rows: [
+    { key: 'res_4k', means: '4K / UHD (source width ≥ 3200px)' },
+    { key: 'res_1080p', means: '1080p / Full HD' },
+    { key: 'res_720p', means: '720p / HD' },
+    { key: 'res_576p', means: '576p (PAL SD)' },
+    { key: 'res_480p', means: '480p (NTSC SD)' },
+  ]},
+  { category: 'dynamic_range', label: 'Dynamic range (HDR)', rows: [
+    { key: 'dv_hdr_plus', means: 'Dolby Vision + HDR10+' },
+    { key: 'dv_hdr', means: 'Dolby Vision + HDR10' },
+    { key: 'dv', means: 'Dolby Vision (no HDR10 layer)' },
+    { key: 'hdr10plus', means: 'HDR10+' },
+    { key: 'hdr10', means: 'HDR10' },
+    { key: 'hlg', means: 'HLG (Hybrid Log-Gamma)' },
+  ]},
+  { category: 'audio', label: 'Audio', rows: [
+    { key: 'truehd_atmos', means: 'Dolby TrueHD with Atmos' },
+    { key: 'ddplus_atmos', means: 'Dolby Digital+ (E-AC3) with Atmos' },
+    { key: 'dtsx', means: 'DTS:X' },
+    { key: 'dtshd_ma', means: 'DTS-HD Master Audio' },
+    { key: 'truehd', means: 'Dolby TrueHD' },
+    { key: 'ddplus', means: 'Dolby Digital+ (E-AC3)' },
+    { key: 'dts', means: 'DTS (plain, no X/HD MA)' },
+    { key: 'dd', means: 'Dolby Digital (AC3)' },
+    { key: 'aac', means: 'AAC' },
+  ]},
+];
+
+// Collapsible <details> (native disclosure widget, no new component library
+// needed) living right in Installed Packs -- operator-requested: a
+// reference for exactly what to name every single image, not just the
+// mechanism, surfaced in the app itself rather than only in
+// docs/BADGE_PACKS.md (which still has the advanced matchers/full schema).
+function PackNamingHelp() {
+  return (
+    <details className="pack-row" style={{marginTop:'10px'}}>
+      <summary style={{cursor:'pointer', fontWeight:600}}>
+        How do I add my own badge images?
+      </summary>
+      <div style={{marginTop:'10px'}}>
+        <p className="field-hint muted" style={{marginTop:0}}>
+          Create <code>assets/packs/&lt;your-pack-name&gt;/images/</code> and drop PNG files
+          straight into it — one file per key below, named exactly as shown (no subfolders, no
+          pack.yml). Finmeta reads each filename and works out on its own which badge it is;
+          every key is unique across all three categories, so the name alone is enough. Add only
+          the keys you want to override — anything you skip just has no badge for that case.
+        </p>
+        <p className="field-hint muted">
+          <strong>Format:</strong> PNG with a transparent background, tightly cropped to the
+          visible artwork (not a full poster-sized canvas) — roughly 150–250px tall is a good
+          native size. Finmeta always scales to fit, so exact width doesn't matter.
+        </p>
+        {KEY_REFERENCE.map((group) => (
+          <div key={group.category} style={{marginTop:'10px'}}>
+            <div style={{fontWeight:600, fontSize:'0.9em'}}>
+              {group.label} <code className="field-hint muted">({group.category})</code>
+            </div>
+            <div style={{overflowX:'auto'}}>
+              <table style={{width:'100%', borderCollapse:'collapse', fontSize:'0.88em', marginTop:'4px'}}>
+                <tbody>
+                  {group.rows.map((r) => (
+                    <tr key={r.key} style={{borderTop:'1px solid var(--border)'}}>
+                      <td style={{padding:'3px 8px 3px 0', whiteSpace:'nowrap'}}>
+                        <code>{r.key}.png</code>
+                      </td>
+                      <td style={{padding:'3px 0', color:'var(--text-muted, inherit)'}}>{r.means}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ))}
+        <p className="field-hint muted" style={{marginTop:'10px', marginBottom:0}}>
+          Want badges keyed off the video <em>filename</em> instead (scene-release tags like
+          "2160p", "DTS-X"), your own categories, or TMDb-rating tiers? Those need a hand-written
+          <code> pack.yml</code> — see <code>docs/BADGE_PACKS.md</code> in the repo for the full
+          schema and every matcher type.
+        </p>
+      </div>
+    </details>
   );
 }
 

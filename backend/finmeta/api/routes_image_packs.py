@@ -3,18 +3,36 @@ from __future__ import annotations
 
 import re
 import shutil
+from typing import List
 
 import yaml
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 
 from finmeta.api.deps import get_ctx
 from finmeta.api.state import AppContext
 from finmeta.config.loading import ConfigError
-from finmeta.engine.image_packs import load_packs
+from finmeta.engine.image_packs import get_pack, load_packs
 
 router = APIRouter(prefix="/api/packs", tags=["packs"])
 
 _NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+
+#: format_rule keys for a scaffolded pack's categories -- exactly K9's own
+#: vocabulary (engine/format_rules.py's DEFAULT_FORMAT_RULES `image` fields),
+#: so a scaffolded pack.yml resolves with zero further edits once the
+#: operator drops matching PNGs in. See docs/BADGE_PACKS.md.
+_SCAFFOLD_CATEGORIES = {
+    "resolution": ["res_4k", "res_1080p", "res_720p", "res_576p", "res_480p"],
+    "dynamic_range": ["dv_hdr_plus", "dv_hdr", "dv", "hdr10plus", "hdr10", "hlg"],
+    "audio": ["truehd_atmos", "ddplus_atmos", "truehd", "ddplus", "dd",
+              "dtsx", "dtshd_ma", "dts", "aac"],
+}
+
+
+class ScaffoldPackReq(BaseModel):
+    name: str
+    categories: List[str] = Field(default_factory=lambda: list(_SCAFFOLD_CATEGORIES))
 
 
 @router.get("")
@@ -26,6 +44,41 @@ def list_packs(ctx: AppContext = Depends(get_ctx)):
     """
     packs = load_packs(ctx.config_dir)
     return {"packs": [p.model_dump() for p in packs]}
+
+
+@router.post("/scaffold")
+def scaffold_pack(req: ScaffoldPackReq, ctx: AppContext = Depends(get_ctx)):
+    """Create a new pack.yml pre-filled with K9's own format_rule keys for
+    the requested categories, plus empty images/<category>/ directories.
+
+    No image files are written -- the operator drops their own PNGs in
+    afterwards (GET /api/packs then reports exactly which keys are still
+    missing, same as any other pack). This is the only thing a hand-made
+    pack needs to get right to resolve automatically; see docs/BADGE_PACKS.md.
+    """
+    name = req.name.strip()
+    if name in (".", "..") or not _NAME_RE.match(name):
+        raise HTTPException(status_code=400, detail=f"invalid pack name: {name!r}")
+    categories = req.categories or list(_SCAFFOLD_CATEGORIES)
+    unknown = [c for c in categories if c not in _SCAFFOLD_CATEGORIES]
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"unknown categories: {unknown}")
+
+    pack_dir = (ctx.config_dir / "assets" / "packs" / name)
+    if pack_dir.exists():
+        raise HTTPException(status_code=409, detail=f"pack already exists: {name}")
+
+    lines = [f"name: {name}", "categories:"]
+    for cat in categories:
+        keys = ", ".join(_SCAFFOLD_CATEGORIES[cat])
+        lines += [f"  {cat}:", "    matcher: format_rule", f"    keys: [{keys}]"]
+    pack_dir.mkdir(parents=True)
+    (pack_dir / "pack.yml").write_text("\n".join(lines) + "\n")
+    for cat in categories:
+        (pack_dir / "images" / cat).mkdir(parents=True)
+
+    info = get_pack(ctx.config_dir, name)
+    return info.model_dump() if info is not None else {"name": name}
 
 
 @router.delete("/{name}")

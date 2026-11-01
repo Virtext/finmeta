@@ -47,6 +47,31 @@ def test_elementless_profile_gets_elements_merged_into_a_new_auto_profile():
     assert _profile_overlay_names(lib, cfg) == ["resolution"]
 
 
+def test_profile_style_with_status_colors_does_not_fall_back_to_global(caplog):
+    """Operator-reported (2026-11-01): the Overlays-tab editor always saves
+    `status_colors` on a profile's style (even `{}`), but `_profile_style`
+    only ever dropped `elements`/`ribbon_text` before translating the rest
+    into the simpler `config.models.OverlayStyle` -- `status_colors` isn't a
+    field on that model at all, so validation failed on EVERY preview
+    request and silently discarded the whole profile style (position/
+    margin/font/bg/fg/radius included), falling back to the bare global
+    style. Caught live: Movies-auto's own `base_position: bottom_left`
+    rendered as the global default `top_left` instead."""
+    cfg = _cfg(
+        {"Movies": MovieLibrary(type="movies", overlays=["resolution"],
+                                 overlay_profile="movies")},
+        profiles={"movies": {"style": {
+            "base_position": "bottom_left", "margin": 30, "status_colors": {},
+        }}},
+    )
+    lib = cfg.libraries["Movies"]
+    with caplog.at_level("WARNING"):
+        style = _profile_style(lib, cfg)
+    assert "library profile style invalid" not in caplog.text
+    assert style.position == "bottom_left"
+    assert style.margin == 30
+
+
 def test_profile_with_elements_already_is_left_alone():
     cfg = _cfg(
         {"Movies": MovieLibrary(type="movies", overlays=["resolution"],
