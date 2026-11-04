@@ -51,7 +51,18 @@ hand-written pack.yml), so they're worth calling out explicitly:
 1. **Wrong location.** Images go under `<config>/assets/packs/<your-pack-name>/
    images/...`, not anywhere else — not `fixture/assets/` (that's the test
    library's own media folder, never scanned for pack images) and not a
-   folder you create yourself elsewhere.
+   folder you create yourself elsewhere. `<config>` means **the host
+   directory bind-mounted to `/config`** — check your own
+   `docker-compose.yml`/`docker run -v` for the exact path (the example
+   compose maps `./config:/config`, but yours may be named differently).
+   It is specifically **not** the `config/` folder sitting in the Finmeta
+   git checkout itself (that one only ever holds `config.template.yml` +
+   `schema.json` and is never read at runtime) — nor any other folder
+   named `assets/` in the checkout. The container only ever sees whatever
+   is bind-mounted; a pack dropped into the checkout's own `assets/`
+   silently never loads, with `GET /api/packs` reporting every single key
+   as missing (this bit a real attempt: files were correctly named and
+   correctly subfoldered, just sitting in the wrong `assets/` entirely).
 2. **Wrong folder/category name**, if using the pack.yml method. The
    "+ New pack" checkboxes are labelled "Dynamic range (HDR)" for
    readability, but the actual folder underneath is named `dynamic_range`
