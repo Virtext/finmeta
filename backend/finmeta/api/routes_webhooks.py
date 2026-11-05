@@ -21,7 +21,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import secrets as _secrets_mod
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
@@ -53,29 +53,41 @@ def _get_ci(d: Dict[str, Any], *names: str) -> Optional[Any]:
     return None
 
 
-def _resolve_apply_target(ctx: AppContext, item_id: str) -> Optional[str]:
+def _resolve_apply_target(ctx: AppContext, item_id: str) -> Tuple[Optional[str], Optional[str]]:
     """An Episode's own id isn't a valid apply scope (build_plan only
-    dispatches Movie/Series) -- resolve up to its Series. Returns None when
-    the item doesn't exist, isn't a Movie/Series(/Episode), or belongs to a
-    library Finmeta isn't managing (``enabled: false`` or unconfigured)."""
+    dispatches Movie/Series) -- resolve up to its Series. Returns
+    ``(target_id, None)`` on success, or ``(None, reason)`` -- a short,
+    specific reason the caller logs -- when the item doesn't exist, isn't a
+    Movie/Series(/Episode), or belongs to a library Finmeta isn't managing
+    (``enabled: false`` or unconfigured). Collapsing all of these into a
+    single silent ``None`` (the previous behavior) made every real-world
+    webhook skip indistinguishable from any other in the logs."""
     from finmeta.engine.plan_builder import _resolve_item_library
 
     jf = ctx.make_jellyfin()
     try:
-        item = jf.get_item(item_id)
+        try:
+            item = jf.get_item(item_id)
+        except Exception as exc:
+            return None, f"could not fetch item from Jellyfin: {exc}"
         if item.type == "Episode" and item.series_id:
-            item = jf.get_item(item.series_id)
+            try:
+                item = jf.get_item(item.series_id)
+            except Exception as exc:
+                return None, f"could not fetch parent series from Jellyfin: {exc}"
         if item.type not in ("Movie", "Series"):
-            return None
-        _name, lib_cfg = _resolve_item_library(item, jf, ctx.config)
-    except Exception:
-        logger.warning("webhook: failed to resolve item %s", item_id, exc_info=True)
-        return None
+            return None, f"item type {item.type!r} is not Movie/Series(/Episode)"
+        try:
+            _name, lib_cfg = _resolve_item_library(item, jf, ctx.config)
+        except Exception as exc:
+            return None, f"library resolution failed: {exc}"
     finally:
         jf.close()
-    if lib_cfg is None or not getattr(lib_cfg, "enabled", False):
-        return None
-    return item.id
+    if lib_cfg is None:
+        return None, "item's path matched no configured library"
+    if not getattr(lib_cfg, "enabled", False):
+        return None, "item's library is configured but not enabled"
+    return item.id, None
 
 
 @router.get("/webhooks/jellyfin/status")
@@ -117,21 +129,26 @@ async def webhook_receive(
     try:
         body = await request.json()
     except Exception:
+        logger.info("webhook: skipped (invalid JSON body)")
         return {"ok": True, "skipped": "invalid JSON body"}
     if not isinstance(body, dict):
+        logger.info("webhook: skipped (unexpected payload shape)")
         return {"ok": True, "skipped": "unexpected payload shape"}
 
     notif = _get_ci(body, "NotificationType")
     if not isinstance(notif, str) or notif.lower() != "itemadded":
+        logger.info("webhook: skipped (ignored notification type %r)", notif)
         return {"ok": True, "skipped": f"ignored notification type {notif!r}"}
 
     item_id = _get_ci(body, "ItemId")
     if not item_id:
+        logger.info("webhook: skipped (no ItemId in payload)")
         return {"ok": True, "skipped": "no ItemId in payload"}
 
-    target_id = _resolve_apply_target(ctx, str(item_id))
+    target_id, reason = _resolve_apply_target(ctx, str(item_id))
     if target_id is None:
-        return {"ok": True, "skipped": "item not in a Finmeta-managed library"}
+        logger.info("webhook: skipped for item %s (%s)", item_id, reason)
+        return {"ok": True, "skipped": reason or "item not in a Finmeta-managed library"}
 
     run_id, err = submit_run(ctx, "apply", item_id=target_id)
     if run_id:
