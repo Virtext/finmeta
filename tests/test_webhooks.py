@@ -8,7 +8,7 @@ FakeJf, same style as test_pagination.py.
 """
 from __future__ import annotations
 
-import time
+from datetime import datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -164,17 +164,26 @@ def test_unresolvable_item_is_skipped(client, monkeypatch):
     assert r.json() == {"ok": True, "skipped": "item not in a Finmeta-managed library"}
 
 
-def test_item_added_triggers_a_run(client, monkeypatch):
+def test_item_added_schedules_a_delayed_apply(client, monkeypatch):
+    """The actual apply no longer runs synchronously on the webhook POST --
+    it's scheduled ``WEBHOOK_APPLY_DELAY`` out (see that constant's
+    docstring for why), via the same scheduler the cron jobs use."""
     _session(client)
     monkeypatch.setattr("finmeta.api.routes_webhooks._resolve_apply_target",
                         lambda ctx, item_id: ("resolved-id", None))
     token = client.post("/api/webhooks/jellyfin/regenerate").json()["url"].rsplit("/", 1)[-1]
+    before = datetime.now(client.app.state.context.scheduler.timezone)
     r = client.post(f"/api/webhooks/jellyfin/{token}",
                     json={"NotificationType": "ItemAdded", "ItemId": "x"})
     body = r.json()
     assert body["ok"] is True
-    assert body["run_id"]
-    time.sleep(0.2)  # let the background worker release the run slot
+    assert body["scheduled"] is True
+    from finmeta.api.routes_webhooks import WEBHOOK_APPLY_DELAY
+    run_at = datetime.fromisoformat(body["run_at"])
+    assert run_at >= before + WEBHOOK_APPLY_DELAY
+    ctx = client.app.state.context
+    jobs = [j for j in ctx.scheduler.get_jobs() if j.id.startswith("webhook-apply-resolved-id-")]
+    assert len(jobs) == 1
 
 
 def test_case_insensitive_payload_keys(client, monkeypatch):
@@ -187,21 +196,18 @@ def test_case_insensitive_payload_keys(client, monkeypatch):
     r = client.post(f"/api/webhooks/jellyfin/{token}",
                     json={"notificationtype": "itemadded", "itemid": "x"})
     assert r.json()["ok"] is True
-    assert "run_id" in r.json()
-    time.sleep(0.2)
+    assert r.json()["scheduled"] is True
 
 
-def test_busy_run_queues_instead_of_dropping(client, monkeypatch):
-    _session(client)
-    monkeypatch.setattr("finmeta.api.routes_webhooks._resolve_apply_target",
-                        lambda ctx, item_id: ("resolved-id", None))
-    # Occupy the single run slot directly (no real run needed for this check).
-    assert client.app.state.context.claim_run("held-by-test")
-    token = client.post("/api/webhooks/jellyfin/regenerate").json()["url"].rsplit("/", 1)[-1]
-    r = client.post(f"/api/webhooks/jellyfin/{token}",
-                    json={"NotificationType": "ItemAdded", "ItemId": "x"})
-    assert r.json() == {"ok": True, "queued": True}
-    client.app.state.context.release_run("held-by-test")
+def test_submit_or_queue_queues_when_run_slot_busy(context):
+    """``_submit_or_queue`` is what the scheduled job actually calls, after
+    the delay -- exercised directly (no app/lifespan needed) so this test
+    doesn't have to wait out ``WEBHOOK_APPLY_DELAY``."""
+    from finmeta.api.routes_webhooks import _submit_or_queue
+    assert context.claim_run("held-by-test")
+    _submit_or_queue(context, "resolved-id")
+    assert context.pop_webhook_item() == "resolved-id"
+    context.release_run("held-by-test")
 
 
 # ---------------------------------------------------------------------------
