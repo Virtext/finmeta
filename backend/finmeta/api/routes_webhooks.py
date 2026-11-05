@@ -76,15 +76,22 @@ def _get_ci(d: Dict[str, Any], *names: str) -> Optional[Any]:
     return None
 
 
+#: Child types whose own id isn't a valid apply scope, but whose ``SeriesId``
+#: is. Jellyfin fires a *separate* ``ItemAdded`` for each of these -- adding
+#: one season of a show posts the Season and every Episode in it, plus the
+#: Series itself if it's new -- so all of them have to land on the series.
+_RESOLVE_UP_TO_SERIES = ("Episode", "Season")
+
+
 def _resolve_apply_target(ctx: AppContext, item_id: str) -> Tuple[Optional[str], Optional[str]]:
-    """An Episode's own id isn't a valid apply scope (build_plan only
-    dispatches Movie/Series) -- resolve up to its Series. Returns
+    """An Episode's or Season's own id isn't a valid apply scope (build_plan
+    only dispatches Movie/Series) -- resolve up to its Series. Returns
     ``(target_id, None)`` on success, or ``(None, reason)`` -- a short,
     specific reason the caller logs -- when the item doesn't exist, isn't a
-    Movie/Series(/Episode), or belongs to a library Finmeta isn't managing
-    (``enabled: false`` or unconfigured). Collapsing all of these into a
-    single silent ``None`` (the previous behavior) made every real-world
-    webhook skip indistinguishable from any other in the logs."""
+    Movie/Series(/Episode/Season), or belongs to a library Finmeta isn't
+    managing (``enabled: false`` or unconfigured). Collapsing all of these
+    into a single silent ``None`` (the original behavior) made every
+    real-world webhook skip indistinguishable from any other in the logs."""
     from finmeta.engine.plan_builder import _resolve_item_library
 
     jf = ctx.make_jellyfin()
@@ -93,13 +100,13 @@ def _resolve_apply_target(ctx: AppContext, item_id: str) -> Tuple[Optional[str],
             item = jf.get_item(item_id)
         except Exception as exc:
             return None, f"could not fetch item from Jellyfin: {exc}"
-        if item.type == "Episode" and item.series_id:
+        if item.type in _RESOLVE_UP_TO_SERIES and item.series_id:
             try:
                 item = jf.get_item(item.series_id)
             except Exception as exc:
                 return None, f"could not fetch parent series from Jellyfin: {exc}"
         if item.type not in ("Movie", "Series"):
-            return None, f"item type {item.type!r} is not Movie/Series(/Episode)"
+            return None, f"item type {item.type!r} is not Movie/Series(/Episode/Season)"
         try:
             _name, lib_cfg = _resolve_item_library(item, jf, ctx.config)
         except Exception as exc:
@@ -205,14 +212,24 @@ async def webhook_receive(
         _submit_or_queue(ctx, target_id)
         return {"ok": True, "scheduled": False}
 
+    # Debounce, don't queue up one apply per notification: Jellyfin fires a
+    # separate ItemAdded for the Series, its Season and every single Episode,
+    # so importing one 12-episode season posts 13+ times within seconds --
+    # all resolving to the same series. A stable per-target job id plus
+    # replace_existing collapses that burst into ONE apply, and because each
+    # hit pushes the run time out again, it only fires once the burst has
+    # actually gone quiet for WEBHOOK_APPLY_DELAY.
     run_at = datetime.now(ctx.scheduler.timezone) + WEBHOOK_APPLY_DELAY
+    job_id = f"webhook-apply-{target_id}"
+    replaced = ctx.scheduler.get_job(job_id) is not None
     ctx.scheduler.add_job(
         _submit_or_queue, trigger=DateTrigger(run_date=run_at), args=[ctx, target_id],
-        id=f"webhook-apply-{target_id}-{run_at.timestamp()}", misfire_grace_time=300,
+        id=job_id, misfire_grace_time=300, replace_existing=True,
     )
-    logger.info("webhook: apply for item %s scheduled for %s (delay %ds)",
-                target_id, run_at.isoformat(), WEBHOOK_APPLY_DELAY.total_seconds())
-    return {"ok": True, "scheduled": True, "run_at": run_at.isoformat()}
+    logger.info("webhook: apply for item %s %s for %s (delay %ds)",
+                target_id, "rescheduled" if replaced else "scheduled",
+                run_at.isoformat(), WEBHOOK_APPLY_DELAY.total_seconds())
+    return {"ok": True, "scheduled": True, "run_at": run_at.isoformat(), "debounced": replaced}
 
 
 __all__ = ["router"]
