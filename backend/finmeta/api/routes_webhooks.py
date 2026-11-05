@@ -3,9 +3,20 @@ new movie or episode lands in Jellyfin, instead of waiting for the next
 scheduled cron run.
 
 Needs the official Jellyfin "Webhook" plugin, pointed at a Generic
-destination with "Item Added" enabled for the libraries Finmeta manages.
-Its default payload already includes ``ItemId``/``NotificationType`` --
-no custom template required.
+destination with "Item Added" enabled for the libraries Finmeta manages,
+and -- easy to miss, see below -- **"Send All Properties" ticked**.
+
+A Generic destination renders its Handlebars ``Template`` as the request
+body. With "Send All Properties" ON the plugin instead serializes the whole
+notification as JSON, which already includes the ``ItemId`` and
+``NotificationType`` this route needs, so no template has to be written.
+With it OFF *and* no template set (the plugin's own default for a
+freshly-added destination) the rendered body is **empty** -- the plugin
+still POSTs, Finmeta still answers 200, and nothing whatsoever happens.
+This cost a full debugging session on 2026-11-05 because an earlier version
+of this docstring claimed no template was required without mentioning the
+checkbox that makes that true; ``webhook_receive`` now names the setting in
+its own skip message for an empty body.
 
 The receiving path (``POST /api/webhooks/jellyfin/{token}``) is reachable
 without a Finmeta session (Jellyfin's webhook plugin can't log in) --
@@ -19,6 +30,7 @@ would otherwise have scrubbed it out of that one response too).
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import secrets as _secrets_mod
 from datetime import datetime, timedelta
@@ -149,10 +161,23 @@ async def webhook_receive(
     if not stored_hash or not _secrets_mod.compare_digest(_hash(token), stored_hash):
         raise HTTPException(status_code=404, detail="not found")
 
+    raw = await request.body()
+    if not raw.strip():
+        # By far the most common real-world misconfiguration -- the plugin's
+        # Generic destination defaults to no template and "Send All
+        # Properties" off, which renders to nothing at all. Name the fix in
+        # the message: a bare "invalid JSON body" sent a 2026-11-05 session
+        # digging through the plugin's own config XML to work this out.
+        logger.info(
+            "webhook: skipped (empty body) -- tick \"Send All Properties\" on this "
+            "destination in Jellyfin's Webhook plugin, or give it a payload template"
+        )
+        return {"ok": True, "skipped":
+                "empty body: enable \"Send All Properties\" in Jellyfin's Webhook plugin"}
     try:
-        body = await request.json()
-    except Exception:
-        logger.info("webhook: skipped (invalid JSON body)")
+        body = json.loads(raw)
+    except Exception as exc:
+        logger.info("webhook: skipped (body is not valid JSON: %s)", exc)
         return {"ok": True, "skipped": "invalid JSON body"}
     if not isinstance(body, dict):
         logger.info("webhook: skipped (unexpected payload shape)")

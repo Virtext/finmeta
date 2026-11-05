@@ -218,10 +218,11 @@ function WebhookSection() {
       </label>
       <div className="field-hint muted">
         Requires Jellyfin's <strong>Webhook</strong> plugin: add a Generic destination with the
-        URL below, enable "Item Added" for the libraries Finmeta manages. No custom payload
-        template needed. Only Movies/Episodes in a library with "Managed by Finmeta" on are
-        applied; everything else is ignored. If a run is already in progress, the item is
-        queued and applied right after.
+        URL below, enable "Item Added" for the libraries Finmeta manages, and tick{' '}
+        <strong>"Send All Properties"</strong> — without it the plugin posts an empty body and
+        nothing happens (no payload template is needed as long as that box is ticked). Only
+        Movies/Episodes in a library with "Managed by Finmeta" on are applied; everything else
+        is ignored. If a run is already in progress, the item is queued and applied right after.
       </div>
       {freshUrl && (
         <div className="field-msg ok" style={{ wordBreak: 'break-all' }}>

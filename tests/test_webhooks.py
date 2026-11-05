@@ -142,6 +142,34 @@ def test_regenerate_rotates_the_token(client):
 # payload handling (token resolution mocked so these are pure route-logic tests)
 # ---------------------------------------------------------------------------
 
+def test_empty_body_names_the_send_all_properties_setting(client):
+    """What the Jellyfin plugin actually sends when a Generic destination has
+    no template and "Send All Properties" off -- the real-world cause of
+    "webhook arrives, nothing happens" (diagnosed live 2026-11-05). The skip
+    message must name the fix, not just say the JSON was bad."""
+    _session(client)
+    token = client.post("/api/webhooks/jellyfin/regenerate").json()["url"].rsplit("/", 1)[-1]
+    r = client.post(f"/api/webhooks/jellyfin/{token}", content=b"")
+    assert r.status_code == 200
+    assert "Send All Properties" in r.json()["skipped"]
+
+
+def test_whitespace_only_body_is_treated_as_empty(client):
+    _session(client)
+    token = client.post("/api/webhooks/jellyfin/regenerate").json()["url"].rsplit("/", 1)[-1]
+    r = client.post(f"/api/webhooks/jellyfin/{token}", content=b"  \n ")
+    assert "Send All Properties" in r.json()["skipped"]
+
+
+def test_malformed_json_still_reports_invalid_json(client):
+    """A non-empty but unparseable body is a different problem (a broken
+    custom template, say) and must not be mislabeled as the empty-body case."""
+    _session(client)
+    token = client.post("/api/webhooks/jellyfin/regenerate").json()["url"].rsplit("/", 1)[-1]
+    r = client.post(f"/api/webhooks/jellyfin/{token}", content=b"{not json")
+    assert r.json() == {"ok": True, "skipped": "invalid JSON body"}
+
+
 def test_non_item_added_notification_is_skipped(client, monkeypatch):
     _session(client)
     called = []
