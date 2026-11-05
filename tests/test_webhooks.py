@@ -210,8 +210,43 @@ def test_item_added_schedules_a_delayed_apply(client, monkeypatch):
     run_at = datetime.fromisoformat(body["run_at"])
     assert run_at >= before + WEBHOOK_APPLY_DELAY
     ctx = client.app.state.context
-    jobs = [j for j in ctx.scheduler.get_jobs() if j.id.startswith("webhook-apply-resolved-id-")]
-    assert len(jobs) == 1
+    assert ctx.scheduler.get_job("webhook-apply-resolved-id") is not None
+
+
+def test_burst_of_notifications_debounces_to_one_apply(client, monkeypatch):
+    """Importing one season makes Jellyfin post a separate ItemAdded for the
+    Season and every Episode in it -- all resolving to the same series. Those
+    must collapse into a single scheduled apply whose timer restarts on each
+    hit, not 13 queued applies of the same show."""
+    _session(client)
+    monkeypatch.setattr("finmeta.api.routes_webhooks._resolve_apply_target",
+                        lambda ctx, item_id: ("resolved-id", None))
+    token = client.post("/api/webhooks/jellyfin/regenerate").json()["url"].rsplit("/", 1)[-1]
+    ctx = client.app.state.context
+    run_ats = []
+    for _ in range(5):
+        r = client.post(f"/api/webhooks/jellyfin/{token}",
+                        json={"NotificationType": "ItemAdded", "ItemId": "x"})
+        run_ats.append(datetime.fromisoformat(r.json()["run_at"]))
+    jobs = [j for j in ctx.scheduler.get_jobs() if j.id.startswith("webhook-apply-")]
+    assert len(jobs) == 1, f"burst created {len(jobs)} jobs instead of debouncing to 1"
+    # Each hit pushed the fire time further out, so it only runs once quiet.
+    assert run_ats == sorted(run_ats)
+    assert run_ats[-1] > run_ats[0]
+
+
+def test_a_different_item_gets_its_own_job(client, monkeypatch):
+    """Debouncing is per target -- two unrelated shows must not collapse."""
+    _session(client)
+    monkeypatch.setattr("finmeta.api.routes_webhooks._resolve_apply_target",
+                        lambda ctx, item_id: (f"series-for-{item_id}", None))
+    token = client.post("/api/webhooks/jellyfin/regenerate").json()["url"].rsplit("/", 1)[-1]
+    for item in ("a", "b"):
+        client.post(f"/api/webhooks/jellyfin/{token}",
+                    json={"NotificationType": "ItemAdded", "ItemId": item})
+    ctx = client.app.state.context
+    jobs = [j for j in ctx.scheduler.get_jobs() if j.id.startswith("webhook-apply-")]
+    assert len(jobs) == 2
 
 
 def test_case_insensitive_payload_keys(client, monkeypatch):
@@ -292,6 +327,35 @@ def test_episode_resolves_to_its_series():
     assert reason is None
 
 
+def test_season_resolves_to_its_series():
+    """Jellyfin posts an ItemAdded for the Season container too, not just the
+    Episode -- observed live 2026-11-05, where it was skipped as "item type
+    'Season' is not Movie/Series"."""
+    series = Item(id="s1", name="Show", type="Series", path="/media/shows/Show",
+                  provider_ids={})
+    season = Item(id="se1", name="Season 2", type="Season",
+                  path="/media/shows/Show/Season 02", provider_ids={}, series_id="s1")
+    jf = FakeJf({"se1": season, "s1": series},
+               {"Shows": Library(name="Shows", item_id="lib-shows", collection_type="tvshows",
+                                  locations=["/media/shows"])})
+    target, reason = _resolve_apply_target(FakeCtx(jf, _tv_cfg(enabled=True)), "se1")
+    assert target == "s1"
+    assert reason is None
+
+
+def test_unsupported_item_type_names_the_type():
+    """A type with no series to climb to (a music album, say) is still a
+    legitimate skip -- the reason must name what arrived."""
+    album = Item(id="al1", name="Album", type="MusicAlbum", path="/media/music/Album",
+                 provider_ids={})
+    jf = FakeJf({"al1": album},
+               {"Shows": Library(name="Shows", item_id="lib-shows", collection_type="tvshows",
+                                  locations=["/media/shows"])})
+    target, reason = _resolve_apply_target(FakeCtx(jf, _tv_cfg(enabled=True)), "al1")
+    assert target is None
+    assert "MusicAlbum" in reason
+
+
 def test_disabled_library_is_ignored():
     series = Item(id="s1", name="Show", type="Series", path="/media/shows/Show",
                   provider_ids={})
@@ -310,10 +374,15 @@ def test_unknown_item_id_returns_none():
     assert "could not fetch item" in reason
 
 
-def test_season_item_type_returns_none():
+def test_season_with_no_series_id_returns_none():
+    """A Season *with* a SeriesId now resolves up to its series (see
+    ``test_season_resolves_to_its_series``, changed 2026-11-05). One without
+    has nothing to climb to, so it's still an unresolvable skip -- this test
+    was originally written as "Season is never a valid target" and is kept,
+    narrowed to the orphan case it actually exercises."""
     season = Item(id="se1", name="Season 1", type="Season", path="/media/shows/Show/Season 1",
                  provider_ids={})
     jf = FakeJf({"se1": season}, {})
     target, reason = _resolve_apply_target(FakeCtx(jf, _tv_cfg(enabled=True)), "se1")
     assert target is None
-    assert reason == "item type 'Season' is not Movie/Series(/Episode)"
+    assert reason == "item type 'Season' is not Movie/Series(/Episode/Season)"
