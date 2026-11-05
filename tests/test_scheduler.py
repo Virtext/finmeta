@@ -11,9 +11,12 @@ gap where the manual per-library apply button couldn't run them either.
 """
 from __future__ import annotations
 
+from datetime import datetime
 from unittest.mock import MagicMock
 
-from finmeta.api.scheduler import _build_jobs
+import finmeta.api.scheduler as scheduler_module
+from apscheduler.triggers.cron import CronTrigger
+from finmeta.api.scheduler import _build_jobs, _run_catch_up
 from finmeta.config.models import Config, Metadata, MovieArtwork, MovieLibrary, Schedule, ServerConfig
 
 
@@ -80,3 +83,73 @@ class TestBuildJobsAllLibraries:
         scheduler = MagicMock()
         _build_jobs(_fake_context(cfg), scheduler)
         scheduler.add_job.assert_not_called()
+
+
+class _FixedNow(datetime):
+    """A ``datetime`` subclass whose ``.now()`` always returns a fixed
+    instant -- real ``datetime`` otherwise, so comparisons/arithmetic with
+    genuine ``datetime`` values (as ``_run_catch_up`` does) still work."""
+    _frozen: datetime
+
+    @classmethod
+    def now(cls, tz=None):
+        return cls._frozen if tz is None else cls._frozen.astimezone(tz)
+
+
+def _frozen_datetime(value: datetime):
+    cls = type("_Frozen", (_FixedNow,), {"_frozen": value})
+    return cls
+
+
+class _FakeJob:
+    def __init__(self, job_id, trigger):
+        self.id = job_id
+        self.trigger = trigger
+
+
+class _FakeScheduler:
+    def __init__(self, timezone, jobs):
+        self.timezone = timezone
+        self._jobs = jobs
+        self.modify_job = MagicMock()
+
+    def get_jobs(self):
+        return self._jobs
+
+
+class TestRunCatchUp:
+    """``_run_catch_up`` -- fires a job whose cron occurrence fell due while
+    the process wasn't running (see the function's own docstring for why
+    ``misfire_grace_time`` alone can't cover this)."""
+
+    def test_missed_occurrence_is_run_now(self, monkeypatch):
+        trigger = CronTrigger.from_crontab("0 4 * * *")
+        now = datetime(2026, 11, 5, 7, 36, tzinfo=trigger.timezone)  # 04:00 fired 3h36m ago
+        monkeypatch.setattr(scheduler_module, "datetime", _frozen_datetime(now))
+        scheduler = _FakeScheduler(trigger.timezone, [_FakeJob("sched-0-all", trigger)])
+
+        _run_catch_up(scheduler)
+
+        scheduler.modify_job.assert_called_once_with("sched-0-all", next_run_time=now)
+
+    def test_occurrence_outside_window_is_not_caught_up(self, monkeypatch):
+        trigger = CronTrigger.from_crontab("0 4 * * *")
+        # 04:00 fired 23h ago -- outside the (default 6h) catch-up window,
+        # so the job's own NEXT real occurrence (tonight) must be left alone.
+        now = datetime(2026, 11, 6, 3, 0, tzinfo=trigger.timezone)
+        monkeypatch.setattr(scheduler_module, "datetime", _frozen_datetime(now))
+        scheduler = _FakeScheduler(trigger.timezone, [_FakeJob("sched-0-all", trigger)])
+
+        _run_catch_up(scheduler)
+
+        scheduler.modify_job.assert_not_called()
+
+    def test_no_missed_occurrence_does_nothing(self, monkeypatch):
+        trigger = CronTrigger.from_crontab("0 4 * * *")
+        now = datetime(2026, 11, 5, 1, 0, tzinfo=trigger.timezone)  # before today's 04:00
+        monkeypatch.setattr(scheduler_module, "datetime", _frozen_datetime(now))
+        scheduler = _FakeScheduler(trigger.timezone, [_FakeJob("sched-0-all", trigger)])
+
+        _run_catch_up(scheduler)
+
+        scheduler.modify_job.assert_not_called()

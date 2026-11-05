@@ -7,6 +7,7 @@ the new config — this is the config hot-reload hook.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta
 from typing import Optional
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -17,6 +18,10 @@ from finmeta.api.run_service import submit_run
 from finmeta.engine.poster_rotation import top_rated_item_ids
 
 logger = logging.getLogger("finmeta.api.scheduler")
+
+#: How far back to look, on a fresh process start, for a cron occurrence
+#: that should have fired but never did -- see ``_run_catch_up``.
+_CATCH_UP_WINDOW = timedelta(hours=6)
 
 
 def _job(context: AppContext, action: str, library: Optional[str]) -> None:
@@ -120,6 +125,41 @@ def _build_jobs(context: AppContext, scheduler: BackgroundScheduler) -> None:
         )
 
 
+def _run_catch_up(scheduler: BackgroundScheduler) -> None:
+    """Fire any job whose cron occurrence fell due in the last
+    ``_CATCH_UP_WINDOW`` but was never actually run.
+
+    ``BackgroundScheduler``'s default in-memory jobstore has no memory of
+    anything from before this process existed: on every fresh start,
+    ``add_job`` computes each job's next fire time starting from *now*, so a
+    cron time that passed while the container was down (an operator restart,
+    an image update, a crash) is never scheduled in the first place --
+    ``misfire_grace_time`` only covers a *delay* within an already-running
+    process, not this case. Confirmed live 2026-11-05: ``finmeta-public-
+    test``'s nightly 04:00 schedule was silently skipped after an operator
+    restart that landed in this exact gap, with zero error anywhere.
+
+    Re-running an apply/plan schedule that, unbeknownst to this fresh
+    process, actually already completed moments before the restart is a
+    harmless no-op -- apply is idempotent by design (STATE.md: two
+    consecutive applies with no changes write 0 files). The one non-
+    idempotent job, poster rotation, could in that same edge case reshuffle
+    once more than intended; accepted as a minor cosmetic cost against the
+    alternative of silently dropping real runs.
+    """
+    now = datetime.now(scheduler.timezone)
+    window_start = now - _CATCH_UP_WINDOW
+    for job in scheduler.get_jobs():
+        missed_at = job.trigger.get_next_fire_time(None, window_start)
+        if missed_at is not None and missed_at <= now:
+            logger.warning(
+                "scheduler: %s missed its %s occurrence (process was not "
+                "running) -- running it now as catch-up",
+                job.id, missed_at.isoformat(),
+            )
+            scheduler.modify_job(job.id, next_run_time=now)
+
+
 def reschedule(context: AppContext) -> None:
     """Remove all jobs and rebuild them from the current config."""
     scheduler: Optional[BackgroundScheduler] = context.scheduler
@@ -138,6 +178,10 @@ def start(context: AppContext) -> None:
     scheduler.start()
     context.scheduler = scheduler
     logger.info("scheduler started with %d job(s)", len(scheduler.get_jobs()))
+    # Only on a genuinely fresh process -- reschedule() (config hot-reload)
+    # must never re-trigger a job that correctly already ran minutes ago
+    # under the just-replaced config.
+    _run_catch_up(scheduler)
 
 
 __all__ = ["start", "reschedule"]

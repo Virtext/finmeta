@@ -78,7 +78,7 @@ def test_disable_requires_session(client):
 
 def test_receive_works_with_no_session_cookie_at_all(client, monkeypatch):
     monkeypatch.setattr("finmeta.api.routes_webhooks._resolve_apply_target",
-                        lambda ctx, item_id: None)
+                        lambda ctx, item_id: (None, "test: no session"))
     _session(client)
     token = client.post("/api/webhooks/jellyfin/regenerate").json()["url"].rsplit("/", 1)[-1]
     client.cookies.clear()
@@ -146,7 +146,7 @@ def test_non_item_added_notification_is_skipped(client, monkeypatch):
     _session(client)
     called = []
     monkeypatch.setattr("finmeta.api.routes_webhooks._resolve_apply_target",
-                        lambda ctx, item_id: called.append(item_id) or "resolved-id")
+                        lambda ctx, item_id: (called.append(item_id) or "resolved-id", None))
     token = client.post("/api/webhooks/jellyfin/regenerate").json()["url"].rsplit("/", 1)[-1]
     r = client.post(f"/api/webhooks/jellyfin/{token}",
                     json={"NotificationType": "PlaybackStart", "ItemId": "x"})
@@ -157,7 +157,7 @@ def test_non_item_added_notification_is_skipped(client, monkeypatch):
 def test_unresolvable_item_is_skipped(client, monkeypatch):
     _session(client)
     monkeypatch.setattr("finmeta.api.routes_webhooks._resolve_apply_target",
-                        lambda ctx, item_id: None)
+                        lambda ctx, item_id: (None, "item not in a Finmeta-managed library"))
     token = client.post("/api/webhooks/jellyfin/regenerate").json()["url"].rsplit("/", 1)[-1]
     r = client.post(f"/api/webhooks/jellyfin/{token}",
                     json={"NotificationType": "ItemAdded", "ItemId": "x"})
@@ -167,7 +167,7 @@ def test_unresolvable_item_is_skipped(client, monkeypatch):
 def test_item_added_triggers_a_run(client, monkeypatch):
     _session(client)
     monkeypatch.setattr("finmeta.api.routes_webhooks._resolve_apply_target",
-                        lambda ctx, item_id: "resolved-id")
+                        lambda ctx, item_id: ("resolved-id", None))
     token = client.post("/api/webhooks/jellyfin/regenerate").json()["url"].rsplit("/", 1)[-1]
     r = client.post(f"/api/webhooks/jellyfin/{token}",
                     json={"NotificationType": "ItemAdded", "ItemId": "x"})
@@ -182,7 +182,7 @@ def test_case_insensitive_payload_keys(client, monkeypatch):
     anything -- the lookup must not care."""
     _session(client)
     monkeypatch.setattr("finmeta.api.routes_webhooks._resolve_apply_target",
-                        lambda ctx, item_id: "resolved-id")
+                        lambda ctx, item_id: ("resolved-id", None))
     token = client.post("/api/webhooks/jellyfin/regenerate").json()["url"].rsplit("/", 1)[-1]
     r = client.post(f"/api/webhooks/jellyfin/{token}",
                     json={"notificationtype": "itemadded", "itemid": "x"})
@@ -194,7 +194,7 @@ def test_case_insensitive_payload_keys(client, monkeypatch):
 def test_busy_run_queues_instead_of_dropping(client, monkeypatch):
     _session(client)
     monkeypatch.setattr("finmeta.api.routes_webhooks._resolve_apply_target",
-                        lambda ctx, item_id: "resolved-id")
+                        lambda ctx, item_id: ("resolved-id", None))
     # Occupy the single run slot directly (no real run needed for this check).
     assert client.app.state.context.claim_run("held-by-test")
     token = client.post("/api/webhooks/jellyfin/regenerate").json()["url"].rsplit("/", 1)[-1]
@@ -253,8 +253,9 @@ def test_episode_resolves_to_its_series():
     jf = FakeJf({"e1": episode, "s1": series},
                {"Shows": Library(name="Shows", item_id="lib-shows", collection_type="tvshows",
                                   locations=["/media/shows"])})
-    target = _resolve_apply_target(FakeCtx(jf, _tv_cfg(enabled=True)), "e1")
+    target, reason = _resolve_apply_target(FakeCtx(jf, _tv_cfg(enabled=True)), "e1")
     assert target == "s1"
+    assert reason is None
 
 
 def test_disabled_library_is_ignored():
@@ -263,19 +264,22 @@ def test_disabled_library_is_ignored():
     jf = FakeJf({"s1": series},
                {"Shows": Library(name="Shows", item_id="lib-shows", collection_type="tvshows",
                                   locations=["/media/shows"])})
-    target = _resolve_apply_target(FakeCtx(jf, _tv_cfg(enabled=False)), "s1")
+    target, reason = _resolve_apply_target(FakeCtx(jf, _tv_cfg(enabled=False)), "s1")
     assert target is None
+    assert reason == "item's library is configured but not enabled"
 
 
 def test_unknown_item_id_returns_none():
     jf = FakeJf({}, {})
-    target = _resolve_apply_target(FakeCtx(jf, _tv_cfg(enabled=True)), "missing")
+    target, reason = _resolve_apply_target(FakeCtx(jf, _tv_cfg(enabled=True)), "missing")
     assert target is None
+    assert "could not fetch item" in reason
 
 
 def test_season_item_type_returns_none():
     season = Item(id="se1", name="Season 1", type="Season", path="/media/shows/Show/Season 1",
                  provider_ids={})
     jf = FakeJf({"se1": season}, {})
-    target = _resolve_apply_target(FakeCtx(jf, _tv_cfg(enabled=True)), "se1")
+    target, reason = _resolve_apply_target(FakeCtx(jf, _tv_cfg(enabled=True)), "se1")
     assert target is None
+    assert reason == "item type 'Season' is not Movie/Series(/Episode)"
