@@ -21,8 +21,10 @@ from __future__ import annotations
 import hashlib
 import logging
 import secrets as _secrets_mod
+from datetime import datetime, timedelta
 from typing import Any, Dict, Optional, Tuple
 
+from apscheduler.triggers.date import DateTrigger
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from finmeta.api.deps import get_ctx
@@ -35,6 +37,15 @@ router = APIRouter(prefix="/api", tags=["webhooks"])
 
 #: Not the token itself -- see module docstring.
 _HASH_SECRET_NAME = "jellyfin_webhook_token_hash"
+
+#: Buffer between a webhook ItemAdded hit and actually running the apply.
+#: Confirmed live 2026-11-05: Jellyfin's own LibraryMonitor (real-time file
+#: watcher) takes ~60s after a file finishes writing before it even starts
+#: refreshing the item, before any metadata/image generation happens on top
+#: of that -- applying immediately on the webhook POST risks overlaying a
+#: poster Jellyfin hasn't actually produced yet. Not configurable (yet);
+#: revisit if 90s proves too short/long in practice.
+WEBHOOK_APPLY_DELAY = timedelta(seconds=90)
 
 
 def _hash(token: str) -> str:
@@ -88,6 +99,18 @@ def _resolve_apply_target(ctx: AppContext, item_id: str) -> Tuple[Optional[str],
     if not getattr(lib_cfg, "enabled", False):
         return None, "item's library is configured but not enabled"
     return item.id, None
+
+
+def _submit_or_queue(context: AppContext, target_id: str) -> None:
+    """Runs ``WEBHOOK_APPLY_DELAY`` after the webhook hit, via the scheduler
+    -- same single-run-slot path everything else uses, so this just as
+    happily queues (``run_service._worker`` drains it) as runs immediately."""
+    run_id, err = submit_run(context, "apply", item_id=target_id)
+    if run_id:
+        logger.info("webhook: delayed apply started for item %s (run %s)", target_id, run_id)
+    else:
+        context.queue_webhook_item(target_id)
+        logger.info("webhook: delayed apply busy (%s), queued item %s", err, target_id)
 
 
 @router.get("/webhooks/jellyfin/status")
@@ -150,15 +173,21 @@ async def webhook_receive(
         logger.info("webhook: skipped for item %s (%s)", item_id, reason)
         return {"ok": True, "skipped": reason or "item not in a Finmeta-managed library"}
 
-    run_id, err = submit_run(ctx, "apply", item_id=target_id)
-    if run_id:
-        logger.info("webhook: apply started for item %s (run %s)", target_id, run_id)
-        return {"ok": True, "run_id": run_id}
-    # A run is already active -- queue it, drained after that run finishes
-    # (run_service._worker) instead of dropping it.
-    ctx.queue_webhook_item(target_id)
-    logger.info("webhook: run busy (%s), queued item %s", err, target_id)
-    return {"ok": True, "queued": True}
+    if ctx.scheduler is None:
+        # Shouldn't happen outside of a context that never went through the
+        # normal app lifespan -- run it now rather than drop it silently.
+        logger.warning("webhook: no scheduler available, applying item %s immediately", target_id)
+        _submit_or_queue(ctx, target_id)
+        return {"ok": True, "scheduled": False}
+
+    run_at = datetime.now(ctx.scheduler.timezone) + WEBHOOK_APPLY_DELAY
+    ctx.scheduler.add_job(
+        _submit_or_queue, trigger=DateTrigger(run_date=run_at), args=[ctx, target_id],
+        id=f"webhook-apply-{target_id}-{run_at.timestamp()}", misfire_grace_time=300,
+    )
+    logger.info("webhook: apply for item %s scheduled for %s (delay %ds)",
+                target_id, run_at.isoformat(), WEBHOOK_APPLY_DELAY.total_seconds())
+    return {"ok": True, "scheduled": True, "run_at": run_at.isoformat()}
 
 
 __all__ = ["router"]
