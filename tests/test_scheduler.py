@@ -52,19 +52,29 @@ class TestBuildJobsAllLibraries:
         assert kwargs["args"][1] == "apply"  # action
         assert kwargs["id"] == "sched-0-all"
 
-    def test_explicit_libraries_still_one_job_per_library(self):
-        """A non-empty Schedule.libraries list keeps the pre-existing
-        per-library fan-out -- only the "empty = all" case changed."""
+    def test_explicit_libraries_is_one_sequential_job(self):
+        """A non-empty Schedule.libraries list -> ONE job carrying the whole
+        list, which runs them one after another on the single run slot.
+
+        Was ``test_explicit_libraries_still_one_job_per_library`` until
+        2026-11-06 (R8: changed deliberately, not removed). The per-library
+        fan-out it asserted put every library on the SAME trigger, so they
+        all fired in the same second, the first claimed the run slot and the
+        rest were dropped with "a run is already in progress" and never
+        retried -- confirmed live on the operator's three-library nightly
+        schedule, two of whose libraries had never once run on time. See
+        ``_libraries_job``.
+        """
         cfg = _cfg([Schedule(cron="0 4 * * *", action="plan",
                               libraries=["Movies", "Shows"])])
         scheduler = MagicMock()
         _build_jobs(_fake_context(cfg), scheduler)
 
-        assert scheduler.add_job.call_count == 2
-        libs_passed = {c.kwargs["args"][2] for c in scheduler.add_job.call_args_list}
-        assert libs_passed == {"Movies", "Shows"}
-        ids = {c.kwargs["id"] for c in scheduler.add_job.call_args_list}
-        assert ids == {"sched-0-Movies", "sched-0-Shows"}
+        assert scheduler.add_job.call_count == 1
+        _, kwargs = scheduler.add_job.call_args
+        assert kwargs["args"][1] == "plan"
+        assert kwargs["args"][2] == ["Movies", "Shows"]
+        assert kwargs["id"] == "sched-0-libs"
 
     def test_multiple_schedules_each_get_their_own_job_id_namespace(self):
         cfg = _cfg([
@@ -76,7 +86,47 @@ class TestBuildJobsAllLibraries:
 
         assert scheduler.add_job.call_count == 2
         ids = {c.kwargs["id"] for c in scheduler.add_job.call_args_list}
-        assert ids == {"sched-0-all", "sched-1-Movies"}
+        assert ids == {"sched-0-all", "sched-1-libs"}
+
+
+class TestLibrariesJob:
+    """``_libraries_job`` -- the fix for silently dropped libraries."""
+
+    def test_first_library_starts_and_the_rest_are_queued(self, monkeypatch):
+        submitted = []
+
+        def fake_submit(context, action, *, library=None, item_id=None):
+            submitted.append((action, library))
+            return "run-1", None
+
+        monkeypatch.setattr(scheduler_module, "submit_run", fake_submit)
+        ctx = MagicMock()
+        scheduler_module._libraries_job(ctx, "apply", ["Anime", "Tv serier", "Filmer"])
+
+        assert submitted == [("apply", "Anime")]
+        assert [c.args for c in ctx.queue_library_run.call_args_list] == [
+            ("apply", "Tv serier"), ("apply", "Filmer"),
+        ]
+
+    def test_a_busy_slot_queues_the_first_library_too(self, monkeypatch):
+        """Nothing may be dropped even when the slot is already taken -- the
+        old code logged "schedule skipped" here and lost the run."""
+        monkeypatch.setattr(
+            scheduler_module, "submit_run",
+            lambda *a, **k: (None, "a run is already in progress"))
+        ctx = MagicMock()
+        scheduler_module._libraries_job(ctx, "apply", ["Anime", "Filmer"])
+
+        assert [c.args for c in ctx.queue_library_run.call_args_list] == [
+            ("apply", "Anime"), ("apply", "Filmer"),
+        ]
+
+    def test_empty_list_does_nothing(self, monkeypatch):
+        monkeypatch.setattr(scheduler_module, "submit_run",
+                            lambda *a, **k: ("run-1", None))
+        ctx = MagicMock()
+        scheduler_module._libraries_job(ctx, "apply", [])
+        ctx.queue_library_run.assert_not_called()
 
     def test_no_schedules_adds_no_jobs(self):
         cfg = _cfg([])

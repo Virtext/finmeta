@@ -29,7 +29,8 @@ from finmeta.engine.nfo import (
     episode_nfo, movie_nfo, nfo_sha256, season_nfo, tvshow_nfo,
 )
 from finmeta.engine import trash
-from finmeta.engine.overlay import prune_overlay_cache, read_overlay_cache
+from finmeta.engine.net import fetch_bytes
+from finmeta.engine.overlay import OVERLAID_KINDS, prune_overlay_cache, read_overlay_cache
 from finmeta.engine.plan import ApiAction, FileWrite, ItemPlan, WritePlan
 from finmeta.engine.runs import (
     DEFAULT_CONFIG_DIR, Manifest, RunFile, backup, record,
@@ -107,10 +108,7 @@ def _fetch_content(
     if fw.source_ref == "generated":
         return _nfo_bytes(item, cfg, tmdb)
     if fw.source_ref.startswith(("http://", "https://")):
-        import httpx
-        resp = httpx.get(fw.source_ref, timeout=30, follow_redirects=True)
-        resp.raise_for_status()
-        return resp.content
+        return fetch_bytes(fw.source_ref)
     p = Path(fw.source_ref)
     if p.is_file():
         return p.read_bytes()
@@ -345,12 +343,31 @@ def apply_plan(
             # Validate hash
             actual_sha = hashlib.sha256(content).hexdigest()
             if actual_sha != fw.content_sha256:
-                msg = (f"hash mismatch for {fw.target_path}: "
-                       f"expected={fw.content_sha256[:12]}… actual={actual_sha[:12]}…")
+                if fw.kind in OVERLAID_KINDS or not fw.source_ref.startswith(
+                        ("http://", "https://")):
+                    # An overlaid poster's bytes come from the render cache;
+                    # a mismatch here means the cache entry is gone and
+                    # `content` is the UN-overlaid original -- writing it
+                    # would strip the badges. Never write that.
+                    msg = (f"hash mismatch for {fw.target_path}: "
+                           f"expected={fw.content_sha256[:12]}… actual={actual_sha[:12]}…")
+                    logger.warning(msg)
+                    result.errors.append(msg)
+                    log(db_path, run_id, "warn", msg)
+                    continue
+                # A plain copy from a URL: `content` came through
+                # engine.net.fetch_bytes, so it is a VERIFIED-complete body
+                # from the very source this FileWrite names. The planned
+                # hash disagreeing with it means the plan's own download was
+                # the bad one (a short read -- ~360 backdrops/logos per run
+                # were lost to this before fetch_bytes existed) or the source
+                # changed since. Either way the freshly verified bytes are
+                # the better answer than skipping the write.
+                msg = (f"source changed since plan for {fw.target_path}: "
+                       f"planned={fw.content_sha256[:12]}… actual={actual_sha[:12]}…"
+                       f" — writing the verified source bytes")
                 logger.warning(msg)
-                result.errors.append(msg)
                 log(db_path, run_id, "warn", msg)
-                continue
 
             target = Path(fw.target_path)
             is_overwrite = target.is_file()

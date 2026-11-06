@@ -323,8 +323,14 @@ def overlay_file_write(
     render_fn: Optional[Callable[[bytes], bytes]] = None,
     config_dir: Optional[Path] = None,
     is_override: bool = False,
+    kind: str = "poster",
 ) -> FileWrite:
     """Produce the overlaid-poster ``FileWrite`` for an item (SPEC \u00a78, O7).
+
+    ``kind`` is the FileWrite kind to emit -- ``"poster"`` for the item's own
+    poster, ``"season_poster"`` for a TV season's (same rendering, same O7
+    rules, different target file). Anything cached here must also be counted
+    as live by ``_live_overlay_digests``.
 
     ``render_fn`` (preferred): called with the resolved *original* poster
     bytes (after the O7 backup/override lookup below) to produce the
@@ -382,7 +388,7 @@ def overlay_file_write(
         _write_overlay_cache(digest, overlaid, config_dir=config_dir)
     return FileWrite(
         target_path=str(target_path),
-        kind="poster",
+        kind=kind,  # type: ignore[arg-type]
         source_ref=original_ref,
         content_sha256=digest,
         # S9d5: the CLEAN (non-overlaid) base this was rendered from -- what
@@ -402,8 +408,14 @@ def overlay_file_write(
 _CACHE_PRUNE_GRACE_SECONDS = 3600
 
 
+#: FileWrite kinds whose bytes are RENDERED (and therefore cached) by
+#: ``overlay_file_write`` -- the executor can only get these from the cache,
+#: never by re-fetching source_ref (which is the un-overlaid original).
+OVERLAID_KINDS = ("poster", "season_poster")
+
+
 def _live_overlay_digests(config_dir: Path) -> set[str]:
-    """content_sha256 of every poster ``FileWrite`` in a plan still on disk.
+    """content_sha256 of every overlaid ``FileWrite`` in a plan still on disk.
 
     A plan written by ``finmeta plan`` may not be applied for a while (the
     operator reviews the dry-run diff first), so any overlay cache entry it
@@ -424,7 +436,7 @@ def _live_overlay_digests(config_dir: Path) -> set[str]:
             continue
         for item in plan.items:
             for fw in item.files:
-                if fw.kind == "poster":
+                if fw.kind in OVERLAID_KINDS:
                     digests.add(fw.content_sha256)
     return digests
 

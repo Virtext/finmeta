@@ -211,6 +211,20 @@ def _worker(context: AppContext, run_id: str, action: str,
             new_run_id, err = submit_run(context, "apply", item_id=next_item)
             if new_run_id is None:
                 context.queue_webhook_item(next_item)
+        else:
+            # Nothing from the webhook -- take the next library a multi-library
+            # schedule left queued (state.AppContext.queue_library_run). Webhook
+            # items go first: each is one newly added title and finishes in
+            # seconds, while a library-wide run can take many minutes.
+            queued = context.pop_library_run()
+            if queued is not None:
+                q_action, q_library = queued
+                new_run_id, err = submit_run(context, q_action, library=q_library)
+                if new_run_id is None:
+                    context.queue_library_run(q_action, q_library)
+                else:
+                    logger.info("queued schedule started run %s (%s %s)",
+                                new_run_id, q_action, q_library)
 
 
 __all__ = ["submit_run"]

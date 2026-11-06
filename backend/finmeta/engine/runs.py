@@ -13,6 +13,7 @@ restores the same bytes and deletes nothing new.
 """
 from __future__ import annotations
 
+import json
 import os
 import shutil
 from dataclasses import dataclass, field
@@ -107,6 +108,92 @@ def load_manifest(run_id: str, *, config_dir: Path = DEFAULT_CONFIG_DIR) -> Mani
     return Manifest.model_validate_json(mp.read_text())
 
 
+def _run_epoch(run_id: str) -> float:
+    """The submit-time epoch embedded in ``run-<epoch>-<hex>``.
+
+    Used to order runs chronologically. A directory that does not follow the
+    pattern (``verify-run-1`` and friends) sorts LAST, so a real run always
+    wins over a hand-made one. Never the backup file's ``st_mtime``:
+    ``backup()`` copies with ``shutil.copy2``, which preserves the SOURCE
+    file's mtime -- so mtime says when the backed-up content was written,
+    not which run saved it, and the two can disagree.
+    """
+    parts = run_id.split("-")
+    if len(parts) >= 3 and parts[0] == "run":
+        try:
+            return float(parts[1])
+        except ValueError:
+            pass
+    return float("inf")
+
+
+#: ``{resolved config_dir: (signature, {path: status})}`` -- see
+#: ``_first_touch_index``. Run dirs are only ever added, so the signature is
+#: just how many there are plus the highest name.
+_FIRST_TOUCH_CACHE: dict = {}
+
+
+def _first_touch_index(config_dir: Path) -> dict:
+    """``{absolute path: status}`` of the EARLIEST manifest entry per path.
+
+    Scans every ``runs/<run_id>/manifest.json`` once and remembers, for each
+    path any run has ever written, what the oldest of those runs did to it
+    (``"create"`` or ``"overwrite"``). Cached per config dir and rebuilt when
+    a new run dir shows up -- a plan build asks this once per overlaid
+    poster, and re-reading every manifest each time would be quadratic.
+
+    Best-effort by design: a missing/malformed manifest is skipped, and an
+    empty index simply means ``find_original_backup`` behaves exactly as it
+    did before this index existed.
+    """
+    runs_dir = Path(config_dir) / "runs"
+    if not runs_dir.is_dir():
+        return {}
+    try:
+        names = sorted(d.name for d in runs_dir.iterdir() if d.is_dir())
+    except OSError:
+        return {}
+    signature = (len(names), names[-1] if names else "")
+    key = str(Path(config_dir).resolve())
+    cached = _FIRST_TOUCH_CACHE.get(key)
+    if cached is not None and cached[0] == signature:
+        return cached[1]
+    oldest: dict = {}
+    for name in names:
+        mp = runs_dir / name / "manifest.json"
+        if not mp.is_file():
+            continue
+        try:
+            data = json.loads(mp.read_text())
+        except Exception:
+            continue
+        epoch = _run_epoch(name)
+        for entry in data.get("files") or []:
+            path, status = entry.get("path"), entry.get("status")
+            if not path or not status:
+                continue
+            norm = str(Path(path))
+            prev = oldest.get(norm)
+            if prev is None or epoch < prev[0]:
+                oldest[norm] = (epoch, status)
+    index = {path: status for path, (_epoch, status) in oldest.items()}
+    _FIRST_TOUCH_CACHE[key] = (signature, index)
+    return index
+
+
+def created_by_finmeta(
+    target_path: Path, *, config_dir: Path = DEFAULT_CONFIG_DIR,
+) -> bool:
+    """True when the oldest run that ever touched this path CREATED it.
+
+    Such a path has no pre-Finmeta original at all: ``backup()`` only copies
+    a file that already exists, so the first apply saved nothing and every
+    backup that exists is of Finmeta's own output. See
+    ``find_original_backup``.
+    """
+    return _first_touch_index(config_dir).get(str(Path(target_path))) == "create"
+
+
 def find_original_backup(
     target_path: Path, *, config_dir: Path = DEFAULT_CONFIG_DIR,
 ) -> Optional[Path]:
@@ -124,22 +211,38 @@ def find_original_backup(
     repeated-apply session: run N's backup is run N-1's already-overlaid
     output). Returns ``None`` when no run has backed this path up yet (the
     on-disk file, if any, IS the original).
+
+    **"Oldest backup" is only the original when the file predates Finmeta**
+    (fixed 2026-11-06, operator-reported, confirmed on a real movie poster):
+    ``backup()`` copies nothing when the file does not exist yet, so a path
+    Finmeta CREATED itself gets no backup on its first apply -- and the
+    oldest backup that eventually exists is the one the SECOND apply made,
+    i.e. a copy of the first apply's own overlaid output. Compositing onto
+    that stacks old badges under new ones, exactly the bug the oldest-backup
+    rule was introduced to prevent. Movie libraries hit this as the normal
+    case: Radarr writes ``folder.jpg``, never ``poster.jpg``, so Finmeta
+    creates every ``poster.jpg`` itself. ``created_by_finmeta`` (the run
+    manifests' own ``status`` field) detects it, and ``None`` here sends the
+    caller back to the freshly resolved candidate -- which is the correct
+    original for such a path.
     """
     base = Path(config_dir) / "backups"
     if not base.is_dir():
         return None
+    if created_by_finmeta(target_path, config_dir=config_dir):
+        return None
     rel = _relpath(Path(target_path), config_dir)
-    found: List[Path] = []
+    found: List[tuple] = []
     for run_dir in base.iterdir():
         if not run_dir.is_dir():
             continue
         bk = run_dir / rel
         if bk.is_file():
-            found.append(bk)
+            found.append((_run_epoch(run_dir.name), bk.stat().st_mtime, bk))
     if not found:
         return None
-    found.sort(key=lambda pth: pth.stat().st_mtime)
-    return found[0]
+    found.sort(key=lambda row: (row[0], row[1]))
+    return found[0][2]
 
 
 def undo(run_id: str, *, config_dir: Path = DEFAULT_CONFIG_DIR) -> UndoResult:
@@ -177,5 +280,6 @@ def undo(run_id: str, *, config_dir: Path = DEFAULT_CONFIG_DIR) -> UndoResult:
 __all__ = [
     "Manifest", "RunFile", "UndoResult",
     "backup", "record", "load_manifest", "undo",
+    "created_by_finmeta", "find_original_backup",
     "DEFAULT_CONFIG_DIR",
 ]

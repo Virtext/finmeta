@@ -74,6 +74,15 @@ class AppContext:
         # item (Jellyfin can fire more than one per import) only queues once.
         self._webhook_queue: List[str] = []
         self._webhook_queued_set: set = set()
+        # Scheduled library-scoped runs waiting for the slot. A schedule that
+        # names several libraries used to add one cron job PER library on the
+        # same trigger: they all fired at once, the first won the single run
+        # slot and the rest were dropped with "a run is already in progress"
+        # and never retried (confirmed live 2026-11-06 -- the operator's
+        # nightly apply only ever ran one of its three libraries). Queued on
+        # the same FIFO treatment as the webhook items above instead.
+        self._library_queue: List[tuple] = []
+        self._library_queued_set: set = set()
         self._cache: Dict[tuple, _PlanCache] = {}
         self._cache_lock = threading.Lock()
         self.overrides = OverrideStore(self._overrides_path)
@@ -463,6 +472,29 @@ class AppContext:
             item_id = self._webhook_queue.pop(0)
             self._webhook_queued_set.discard(item_id)
             return item_id
+
+    def queue_library_run(self, action: str, library: str) -> None:
+        """Remember a scheduled library-scoped run that could not start yet.
+
+        Drained one at a time by ``run_service._worker`` as each run releases
+        the slot, exactly like ``queue_webhook_item``. Deduped: a schedule
+        that fires again while its own earlier occurrence is still queued
+        must not pile up two identical runs.
+        """
+        key = (action, library)
+        with self._claim_lock:
+            if key not in self._library_queued_set:
+                self._library_queued_set.add(key)
+                self._library_queue.append(key)
+
+    def pop_library_run(self) -> Optional[tuple]:
+        """``(action, library)`` of the next queued scheduled run, or None."""
+        with self._claim_lock:
+            if not self._library_queue:
+                return None
+            key = self._library_queue.pop(0)
+            self._library_queued_set.discard(key)
+            return key
 
     # -- scheduler hook -----------------------------------------------------
     def reschedule(self) -> None:

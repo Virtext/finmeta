@@ -10,11 +10,11 @@ import logging
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
-import httpx
 
 from finmeta.config.models import Config, MovieLibrary, TvLibrary
 from finmeta.engine.diff import annotate_status, diff_plan, diff_to_text
 from finmeta.engine.matching import MatchResult, match_item
+from finmeta.engine.net import fetch_bytes
 from finmeta.engine.nfo import (
     DEFAULT_MOVIE_FIELDS, DEFAULT_TV_FIELDS,
     episode_nfo, movie_nfo, nfo_sha256, season_nfo, tvshow_nfo,
@@ -98,10 +98,14 @@ def _file_sha256(path: Path) -> str:
 
 
 def _http_sha256(url: str, timeout: float = 30.0) -> str:
-    """SHA-256 of a remote file (downloads it)."""
-    resp = httpx.get(url, timeout=timeout, follow_redirects=True)
-    resp.raise_for_status()
-    return hashlib.sha256(resp.content).hexdigest()
+    """SHA-256 of a remote file (downloads it).
+
+    Goes through ``engine.net.fetch_bytes`` so a truncated response raises
+    instead of being hashed: the hash recorded here is what the executor
+    must reproduce at apply time, and a short read poisons it for the whole
+    run (see ``engine.net``'s module docstring).
+    """
+    return hashlib.sha256(fetch_bytes(url, timeout=timeout)).hexdigest()
 
 
 def _content_sha256(source_ref: str) -> str:
@@ -120,13 +124,35 @@ def _content_sha256(source_ref: str) -> str:
 def _candidate_bytes(source_ref: str, timeout: float = 30.0) -> bytes:
     """Fetch the raw bytes of a candidate (local file or remote URL)."""
     if source_ref.startswith(("http://", "https://")):
-        resp = httpx.get(source_ref, timeout=timeout, follow_redirects=True)
-        resp.raise_for_status()
-        return resp.content
+        return fetch_bytes(source_ref, timeout=timeout)
     p = Path(source_ref)
     if p.is_file():
         return p.read_bytes()
     return b""
+
+
+def _fetch_item_streams(
+    item: Item, jf: JellyfinClient, media_type: str,
+) -> List[Dict[str, Any]]:
+    """Raw media streams for the item the badges describe.
+
+    SAME raw-stream source (``JellyfinClient.get_item_media_streams_raw``) as
+    the preview path -> preview badges always equal plan/apply badges. Raw
+    dicts keep every field K9 detection needs (DisplayTitle, IsForced,
+    ChannelLayout, ColorTransfer). A series has no streams of its own, so its
+    first episode stands in for the whole show.
+    """
+    target_id = item.id
+    if media_type == "tvshow":
+        first_ep = jf.get_items_page(
+            parent_id=item.id, recursive=True,
+            include_item_types=["Episode"],
+            sort_by=["ParentIndexNumber", "IndexNumber"],
+            sort_order="Ascending", limit=1,
+        ).items
+        if first_ep:
+            target_id = first_ep[0].id
+    return list(jf.get_item_media_streams_raw(target_id))
 
 
 def _overlay_poster(
@@ -143,8 +169,14 @@ def _overlay_poster(
     trending_rank: Optional[int] = None,
     is_override: bool = False,
     rating_values: Optional[Dict[str, str]] = None,
+    kind: str = "poster",
 ) -> Optional[FileWrite]:
     """Build the overlaid-poster FileWrite for one item, or None on failure.
+
+    ``kind`` selects which FileWrite kind comes out: ``"poster"`` (the item's
+    own poster) or ``"season_poster"`` (a TV season's, see
+    ``_season_poster_overlays``) -- everything else about the render, the O7
+    original lookup and the overlay cache is identical.
 
     The poster is always rendered from the original (backup if a prior run
     saved one, else the candidate) so re-runs never stack badges (O7) -- see
@@ -177,21 +209,8 @@ def _overlay_poster(
         logger.warning("empty poster bytes for overlay on %s; skipping overlay", item.name)
         return None
     try:
-        # SAME raw-stream source (JellyfinClient.get_item_media_streams_raw) as the preview
-        # path -> preview badges always equal plan/apply badges. Raw dicts keep every field
-        # K9 detection needs (DisplayTitle, IsForced, ChannelLayout, ColorTransfer).
         if streams is None:
-            target_id = item.id
-            if media_type == "tvshow":
-                first_ep = jf.get_items_page(
-                    parent_id=item.id, recursive=True,
-                    include_item_types=["Episode"],
-                    sort_by=["ParentIndexNumber", "IndexNumber"],
-                    sort_order="Ascending", limit=1,
-                ).items
-                if first_ep:
-                    target_id = first_ep[0].id
-            streams = list(jf.get_item_media_streams_raw(target_id))
+            streams = _fetch_item_streams(item, jf, media_type)
     except Exception as exc:
         logger.warning("media-stream fetch failed for %s: %s", item.name, exc)
         streams = []
@@ -228,6 +247,7 @@ def _overlay_poster(
     fw = overlay_file_write(
         target_path=fw_target, candidate_bytes=poster_bytes, candidate_ref=cand.ref,
         render_fn=_render, config_dir=config_dir, is_override=is_override,
+        kind=kind,
     )
     if item_fc:
         fw.meta["format_counts"] = item_fc
@@ -688,8 +708,10 @@ def _build_tvshow_plan(
     }
     for kind, cand in resolved.items():
         if kind == "season_poster":
-            # Season posters go to the show folder as seasonNN-poster.jpg
-            continue  # handled per-season
+            # Season posters live in the show folder as seasonNN-poster.jpg,
+            # one per season -- a single resolved candidate cannot express
+            # that. Handled after this loop by _season_poster_overlays.
+            continue
         fname = filename_map.get(kind, f"{kind}.jpg")
         if kind == "poster" and overlay_names and not _overlay_skipped(item.id, config_dir):
             fw = _overlay_poster(
@@ -727,6 +749,21 @@ def _build_tvshow_plan(
             meta=meta,
         ))
 
+    if (getattr(art, "season_posters", False) and overlay_names
+            and not _overlay_skipped(item.id, config_dir)):
+        files.extend(_season_poster_overlays(
+            item, base, list(overlay_names), jf, details, config_dir,
+            _apply_style_doc(lib, cfg, overlay_names),
+            _profile_format_rules(lib, cfg), streams=streams,
+            packs_profile=_profile_for(lib, cfg),
+            logo_packs=list(getattr(cfg.overlays, "logo_packs", None) or []),
+            assets_root=getattr(getattr(cfg.sources, "local", None), "path", None),
+            status_label=tv_status_obj.label if tv_status_obj else None,
+            status_key=tv_status_obj.status if tv_status_obj else None,
+            trending_rank=trending_rank,
+            rating_values=rating_values,
+        ))
+
     format_counts = _aggregate_format_counts(files)
     return ItemPlan(
         item_id=item.id, item_name=item.name,
@@ -736,6 +773,70 @@ def _build_tvshow_plan(
         format_counts=format_counts,
         tv_status=tv_status_obj.status if tv_status_obj else None,
     )
+
+
+#: Jellyfin's own season-poster filenames in a show folder:
+#: ``season01-poster.jpg`` ... plus ``season-specials-poster.jpg``.
+_SEASON_POSTER_GLOBS = ("season*-poster.jpg", "season*-poster.png")
+
+
+def _season_poster_overlays(
+    item: Item, base: Path, overlay_names: List[str], jf: JellyfinClient,
+    details: Optional[Dict[str, Any]], config_dir: Optional[Path],
+    style_doc: dict, format_rules: Optional[Dict[str, list]] = None,
+    **overlay_kwargs: Any,
+) -> List[FileWrite]:
+    """Badge every season poster already present in the show folder.
+
+    **Why this exists** (2026-11-06, operator-reported "overlays show up only
+    sometimes on series and anime"): Finmeta only ever overlaid the SERIES
+    poster, but Jellyfin's "Recently Added" row does not necessarily show it.
+    Its card builder asks for ``preferParentPoster`` and prefers an episode's
+    ``ParentPrimaryImageItemId`` -- the SEASON -- over ``SeriesId``, so a
+    single newly added episode is drawn with the season's own poster. Sonarr
+    and Jellyfin write those season files themselves, Finmeta never touched
+    them, so the badges "disappeared" for exactly the newest episode while
+    the library view (which shows the series poster) looked correct.
+
+    Deliberately only overlays season posters that ALREADY EXIST: fetching
+    per-season artwork is a separate feature Finmeta does not have yet, and
+    a season with no poster of its own falls back to the series poster in
+    Jellyfin -- which is overlaid already. Either way the card shows badges.
+
+    Same renderer, same O7 original-lookup and same overlay cache as the
+    series poster (``_overlay_poster``), so a re-run never stacks badges.
+    Never fails the item: a season file that cannot be read is skipped with
+    a warning, like every other best-effort artwork step here.
+    """
+    out: List[FileWrite] = []
+    seen: set = set()
+    if overlay_kwargs.get("streams") is None:
+        # Resolve once for the whole show instead of once per season file.
+        try:
+            overlay_kwargs["streams"] = _fetch_item_streams(item, jf, "tvshow")
+        except Exception as exc:
+            logger.warning("media-stream fetch failed for %s: %s", item.name, exc)
+            overlay_kwargs["streams"] = []
+    for pattern in _SEASON_POSTER_GLOBS:
+        try:
+            matches = sorted(base.glob(pattern))
+        except OSError as exc:
+            logger.warning("season poster scan failed for %s: %s", item.name, exc)
+            continue
+        for path in matches:
+            if not path.is_file() or path in seen:
+                continue
+            seen.add(path)
+            cand = Candidate(kind="season_poster", source="local",
+                             ref=str(path), lang=None, score=1.0)
+            fw = _overlay_poster(
+                item, cand, overlay_names, path, jf, details, "tvshow",
+                config_dir, style_doc, format_rules, kind="season_poster",
+                **overlay_kwargs,
+            )
+            if fw is not None:
+                out.append(fw)
+    return out
 
 
 def _tv_status_for_item(
