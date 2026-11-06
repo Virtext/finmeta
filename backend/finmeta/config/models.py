@@ -449,13 +449,19 @@ class TvArtwork(_Strict):
         "Very useful for TV shows."})
     season_posters: bool = Field(
         default=False,
-        description="Write per-season posters.",
-        json_schema_extra={"help": "Write `seasonXX.poster.jpg` for each season. Off by default."})
+        description="Overlay the per-season posters.",
+        json_schema_extra={"help": "Draw this library's overlay badges on the `seasonXX-poster.jpg` "
+        "files that already exist in each show folder (the ones Sonarr or Jellyfin wrote). Worth "
+        "turning on: Jellyfin's \"Recently Added\" row shows the SEASON poster for a newly added "
+        "episode, so without this the badges look like they disappear for exactly the newest "
+        "episode. A season with no poster file of its own falls back to the show poster, which is "
+        "overlaid anyway. Finmeta does not download season artwork itself. Off by default."})
     episode_thumbs: bool = Field(
         default=False,
         description="Write per-episode thumbnails.",
-        json_schema_extra={"help": "Write a thumbnail image for each episode. Off by default; "
-        "noisy and large for long-running shows."})
+        json_schema_extra={"help": "Reserved - Finmeta does not write episode thumbnails yet, so "
+        "this switch currently does nothing. It does not affect overlays: Jellyfin draws episode "
+        "cards from the season/show poster, not from the episode thumbnail."})
 
 
 class _LibraryBase(_Strict):

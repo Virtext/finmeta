@@ -33,6 +33,43 @@ def _job(context: AppContext, action: str, library: Optional[str]) -> None:
         logger.info("schedule started run %s (%s %s)", run_id, action, label)
 
 
+def _libraries_job(context: AppContext, action: str, libraries: list) -> None:
+    """One cron occurrence for a schedule that names several libraries.
+
+    Starts the first library and QUEUES the rest, drained one at a time by
+    ``run_service._worker`` as each run releases the single run slot.
+
+    Before this (fixed 2026-11-06, operator-reported): ``_build_jobs`` added
+    one cron job PER library on the same trigger, so they all fired in the
+    same second, the first claimed the run slot and every other library was
+    dropped with "a run is already in progress" -- no retry, no queue, and
+    nothing about it in the UI. Live proof from the operator's deployment,
+    whose nightly schedule lists three libraries::
+
+        schedule skipped (apply/Anime): a run is already in progress
+        schedule started run run-... (apply Filmer)
+        schedule skipped (apply/Tv serier): a run is already in progress
+
+    Two of its three libraries had silently never been applied on schedule.
+
+    Deliberately NOT collapsed into one combined ``library=None`` run: that
+    scope also builds preset/seasonal collections (see ``_build_jobs``'s
+    ``else`` branch), which an explicit library subset must not trigger.
+    """
+    if not libraries:
+        return
+    first, rest = libraries[0], list(libraries[1:])
+    run_id, err = submit_run(context, action, library=first)
+    if run_id:
+        logger.info("schedule started run %s (%s %s)", run_id, action, first)
+    else:
+        context.queue_library_run(action, first)
+        logger.info("schedule queued %s/%s (%s)", action, first, err)
+    for lib in rest:
+        context.queue_library_run(action, lib)
+        logger.info("schedule queued %s/%s behind the active run", action, lib)
+
+
 def _poster_rotation_job(context: AppContext, library: str) -> None:
     """S9d6: reshuffle+reapply the poster of a library's top-rated items.
 
@@ -77,18 +114,21 @@ def _build_jobs(context: AppContext, scheduler: BackgroundScheduler) -> None:
     for i, sched in enumerate(cfg.schedules):
         trigger = CronTrigger.from_crontab(sched.cron)
         if sched.libraries:
-            # Explicit subset -> one scoped run per listed library, unchanged.
-            for lib in sched.libraries:
-                scheduler.add_job(
-                    _job,
-                    trigger=trigger,
-                    args=[context, sched.action, lib],
-                    id=f"sched-{i}-{lib}",
-                    name=f"{sched.action}:{lib}",
-                    max_instances=1,
-                    coalesce=True,
-                    misfire_grace_time=300,
-                )
+            # Explicit subset -> ONE job that runs the listed libraries one
+            # after another on the single run slot. One job per library (what
+            # this used to be) silently dropped every library but the first --
+            # see _libraries_job.
+            libs = list(sched.libraries)
+            scheduler.add_job(
+                _libraries_job,
+                trigger=trigger,
+                args=[context, sched.action, libs],
+                id=f"sched-{i}-libs",
+                name=f"{sched.action}:{','.join(libs)}",
+                max_instances=1,
+                coalesce=True,
+                misfire_grace_time=300,
+            )
         else:
             # Empty libraries list = "all configured libraries" (the UI's own
             # hint text). Must be ONE combined library=None run, not one job
