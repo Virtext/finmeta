@@ -80,6 +80,18 @@ Kometa configuration — image packs are placed by hand under
 - **Trending & TV status** via MDBList and Sonarr/Radarr integration.
 - **Playlists**, theme music management, and a scheduler for unattended
   runs.
+- **Library health scanner** — one read-only pass reports missing artwork,
+  posters Jellyfin has not picked up, items it never probed, resolution/HDR
+  information that disagrees with the filename, low-resolution or unreadable
+  artwork, duplicate titles, thin or wrong metadata, missing episodes (via
+  Sonarr) and libraries with no path mapping — and fixes the fixable ones
+  from the result list.
+- **Activity Center** — every plan, apply and scan run, including the ones a
+  schedule or Jellyfin's webhook started: what is running, what is queued
+  behind it, when each schedule next fires, per-run logs, and retry.
+- **Backup & restore** — export your configuration, profiles and artwork
+  decisions as one file and restore them on another install. Secrets, caches
+  and media are never in a backup.
 - **Web UI** for configuration, library browsing, overlay/collection
   preview, and secrets management — no hand-edited YAML required for
   day-to-day use.

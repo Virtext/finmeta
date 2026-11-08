@@ -164,6 +164,23 @@ class TmdbClient:
     def _clean(fp: str) -> str:
         return fp.lstrip("/")
 
+    @staticmethod
+    def _usable_image(fp: str) -> bool:
+        """Is this a raster image Jellyfin and the overlay renderer can use?
+
+        TMDb stores many logos as BOTH a PNG and an SVG and returns both in
+        ``/images``; ``file_path`` is simply the stored filename. Taking an
+        ``.svg`` and writing it to ``logo.png`` produces a file nothing can
+        decode: Jellyfin's image processor shows no logo at all, and the
+        overlay renderer cannot composite it either. Found 2026-11-08 by the
+        S10 health scanner, which flagged two real ``logo.png`` files in the
+        test library whose first bytes were ``<?xml version="1``.
+
+        A title whose logo exists only as SVG simply has no logo candidate,
+        which is the honest outcome -- there is no raster version to write.
+        """
+        return not str(fp).lower().endswith(".svg")
+
     def _to_candidates(self, data: dict, kinds, language, language_fallback) -> List[Candidate]:
         prefs = self._prefs(language, language_fallback)
         out: List[Candidate] = []
@@ -173,7 +190,7 @@ class TmdbClient:
                 continue
             for item in data.get(key) or []:
                 fp = item.get("file_path")
-                if not fp:
+                if not fp or not self._usable_image(fp):
                     continue
                 out.append(Candidate(
                     kind=kind, source="tmdb",

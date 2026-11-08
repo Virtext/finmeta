@@ -8,7 +8,12 @@ import { useCallback, useEffect, useState } from 'react';
 import { getConfig, putConfig } from '../api';
 import * as YAML from 'js-yaml';
 
-interface ScheduleRow { cron: string; action: 'plan' | 'apply'; libraries: string[] }
+type ScheduleAction = 'plan' | 'apply' | 'scan';
+
+// `tier` only means anything for action: scan (1 = quick, 2 = deep).
+interface ScheduleRow {
+  cron: string; action: ScheduleAction; libraries: string[]; tier: number;
+}
 
 export default function SchedulesPanel() {
   const [schedules, setSchedules] = useState<ScheduleRow[]>([]);
@@ -22,8 +27,9 @@ export default function SchedulesPanel() {
       const c = await getConfig();
       const raw = (c.parsed?.schedules as any[]) ?? [];
       setSchedules(raw.map((s) => ({
-        cron: s.cron ?? '', action: (s.action ?? 'plan') as 'plan' | 'apply',
+        cron: s.cron ?? '', action: (s.action ?? 'plan') as ScheduleAction,
         libraries: Array.isArray(s.libraries) ? s.libraries : [],
+        tier: Number(s.tier ?? 1) === 2 ? 2 : 1,
       })));
       setLibNames(Object.keys(c.parsed?.libraries ?? {}));
     } catch { /* keep last good state */ }
@@ -39,7 +45,12 @@ export default function SchedulesPanel() {
       const d = await getConfig();
       let doc: any;
       try { doc = (YAML.load(d.yaml) as any) ?? {}; } catch { doc = {}; }
-      doc.schedules = next.map((s) => ({ cron: s.cron, action: s.action, libraries: s.libraries }));
+      doc.schedules = next.map((s) => ({
+        cron: s.cron, action: s.action, libraries: s.libraries,
+        // Only write `tier` for a scan: on plan/apply it would be config
+        // noise the backend ignores anyway.
+        ...(s.action === 'scan' ? { tier: s.tier } : {}),
+      }));
       const text = YAML.dump(doc, { noRefs: true, lineWidth: -1 });
       await putConfig(text);     // server-side validated (cron syntax, library refs); 400 on error
       // Trust `next` as the new state instead of re-fetching: a re-fetch
@@ -56,7 +67,7 @@ export default function SchedulesPanel() {
   }
 
   function addSchedule() {
-    void save([...schedules, { cron: '0 4 * * *', action: 'plan', libraries: [] }])
+    void save([...schedules, { cron: '0 4 * * *', action: 'plan', libraries: [], tier: 1 }])
       .then((ok) => { if (ok) flash('Schedule added'); });
   }
 
@@ -68,8 +79,14 @@ export default function SchedulesPanel() {
     void save(schedules).then((ok) => { if (ok) flash('Schedule saved'); });
   }
 
-  function setAction(i: number, action: 'plan' | 'apply') {
+  function setAction(i: number, action: ScheduleAction) {
     const next = schedules.map((s, idx) => (idx === i ? { ...s, action } : s));
+    setSchedules(next);
+    void save(next).then((ok) => { if (ok) flash('Schedule saved'); });
+  }
+
+  function setTier(i: number, tier: number) {
+    const next = schedules.map((s, idx) => (idx === i ? { ...s, tier } : s));
     setSchedules(next);
     void save(next).then((ok) => { if (ok) flash('Schedule saved'); });
   }
@@ -93,10 +110,13 @@ export default function SchedulesPanel() {
     <div className="schedules-panel">
       <h3>Schedules</h3>
       <p className="field-hint muted" style={{ marginTop: 0 }}>
-        Recurring plan/apply runs (cron). Empty library selection = all configured libraries.
+        Recurring plan/apply/scan runs (cron). Empty library selection = all configured libraries.
         Once an item's artwork is locked (first successful apply — see the candidate picker's
         🔒 indicator), an "apply" schedule here already behaves as a nightly overlay-only
         refresh: it never re-queries TMDb/fanart for locked items.
+        {' '}A <strong>scan</strong> schedule runs the Library health checks instead of writing
+        anything, so it works regardless of dry_run; a deep scan also queries TMDb per item and
+        Sonarr per series, so keep that one nightly at most.
         {' '}Not sure about the cron syntax?{' '}
         <a href="https://crontab.guru/" target="_blank" rel="noreferrer" className="link">crontab.guru</a>.
       </p>
@@ -117,11 +137,22 @@ export default function SchedulesPanel() {
                 <td>
                   <select
                     value={s.action} disabled={busy}
-                    onChange={(e) => setAction(i, e.target.value as 'plan' | 'apply')}
+                    onChange={(e) => setAction(i, e.target.value as ScheduleAction)}
                   >
                     <option value="plan">plan</option>
                     <option value="apply">apply</option>
+                    <option value="scan">scan (health)</option>
                   </select>
+                  {s.action === 'scan' && (
+                    <select
+                      value={s.tier} disabled={busy}
+                      title="Deep adds the TMDb/Sonarr checks — much slower"
+                      onChange={(e) => setTier(i, Number(e.target.value))}
+                    >
+                      <option value={1}>quick</option>
+                      <option value={2}>deep</option>
+                    </select>
+                  )}
                 </td>
                 <td>
                   <div className="schedule-libs">

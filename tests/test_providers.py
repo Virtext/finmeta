@@ -679,3 +679,33 @@ def test_arr_test_error_is_redacted(arr_client, monkeypatch):
     assert data["ok"] is False
     assert "radarr-secret" not in r.text
 
+
+
+# --- 2026-11-08: TMDb SVG logos must never become logo.png ------------------
+def test_svg_candidates_are_skipped():
+    """TMDb returns the same logo as both PNG and SVG; writing the SVG to
+    logo.png yields a file neither Jellyfin nor the overlay renderer can
+    decode. Found by the S10 health scanner on real data (two logo.png files
+    starting with `<?xml version="1`)."""
+    from finmeta.sources.tmdb import TmdbClient
+
+    client = TmdbClient.__new__(TmdbClient)        # no HTTP needed
+    client.image_base = "https://image.tmdb.org/t/p"
+    data = {"logos": [
+        {"file_path": "/vector.svg", "iso_639_1": "en", "vote_average": 9.0,
+         "width": 3000, "height": 1000},
+        {"file_path": "/raster.png", "iso_639_1": "en", "vote_average": 5.0,
+         "width": 800, "height": 300},
+    ]}
+    cands = client._to_candidates(data, ["logo"], "en", [None])
+    assert [c.ref.rsplit("/", 1)[-1] for c in cands] == ["raster.png"]
+
+
+def test_a_logo_that_exists_only_as_svg_yields_no_candidate():
+    """The honest outcome: there is no raster version to write."""
+    from finmeta.sources.tmdb import TmdbClient
+
+    client = TmdbClient.__new__(TmdbClient)
+    client.image_base = "https://image.tmdb.org/t/p"
+    data = {"logos": [{"file_path": "/only.SVG", "vote_average": 9.0}]}
+    assert client._to_candidates(data, ["logo"], None, [None]) == []

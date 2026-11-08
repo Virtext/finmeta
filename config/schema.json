@@ -28,6 +28,29 @@
       "title": "ArtworkSelection",
       "type": "object"
     },
+    "BackupConfig": {
+      "additionalProperties": false,
+      "description": "Backup bundle settings (SPEC_S11 \u00a7D5).\n\nA bundle holds configuration, library profiles and artwork decisions. It\nNEVER holds secrets, auth, caches or media -- that is a hard rule in\n`engine/backup_bundle.py`, not a setting.",
+      "properties": {
+        "include_scan": {
+          "default": false,
+          "description": "Include the newest health-scan findings in a bundle.",
+          "help": "Off by default: findings are a snapshot of a moment, they can be thousands of rows, and a new scan regenerates them in minutes. Turn on if you want a bundle to carry the last scan's results as a record.",
+          "title": "Include Scan",
+          "type": "boolean"
+        },
+        "keep_bundles": {
+          "default": 10,
+          "description": "How many snapshots to keep on disk (0 = keep every one).",
+          "help": "Snapshots taken from the Backup page are stored under `<config>/backups/bundles/`. After each new one, older snapshots beyond this many are deleted. `0` keeps every snapshot forever. Downloaded bundles are not affected -- this only prunes the copies Finmeta keeps for you.",
+          "minimum": 0,
+          "title": "Keep Bundles",
+          "type": "integer"
+        }
+      },
+      "title": "BackupConfig",
+      "type": "object"
+    },
     "FanartSource": {
       "additionalProperties": false,
       "properties": {
@@ -753,17 +776,169 @@
       "title": "PosterRotation",
       "type": "object"
     },
+    "ScanArtworkWidths": {
+      "additionalProperties": false,
+      "description": "Minimum acceptable width per artwork kind, in pixels (SPEC_S10 SC6).",
+      "properties": {
+        "backdrop": {
+          "default": 1920,
+          "description": "Minimum backdrop width in pixels (0 = do not check).",
+          "help": "Backdrops below this width are reported as low-resolution. Default 1920 (1080p). Set to 0 to disable.",
+          "minimum": 0,
+          "title": "Backdrop",
+          "type": "integer"
+        },
+        "landscape": {
+          "default": 1280,
+          "description": "Minimum landscape width in pixels (0 = do not check).",
+          "help": "Landscape images below this width are reported as low-resolution. Default 1280. Set to 0 to disable.",
+          "minimum": 0,
+          "title": "Landscape",
+          "type": "integer"
+        },
+        "logo": {
+          "default": 400,
+          "description": "Minimum logo width in pixels (0 = do not check).",
+          "help": "Logos below this width are reported as low-resolution. Default 400. Logos are drawn small, so the bar is lower than for posters. Set to 0 to disable.",
+          "minimum": 0,
+          "title": "Logo",
+          "type": "integer"
+        },
+        "poster": {
+          "default": 1000,
+          "description": "Minimum poster width in pixels (0 = do not check).",
+          "help": "Posters below this width are reported as low-resolution. Default 1000 (TMDb's `w500` is 500x750, which looks soft on a 4K TV). Note that artwork ranking already prefers higher resolution, so a low-res poster usually means the source has nothing better -- the fix is to pick a different candidate, not to re-apply. Set to 0 to disable.",
+          "minimum": 0,
+          "title": "Poster",
+          "type": "integer"
+        }
+      },
+      "title": "ScanArtworkWidths",
+      "type": "object"
+    },
+    "ScanChecks": {
+      "additionalProperties": false,
+      "description": "Which health-check groups a scan runs (SPEC_S10 \u00a7B).\n\nEvery group defaults to on. Turning one off removes it from the scan\nentirely -- no findings, and no work either (the media-stream fetch SC3\nneeds is skipped when `media` is off). SC7 (unmapped paths) has no switch:\nan unmapped path blinds every other disk check, so it is always reported.",
+      "properties": {
+        "artwork": {
+          "default": true,
+          "description": "Check that managed poster/backdrop/logo/landscape artwork exists.",
+          "help": "SC1. Reports artwork that is missing on disk AND in Jellyfin (Finmeta can download it), files Jellyfin has not picked up yet (it needs to re-read the folder), and images Jellyfin has but Finmeta owns no file for. Only the kinds a library actually manages are checked.",
+          "title": "Artwork",
+          "type": "boolean"
+        },
+        "artwork_quality": {
+          "default": true,
+          "description": "Check the resolution and sanity of the artwork files on disk.",
+          "help": "SC6. Reads the header of each artwork file Finmeta manages (no full decode) and reports images narrower than `min_artwork_width`, suspiciously small files (placeholders/truncated downloads) and files no image library can read.",
+          "title": "Artwork Quality",
+          "type": "boolean"
+        },
+        "duplicates": {
+          "default": true,
+          "description": "Check for the same title appearing twice.",
+          "help": "SC4. Reports items in one library that share a TMDb/IMDb id, two movies that resolve to the same folder (they would fight over the same poster.jpg), and items holding several versions. Report-only: Finmeta never deletes or moves media.",
+          "title": "Duplicates",
+          "type": "boolean"
+        },
+        "episodes": {
+          "default": true,
+          "description": "Check for missing seasons and episodes (deep scan, needs Sonarr).",
+          "help": "SC5. Deep scan only. Asks Sonarr which monitored episodes have aired but have no file, grouped per season, and flags a monitored season with no files at all. Costs one Sonarr request per series. Finmeta never writes to Sonarr -- the finding links there instead. Series Sonarr does not know are reported as info, and nothing is reported at all when no Sonarr instance is configured.",
+          "title": "Episodes",
+          "type": "boolean"
+        },
+        "media": {
+          "default": true,
+          "description": "Check resolution/HDR information on the video streams.",
+          "help": "SC3. Reports items Jellyfin never probed (no video stream, or no height), 4K items with no HDR information (the HDR badge silently disappears), and files whose NAME claims something the streams deny (e.g. `2160p HDR` on a 1080p SDR stream). Costs one extra batched Jellyfin request per ~50 items.",
+          "title": "Media",
+          "type": "boolean"
+        },
+        "metadata": {
+          "default": true,
+          "description": "Check for missing or wrong metadata.",
+          "help": "SC2. Reports items with no TMDb/IMDb id at all (nothing downstream can work without one) and empty overview/year/genres/studio fields. A deep scan adds the match checks: items TMDb cannot match, and items whose year is more than a year off TMDb's -- which in practice means the item is matched to the wrong title.",
+          "title": "Metadata",
+          "type": "boolean"
+        }
+      },
+      "title": "ScanChecks",
+      "type": "object"
+    },
+    "ScanConfig": {
+      "additionalProperties": false,
+      "description": "Library health scanner settings (SPEC_S10 \u00a7D).\n\nA scan is read-only: it reports, it never writes. These settings only\ndecide what gets reported and how much scan history is kept.",
+      "properties": {
+        "checks": {
+          "$ref": "#/$defs/ScanChecks",
+          "description": "Which check groups the scan runs.",
+          "help": "Turn individual health checks off. All on by default. See ScanChecks."
+        },
+        "include_specials": {
+          "default": false,
+          "description": "Count season 0 (specials) as missing episodes.",
+          "help": "Sonarr tracks specials as season 0. They are usually not something you are actively collecting, so they are excluded from the missing-episode check by default. Turn on to have them reported like any other season.",
+          "title": "Include Specials",
+          "type": "boolean"
+        },
+        "keep_scans": {
+          "default": 5,
+          "description": "How many past scans to keep (0 = keep every scan).",
+          "help": "After each scan, older scans and their findings are deleted beyond this many. A large library can produce thousands of findings per scan, so keeping them forever grows the job database for no benefit -- the newest scan is the one you act on. `0` disables pruning and keeps everything.",
+          "minimum": 0,
+          "title": "Keep Scans",
+          "type": "integer"
+        },
+        "min_artwork_bytes": {
+          "default": 20480,
+          "description": "Report artwork files smaller than this many bytes (0 = do not check).",
+          "help": "An artwork file this small is almost always a placeholder or a truncated download rather than a real image. Default 20480 (20 kB). Set to 0 to disable.",
+          "minimum": 0,
+          "title": "Min Artwork Bytes",
+          "type": "integer"
+        },
+        "min_artwork_width": {
+          "$ref": "#/$defs/ScanArtworkWidths",
+          "description": "Minimum acceptable artwork width per kind.",
+          "help": "Per-kind width floors for the artwork-quality check. See ScanArtworkWidths."
+        },
+        "min_video_height": {
+          "default": 0,
+          "description": "Report video shorter than this many pixels (0 = do not check).",
+          "help": "Items whose video stream is shorter than this are reported as low-resolution (severity `info`). Off by default (`0`) -- a DVD-era film is not a problem to fix. Set e.g. `720` to find everything below 720p.",
+          "minimum": 0,
+          "title": "Min Video Height",
+          "type": "integer"
+        },
+        "severity_floor": {
+          "default": "info",
+          "description": "Lowest severity worth storing (info keeps everything).",
+          "enum": [
+            "error",
+            "warning",
+            "info"
+          ],
+          "help": "Findings below this severity are not stored at all. `info` (the default) keeps everything; `warning` drops the 'probably deliberate' notes (multiple versions of one item, images Jellyfin has but Finmeta does not own); `error` keeps only what is visibly broken for someone browsing Jellyfin.",
+          "title": "Severity Floor",
+          "type": "string"
+        }
+      },
+      "title": "ScanConfig",
+      "type": "object"
+    },
     "Schedule": {
       "additionalProperties": false,
       "properties": {
         "action": {
           "default": "plan",
-          "description": "What the schedule does: plan (dry-run) or apply.",
+          "description": "What the schedule does: plan (dry-run), apply, or scan.",
           "enum": [
             "plan",
-            "apply"
+            "apply",
+            "scan"
           ],
-          "help": "`plan` = build the WritePlan without writing anything (safe, default); `apply` = actually write files and call the Jellyfin API. `apply` is refused while `dry_run` is true.",
+          "help": "`plan` = build the WritePlan without writing anything (safe, default); `apply` = actually write files and call the Jellyfin API. `apply` is refused while `dry_run` is true. `scan` = run the library health scanner (read-only, so it works regardless of `dry_run`); its results appear on the Health page.",
           "title": "Action",
           "type": "string"
         },
@@ -781,6 +956,15 @@
           },
           "title": "Libraries",
           "type": "array"
+        },
+        "tier": {
+          "default": 1,
+          "description": "Scan depth for `action: scan` (1 = quick, 2 = deep). Ignored otherwise.",
+          "help": "Only meaningful with `action: scan`. `1` is the quick pass (Jellyfin and disk only -- safe to run often). `2` adds the checks that query TMDb per item and Sonarr per series, so it is much slower; nightly or weekly at most. A scheduled deep scan keeps its tier even for libraries that had to queue behind another run.",
+          "maximum": 2,
+          "minimum": 1,
+          "title": "Tier",
+          "type": "integer"
         }
       },
       "required": [
@@ -1243,6 +1427,11 @@
       "title": "Artwork Write Method",
       "type": "string"
     },
+    "backup": {
+      "$ref": "#/$defs/BackupConfig",
+      "description": "Backup bundle settings (SPEC_S11).",
+      "help": "How many snapshots Finmeta keeps and whether a bundle carries the last health scan's findings. Secrets, auth files, caches and media are never in a bundle at all. See BackupConfig."
+    },
     "backup_retention_days": {
       "default": 14,
       "description": "Days a superseded backup copy spends in trash before permanent deletion.",
@@ -1351,6 +1540,11 @@
       },
       "title": "Playlists",
       "type": "array"
+    },
+    "scan": {
+      "$ref": "#/$defs/ScanConfig",
+      "description": "Library health scanner settings (SPEC_S10).",
+      "help": "What the health scanner reports and how much scan history it keeps. A scan is read-only -- it never writes files or calls a write API -- and runs from the Health page or `POST /api/runs` with `action: scan`. See ScanConfig."
     },
     "schedules": {
       "description": "Recurring plan/apply runs (cron).",

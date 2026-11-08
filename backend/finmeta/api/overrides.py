@@ -9,9 +9,19 @@ from __future__ import annotations
 import hashlib
 import sqlite3
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from finmeta.engine.plan import FileWrite, ItemPlan, WritePlan
+
+#: Every table this store owns, with its primary-key columns. The backup
+#: bundle (SPEC_S11 §D1) walks this, so a new table cannot be silently left
+#: out of a backup -- add it here and it is exported and restored.
+_EXPORT_TABLES = {
+    "overrides": ("item_id", "kind"),
+    "reshuffle_counts": ("item_id", "kind"),
+    "skip_kinds": ("item_id", "kind"),
+    "artwork_locks": ("item_id", "kind"),
+}
 
 _FILENAME_FOR_KIND = {
     "poster": "poster.jpg", "backdrop": "backdrop.jpg", "logo": "logo.png",
@@ -199,6 +209,60 @@ class OverrideStore:
 
 
 # -- plan application -------------------------------------------------------
+
+    # -- backup / restore (S11c) -------------------------------------------
+    def export_all(self) -> Dict[str, List[Dict[str, Any]]]:
+        """Every row of every table, as plain JSON-able dicts.
+
+        These are the operator's artwork decisions -- which candidate was
+        picked, which image is locked, which kinds are skipped, how many times
+        a poster was reshuffled. They live outside config.yml, so a
+        config-only backup would quietly lose all of it.
+        """
+        out: Dict[str, List[Dict[str, Any]]] = {}
+        with self._conn() as conn:
+            for table in _EXPORT_TABLES:
+                rows = conn.execute(f"SELECT * FROM {table}").fetchall()
+                out[table] = [dict(r) for r in rows]
+        return out
+
+    def import_all(self, data: Dict[str, List[Dict[str, Any]]],
+                   mode: str = "merge") -> Dict[str, int]:
+        """Restore exported rows. Returns ``{table: rows_written}``.
+
+        ``merge`` (the default) upserts, so a lock made after the backup
+        survives being restored over -- nothing is deleted. ``replace`` empties
+        each table first, which is what you want when moving an install, not
+        when undoing a mistake.
+
+        Unknown tables, unknown columns and keyless rows are ignored rather
+        than trusted: a bundle is a file the operator may have hand-edited.
+        """
+        if mode not in ("merge", "replace"):
+            raise ValueError(f"unknown mode {mode!r}")
+        written: Dict[str, int] = {}
+        with self._conn() as conn:
+            for table, pk in _EXPORT_TABLES.items():
+                rows = data.get(table) or []
+                cols = [r["name"] for r in conn.execute(f"PRAGMA table_info({table})")]
+                if mode == "replace":
+                    conn.execute(f"DELETE FROM {table}")
+                count = 0
+                for row in rows:
+                    if not isinstance(row, dict):
+                        continue
+                    keep = {k: v for k, v in row.items() if k in cols}
+                    if not all(keep.get(k) for k in pk):
+                        continue
+                    names = ", ".join(keep)
+                    marks = ", ".join("?" for _ in keep)
+                    conn.execute(
+                        f"INSERT OR REPLACE INTO {table} ({names}) VALUES ({marks})",
+                        list(keep.values()))
+                    count += 1
+                written[table] = count
+        return written
+
 
 def apply_overrides(plan: WritePlan, overrides_by_item: Dict[str, List[Dict[str, str]]]) -> WritePlan:
     """Replace/append FileWrites in ``plan`` per stored override (mutates items).

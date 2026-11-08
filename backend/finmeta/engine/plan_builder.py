@@ -19,6 +19,12 @@ from finmeta.engine.nfo import (
     DEFAULT_MOVIE_FIELDS, DEFAULT_TV_FIELDS,
     episode_nfo, movie_nfo, nfo_sha256, season_nfo, tvshow_nfo,
 )
+from finmeta.engine.paths import (
+    episode_stem as _episode_stem,
+    movie_dir as _movie_dir,
+    season_dir as _season_dir,
+    show_dir as _show_dir,
+)
 from finmeta.engine.plan import (
     ApiAction, FileWrite, ItemPlan, UnmatchedItem, WritePlan,
 )
@@ -252,54 +258,6 @@ def _overlay_poster(
     if item_fc:
         fw.meta["format_counts"] = item_fc
     return fw
-
-
-def _movie_dir(item: Item, mapper: PathMapper) -> Optional[Path]:
-    """Local directory containing the movie video file."""
-    local = mapper.translate(item.path)
-    if not local:
-        return None
-    return Path(local).parent
-
-
-def _show_dir(item: Item, mapper: PathMapper) -> Optional[Path]:
-    """Local directory for a TV series (the show folder)."""
-    local = mapper.translate(item.path)
-    if not local:
-        return None
-    p = Path(local)
-    # A real existing directory IS the show folder -- trust it outright.
-    # Must come before the suffix heuristic below: a show folder NAME can
-    # itself contain a '.' (e.g. "A.D. Police Files", "S.H.I.E.L.D.") and
-    # Path.suffix has no concept of "this is a directory, not a file" --
-    # it just looks for the last '.' in the final path component. Checking
-    # suffix first on a real directory like that wrongly climbed two parent
-    # levels and wrote posters/NFOs into the TOP of the whole media share
-    # instead of the show's own folder (reported live 2026-10-25).
-    if p.is_dir():
-        return p
-    # If path points to a file (first episode), use its parent's parent
-    if p.is_file() or p.suffix:
-        # /media/Shows/Show/Season 01/ep.mkv -> /media/Shows/Show
-        return p.parent.parent
-    return p
-
-
-def _season_dir(item: Item, mapper: PathMapper) -> Optional[Path]:
-    """Local directory for a season."""
-    local = mapper.translate(item.path)
-    if not local:
-        return None
-    return Path(local)
-
-
-def _episode_stem(item: Item, mapper: PathMapper) -> Optional[Path]:
-    """Local path stem for an episode file (without extension)."""
-    local = mapper.translate(item.path)
-    if not local:
-        return None
-    p = Path(local)
-    return p.with_suffix("")
 
 
 # -- ratings ----------------------------------------------------------------

@@ -933,17 +933,179 @@ class Playlist(_Strict):
 # schedules
 # ---------------------------------------------------------------------------
 
+class BackupConfig(_Strict):
+    """Backup bundle settings (SPEC_S11 §D5).
+
+    A bundle holds configuration, library profiles and artwork decisions. It
+    NEVER holds secrets, auth, caches or media -- that is a hard rule in
+    `engine/backup_bundle.py`, not a setting.
+    """
+
+    keep_bundles: int = Field(
+        default=10, ge=0,
+        description="How many snapshots to keep on disk (0 = keep every one).",
+        json_schema_extra={"help": "Snapshots taken from the Backup page are stored under "
+        "`<config>/backups/bundles/`. After each new one, older snapshots beyond this many are "
+        "deleted. `0` keeps every snapshot forever. Downloaded bundles are not affected -- this "
+        "only prunes the copies Finmeta keeps for you."})
+    include_scan: bool = Field(
+        default=False,
+        description="Include the newest health-scan findings in a bundle.",
+        json_schema_extra={"help": "Off by default: findings are a snapshot of a moment, they can "
+        "be thousands of rows, and a new scan regenerates them in minutes. Turn on if you want a "
+        "bundle to carry the last scan's results as a record."})
+
+
+class ScanChecks(_Strict):
+    """Which health-check groups a scan runs (SPEC_S10 §B).
+
+    Every group defaults to on. Turning one off removes it from the scan
+    entirely -- no findings, and no work either (the media-stream fetch SC3
+    needs is skipped when `media` is off). SC7 (unmapped paths) has no switch:
+    an unmapped path blinds every other disk check, so it is always reported.
+    """
+
+    artwork: bool = Field(
+        default=True,
+        description="Check that managed poster/backdrop/logo/landscape artwork exists.",
+        json_schema_extra={"help": "SC1. Reports artwork that is missing on disk AND in Jellyfin "
+        "(Finmeta can download it), files Jellyfin has not picked up yet (it needs to re-read the "
+        "folder), and images Jellyfin has but Finmeta owns no file for. Only the kinds a library "
+        "actually manages are checked."})
+    media: bool = Field(
+        default=True,
+        description="Check resolution/HDR information on the video streams.",
+        json_schema_extra={"help": "SC3. Reports items Jellyfin never probed (no video stream, or "
+        "no height), 4K items with no HDR information (the HDR badge silently disappears), and "
+        "files whose NAME claims something the streams deny (e.g. `2160p HDR` on a 1080p SDR "
+        "stream). Costs one extra batched Jellyfin request per ~50 items."})
+    duplicates: bool = Field(
+        default=True,
+        description="Check for the same title appearing twice.",
+        json_schema_extra={"help": "SC4. Reports items in one library that share a TMDb/IMDb id, "
+        "two movies that resolve to the same folder (they would fight over the same poster.jpg), "
+        "and items holding several versions. Report-only: Finmeta never deletes or moves media."})
+    metadata: bool = Field(
+        default=True,
+        description="Check for missing or wrong metadata.",
+        json_schema_extra={"help": "SC2. Reports items with no TMDb/IMDb id at all (nothing "
+        "downstream can work without one) and empty overview/year/genres/studio fields. A deep "
+        "scan adds the match checks: items TMDb cannot match, and items whose year is more than a "
+        "year off TMDb's -- which in practice means the item is matched to the wrong title."})
+    episodes: bool = Field(
+        default=True,
+        description="Check for missing seasons and episodes (deep scan, needs Sonarr).",
+        json_schema_extra={"help": "SC5. Deep scan only. Asks Sonarr which monitored episodes have "
+        "aired but have no file, grouped per season, and flags a monitored season with no files at "
+        "all. Costs one Sonarr request per series. Finmeta never writes to Sonarr -- the finding "
+        "links there instead. Series Sonarr does not know are reported as info, and nothing is "
+        "reported at all when no Sonarr instance is configured."})
+    artwork_quality: bool = Field(
+        default=True,
+        description="Check the resolution and sanity of the artwork files on disk.",
+        json_schema_extra={"help": "SC6. Reads the header of each artwork file Finmeta manages "
+        "(no full decode) and reports images narrower than `min_artwork_width`, suspiciously "
+        "small files (placeholders/truncated downloads) and files no image library can read."})
+
+
+class ScanArtworkWidths(_Strict):
+    """Minimum acceptable width per artwork kind, in pixels (SPEC_S10 SC6)."""
+
+    poster: int = Field(
+        default=1000, ge=0,
+        description="Minimum poster width in pixels (0 = do not check).",
+        json_schema_extra={"help": "Posters below this width are reported as low-resolution. "
+        "Default 1000 (TMDb's `w500` is 500x750, which looks soft on a 4K TV). Note that artwork "
+        "ranking already prefers higher resolution, so a low-res poster usually means the source "
+        "has nothing better -- the fix is to pick a different candidate, not to re-apply. "
+        "Set to 0 to disable."})
+    backdrop: int = Field(
+        default=1920, ge=0,
+        description="Minimum backdrop width in pixels (0 = do not check).",
+        json_schema_extra={"help": "Backdrops below this width are reported as low-resolution. "
+        "Default 1920 (1080p). Set to 0 to disable."})
+    logo: int = Field(
+        default=400, ge=0,
+        description="Minimum logo width in pixels (0 = do not check).",
+        json_schema_extra={"help": "Logos below this width are reported as low-resolution. "
+        "Default 400. Logos are drawn small, so the bar is lower than for posters. "
+        "Set to 0 to disable."})
+    landscape: int = Field(
+        default=1280, ge=0,
+        description="Minimum landscape width in pixels (0 = do not check).",
+        json_schema_extra={"help": "Landscape images below this width are reported as "
+        "low-resolution. Default 1280. Set to 0 to disable."})
+
+
+class ScanConfig(_Strict):
+    """Library health scanner settings (SPEC_S10 §D).
+
+    A scan is read-only: it reports, it never writes. These settings only
+    decide what gets reported and how much scan history is kept.
+    """
+
+    keep_scans: int = Field(
+        default=5, ge=0,
+        description="How many past scans to keep (0 = keep every scan).",
+        json_schema_extra={"help": "After each scan, older scans and their findings are deleted "
+        "beyond this many. A large library can produce thousands of findings per scan, so keeping "
+        "them forever grows the job database for no benefit -- the newest scan is the one you act "
+        "on. `0` disables pruning and keeps everything."})
+    severity_floor: Literal["error", "warning", "info"] = Field(
+        default="info",
+        description="Lowest severity worth storing (info keeps everything).",
+        json_schema_extra={"help": "Findings below this severity are not stored at all. `info` "
+        "(the default) keeps everything; `warning` drops the 'probably deliberate' notes (multiple "
+        "versions of one item, images Jellyfin has but Finmeta does not own); `error` keeps only "
+        "what is visibly broken for someone browsing Jellyfin."})
+    include_specials: bool = Field(
+        default=False,
+        description="Count season 0 (specials) as missing episodes.",
+        json_schema_extra={"help": "Sonarr tracks specials as season 0. They are usually not "
+        "something you are actively collecting, so they are excluded from the missing-episode "
+        "check by default. Turn on to have them reported like any other season."})
+    min_video_height: int = Field(
+        default=0, ge=0,
+        description="Report video shorter than this many pixels (0 = do not check).",
+        json_schema_extra={"help": "Items whose video stream is shorter than this are reported as "
+        "low-resolution (severity `info`). Off by default (`0`) -- a DVD-era film is not a problem "
+        "to fix. Set e.g. `720` to find everything below 720p."})
+    min_artwork_bytes: int = Field(
+        default=20480, ge=0,
+        description="Report artwork files smaller than this many bytes (0 = do not check).",
+        json_schema_extra={"help": "An artwork file this small is almost always a placeholder or a "
+        "truncated download rather than a real image. Default 20480 (20 kB). Set to 0 to disable."})
+    min_artwork_width: ScanArtworkWidths = Field(
+        default_factory=ScanArtworkWidths,
+        description="Minimum acceptable artwork width per kind.",
+        json_schema_extra={"help": "Per-kind width floors for the artwork-quality check. "
+        "See ScanArtworkWidths."})
+    checks: ScanChecks = Field(
+        default_factory=ScanChecks,
+        description="Which check groups the scan runs.",
+        json_schema_extra={"help": "Turn individual health checks off. All on by default. "
+        "See ScanChecks."})
+
+
 class Schedule(_Strict):
     cron: str = Field(
         description="Cron expression for when the schedule runs.",
         json_schema_extra={"help": "A 5-field cron expression, e.g. `0 4 * * *` (daily at 04:00) or "
         "`0 2 * * 1` (Mondays 02:00). Standard cron minute/hour/day/month/weekday fields."})
-    action: Literal["plan", "apply"] = Field(
+    action: Literal["plan", "apply", "scan"] = Field(
         default="plan",
-        description="What the schedule does: plan (dry-run) or apply.",
+        description="What the schedule does: plan (dry-run), apply, or scan.",
         json_schema_extra={"help": "`plan` = build the WritePlan without writing anything (safe, "
         "default); `apply` = actually write files and call the Jellyfin API. `apply` is refused while "
-        "`dry_run` is true."})
+        "`dry_run` is true. `scan` = run the library health scanner (read-only, so it works "
+        "regardless of `dry_run`); its results appear on the Health page."})
+    tier: int = Field(
+        default=1, ge=1, le=2,
+        description="Scan depth for `action: scan` (1 = quick, 2 = deep). Ignored otherwise.",
+        json_schema_extra={"help": "Only meaningful with `action: scan`. `1` is the quick pass "
+        "(Jellyfin and disk only -- safe to run often). `2` adds the checks that query TMDb per "
+        "item and Sonarr per series, so it is much slower; nightly or weekly at most. A scheduled "
+        "deep scan keeps its tier even for libraries that had to queue behind another run."})
     libraries: List[str] = Field(
         default_factory=list,
         description="Libraries to include (empty = all configured).",
@@ -1087,6 +1249,18 @@ class Config(_Strict):
         description="Playlists to create in Jellyfin.",
         json_schema_extra={"help": "Playlists Finmeta creates and keeps in sync in Jellyfin. Each "
         "picks items from a library by an optional filter, up to a limit, in a chosen sort order."})
+    backup: BackupConfig = Field(
+        default_factory=BackupConfig,
+        description="Backup bundle settings (SPEC_S11).",
+        json_schema_extra={"help": "How many snapshots Finmeta keeps and whether a bundle carries "
+        "the last health scan's findings. Secrets, auth files, caches and media are never in a "
+        "bundle at all. See BackupConfig."})
+    scan: ScanConfig = Field(
+        default_factory=ScanConfig,
+        description="Library health scanner settings (SPEC_S10).",
+        json_schema_extra={"help": "What the health scanner reports and how much scan history it "
+        "keeps. A scan is read-only -- it never writes files or calls a write API -- and runs from "
+        "the Health page or `POST /api/runs` with `action: scan`. See ScanConfig."})
     schedules: List[Schedule] = Field(
         default_factory=list,
         description="Recurring plan/apply runs (cron).",

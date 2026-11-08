@@ -253,3 +253,135 @@ export interface ProvidersResp {
   providers: Provider[];
 }
 
+
+// ---- S10a: library health scanner (SPEC_S10) ----
+
+export type Severity = 'error' | 'warning' | 'info';
+export type FixKind =
+  | 'apply_item' | 'refresh_item' | 'candidate_picker' | 'external' | 'none';
+
+export interface ScanRow {
+  scan_id: string;
+  started_at: string;
+  finished_at: string | null;
+  status: string;                 // running | ok | error
+  library: string | null;         // null = every configured library
+  tier: number;
+  items_scanned: number;
+  finding_count: number;
+}
+
+export interface ScanCounts {
+  by_severity: Record<string, number>;
+  by_group: Record<string, number>;
+  by_check: Record<string, number>;
+}
+
+export interface ScanFinding {
+  id: number;
+  scan_id: string;
+  library: string;
+  item_id: string | null;         // null for library-level findings
+  item_name: string;
+  media_type: string;
+  check_code: string;             // "<group>.<detail>"
+  group: string;
+  severity: Severity;
+  detail: Record<string, any>;
+  fix_kind: FixKind;
+  fixed_at: string | null;        // a fix was submitted; rescan to confirm
+}
+
+export interface ScansResp { scans: ScanRow[] }
+export interface LatestScanResp { scan: ScanRow | null; counts: ScanCounts }
+export interface FindingsResp {
+  scan_id: string;
+  findings: ScanFinding[];
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+}
+export interface FixResp {
+  submitted: Array<{
+    item_id: string; action: string; run_id?: string;
+    queued?: boolean; detail?: string | null; error?: string;
+  }>;
+  not_fixable: number[];
+  unknown: number[];
+}
+
+// ---- S11a: Activity Center ----
+
+export interface ActivityRun {
+  run_id: string;
+  action: string | null;          // null on rows from before S11a
+  scope: string | null;           // "lib:<name>" | "item:<id>" | "all"
+  tier: number | null;
+  status: string;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_s: number | null;
+  files_written: number;
+  files_unchanged: number;
+  api_calls: number;
+  errors: number;
+  warnings: number;
+  last_error: string | null;
+  retryable: boolean;
+}
+
+export interface QueuedLibrary { action: string; library: string; tier: number }
+
+export interface ActivityResp {
+  active: {
+    run_id: string; action: string | null; scope: string | null;
+    tier: number | null; started_at: string | null;
+  } | null;
+  queued: { items: string[]; libraries: QueuedLibrary[] };
+  schedules: Array<{ id: string; name: string; next_run_at: string | null }>;
+  runs: ActivityRun[];
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+  dry_run: boolean;
+}
+
+// ---- S11c: backup bundles ----
+
+export interface BundleRow { name: string; bytes: number; modified_at: number }
+
+export interface BundlesResp {
+  bundles: BundleRow[];
+  keep_bundles: number;
+  excluded: string[];
+}
+
+export interface InspectResp {
+  manifest: {
+    bundle_version: number; finmeta_version: string; created_at: string;
+    contents: string[]; excluded: string[]; secret_names: string[];
+    counts: Record<string, number>;
+  };
+  members: string[];
+  overrides: Record<string, number>;
+  packs: Record<string, string[]>;
+  diff: {
+    libraries?: { added: string[]; removed: string[]; kept: string[] };
+    overlay_profiles?: { added: string[]; removed: string[] };
+    schedules?: { current: number; incoming: number };
+    dry_run?: { current: boolean; incoming: boolean };
+    config?: string;
+  };
+  secrets_required: string[];
+  note: string;
+}
+
+export interface RestoreResp {
+  restored: { config: boolean; overrides: Record<string, number> };
+  mode: string;
+  packs_to_reimport: Record<string, string[]>;
+  secrets_required: string[];
+  note: string;
+}

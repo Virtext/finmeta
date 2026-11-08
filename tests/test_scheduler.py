@@ -95,17 +95,17 @@ class TestLibrariesJob:
     def test_first_library_starts_and_the_rest_are_queued(self, monkeypatch):
         submitted = []
 
-        def fake_submit(context, action, *, library=None, item_id=None):
-            submitted.append((action, library))
+        def fake_submit(context, action, *, library=None, item_id=None, tier=1):
+            submitted.append((action, library, tier))
             return "run-1", None
 
         monkeypatch.setattr(scheduler_module, "submit_run", fake_submit)
         ctx = MagicMock()
         scheduler_module._libraries_job(ctx, "apply", ["Anime", "Tv serier", "Filmer"])
 
-        assert submitted == [("apply", "Anime")]
+        assert submitted == [("apply", "Anime", 1)]
         assert [c.args for c in ctx.queue_library_run.call_args_list] == [
-            ("apply", "Tv serier"), ("apply", "Filmer"),
+            ("apply", "Tv serier", 1), ("apply", "Filmer", 1),
         ]
 
     def test_a_busy_slot_queues_the_first_library_too(self, monkeypatch):
@@ -118,7 +118,7 @@ class TestLibrariesJob:
         scheduler_module._libraries_job(ctx, "apply", ["Anime", "Filmer"])
 
         assert [c.args for c in ctx.queue_library_run.call_args_list] == [
-            ("apply", "Anime"), ("apply", "Filmer"),
+            ("apply", "Anime", 1), ("apply", "Filmer", 1),
         ]
 
     def test_empty_list_does_nothing(self, monkeypatch):
@@ -203,3 +203,44 @@ class TestRunCatchUp:
         _run_catch_up(scheduler)
 
         scheduler.modify_job.assert_not_called()
+
+
+# --- S10c: scheduled health scans -------------------------------------------
+
+class TestScheduledScan:
+    """`action: scan` on a schedule (SPEC_S10 §D, operator decision D4)."""
+
+    def test_an_all_libraries_scan_is_one_run_carrying_its_tier(self, monkeypatch):
+        cfg = _cfg([{"cron": "0 5 * * *", "action": "scan", "tier": 2}])
+        scheduler = MagicMock()
+        _build_jobs(_fake_context(cfg), scheduler)
+        jobs = scheduler.add_job.call_args_list
+        assert len(jobs) == 1
+        kwargs = jobs[0].kwargs
+        assert kwargs["args"][1:] == ["scan", None, 2]
+        assert kwargs["name"] == "scan:all-libraries"
+
+    def test_a_library_subset_scan_keeps_its_tier_for_queued_libraries(self, monkeypatch):
+        """A deep scan whose later libraries had to queue must not come back
+        out as a plain scan."""
+        submitted = []
+
+        def fake_submit(context, action, *, library=None, item_id=None, tier=1):
+            submitted.append((action, library, tier))
+            return "run-1", None
+
+        monkeypatch.setattr(scheduler_module, "submit_run", fake_submit)
+        ctx = MagicMock()
+        scheduler_module._libraries_job(ctx, "scan", ["Filmer", "Anime"], 2)
+
+        assert submitted == [("scan", "Filmer", 2)]
+        assert [c.args for c in ctx.queue_library_run.call_args_list] == [
+            ("scan", "Anime", 2),
+        ]
+
+    def test_plan_and_apply_schedules_default_to_tier_1(self):
+        cfg = _cfg([{"cron": "0 4 * * *", "action": "apply"}])
+        scheduler = MagicMock()
+        _build_jobs(_fake_context(cfg), scheduler)
+        assert scheduler.add_job.call_args_list[0].kwargs["args"][1:] == [
+            "apply", None, 1]

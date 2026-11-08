@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getAuthStatus, getItemsLight, getLibraries, getPlan, startRun, getJob, getHealth } from './api';
+import { getAuthStatus, getItemsLight, getLatestScan, getLibraries, getPlan, startRun, getJob, getHealth } from './api';
 import type { JobResp } from './types';
 import type { ItemLightView, LibItemsLightResp, LibrariesResp, PlanResp } from './types';
 import LibraryBrowser from './components/LibraryBrowser';
@@ -8,10 +8,13 @@ import PreviewPane from './components/PreviewPane';
 import LoginScreen from './components/LoginScreen';
 import SettingsPage from './components/SettingsPage';
 import AccountPage from './components/AccountPage';
+import HealthPage from './components/HealthPage';
+import ActivityPage from './components/ActivityPage';
+import BackupPage from './components/BackupPage';
 import { logout } from './api';
 import ErrorBoundary from './ErrorBoundary';
 
-type Page = 'main' | 'settings' | 'account';
+type Page = 'main' | 'settings' | 'account' | 'health' | 'activity' | 'backup';
 
 // Pagination fix (2026-10-30): /items/light pages at Jellyfin now (bounded
 // 1-500 server-side) -- this is just the UI's own "Load more" chunk size.
@@ -32,6 +35,15 @@ export default function App() {
     setPage('settings');
   }, []);
 
+  // S10b: "Pick artwork…" on a Health finding jumps to that item on the main
+  // page. Switching library fires the items reload, which clears any
+  // selection not present in the page it loaded -- so the target is recorded
+  // here and applied by an effect once those items have landed, the same
+  // two-step the reload-resume path below uses.
+  const pendingHealthItem = useRef<{
+    itemId: string; itemName: string; library: string;
+  } | null>(null);
+
   // Lys/mørk tema: default follows prefers-color-scheme; choice is persisted in
   // localStorage (guarded — some contexts throw on access).
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
@@ -45,6 +57,17 @@ export default function App() {
     document.documentElement.setAttribute('data-theme', theme);
     try { localStorage.setItem('finmeta-theme', theme); } catch { /* ignore */ }
   }, [theme]);
+
+  // S10c (D4): the newest scan's error count, shown on the Health button so
+  // a scheduled scan's findings are visible without opening the page.
+  const [healthErrors, setHealthErrors] = useState(0);
+  const refreshHealthBadge = useCallback(() => {
+    getLatestScan()
+      .then((r) => setHealthErrors(r.counts?.by_severity?.error ?? 0))
+      .catch(() => { /* the badge is additive; never break the topbar */ });
+  }, []);
+
+  useEffect(() => { if (!unauthed) refreshHealthBadge(); }, [unauthed, refreshHealthBadge]);
 
   const [libs, setLibs] = useState<LibrariesResp | null>(null);
   const [libName, setLibName] = useState<string>('');
@@ -361,6 +384,20 @@ export default function App() {
     }
   }, [selected, libName, pollItemJob]);
 
+  // S10b: apply a pending Health deep link. The item may be outside the
+  // loaded page (it pages at 200), so fall back to a minimal view -- the
+  // plan endpoint only needs the id.
+  useEffect(() => {
+    const pending = pendingHealthItem.current;
+    if (!pending || !items) return;
+    if (pending.library && pending.library !== libName) return;
+    pendingHealthItem.current = null;
+    const found = items.items.find((i) => i.item_id === pending.itemId);
+    setSelected(found ?? {
+      item_id: pending.itemId, item_name: pending.itemName, media_type: 'movie',
+    });
+  }, [items, libName]);
+
   // Job status lost on page reload, item-scoped half: loadLibs's resume
   // check (see above) can only record WHICH item/job to resume into --
   // actually selecting it has to wait until that library's items have
@@ -397,6 +434,39 @@ export default function App() {
   // Early return: account page (username/password change).
   if (page === 'account') {
     return <AccountPage onBack={() => setPage('main')} />;
+  }
+
+  // Early return: Backup & Restore (SPEC_S11 §D).
+  if (page === 'backup') {
+    return <BackupPage onBack={() => setPage('main')} />;
+  }
+
+  // Early return: Activity Center (SPEC_S11). Runs started by a schedule,
+  // a webhook or another browser tab are invisible everywhere else.
+  if (page === 'activity') {
+    return (
+      <ActivityPage
+        onBack={() => setPage('main')}
+        onOpenHealth={() => setPage('health')}
+      />
+    );
+  }
+
+  // Early return: library health scanner (SPEC_S10). Its findings cross
+  // libraries, so it is a page of its own rather than a per-library tab.
+  if (page === 'health') {
+    return (
+      <HealthPage
+        libraries={libs?.libraries ?? []}
+        dryRun={libs?.dry_run ?? true}
+        onBack={() => { refreshHealthBadge(); setPage('main'); }}
+        onPickArtwork={(itemId, itemName, library) => {
+          pendingHealthItem.current = { itemId, itemName, library };
+          setPage('main');
+          if (library && library !== libName) setLibName(library);
+        }}
+      />
+    );
   }
 
   const dryRun = libs?.dry_run ?? true;
@@ -441,6 +511,25 @@ export default function App() {
           )}
           {allRunErr && <span className="field-msg err">{allRunErr}</span>}
         </div>
+        <button
+          className="btn settings-btn"
+          title="Scan the libraries for missing artwork, duplicates and other problems"
+          onClick={() => setPage('health')}
+        >
+          🩺 Health
+          {healthErrors > 0 && (
+            <span className="health-badge" title={`${healthErrors} error-level finding(s)`}>
+              {healthErrors}
+            </span>
+          )}
+        </button>
+        <button
+          className="btn settings-btn"
+          title="Runs, queues, schedules and failures"
+          onClick={() => setPage('activity')}
+        >
+          📋 Activity
+        </button>
         <button className="btn settings-btn" onClick={() => setPage('settings')}>⚙ Settings</button>
         <button
           className="theme-toggle user-icon"
@@ -464,6 +553,9 @@ export default function App() {
               <div className="user-menu-backdrop" onClick={() => setUserMenuOpen(false)} />
               <div className="user-menu-list">
                 <button onClick={() => { setUserMenuOpen(false); setPage('account'); }}>Account</button>
+                <button onClick={() => { setUserMenuOpen(false); setPage('backup'); }}>
+                  Backup &amp; Restore
+                </button>
                 <button onClick={() => { logout().catch(() => {}); setUnauthed(true); }}>Log out</button>
               </div>
             </>

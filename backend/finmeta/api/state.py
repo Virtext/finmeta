@@ -473,28 +473,67 @@ class AppContext:
             self._webhook_queued_set.discard(item_id)
             return item_id
 
-    def queue_library_run(self, action: str, library: str) -> None:
+    def queue_library_run(self, action: str, library: str, tier: int = 1) -> None:
         """Remember a scheduled library-scoped run that could not start yet.
 
         Drained one at a time by ``run_service._worker`` as each run releases
         the slot, exactly like ``queue_webhook_item``. Deduped: a schedule
         that fires again while its own earlier occurrence is still queued
         must not pile up two identical runs.
+
+        ``tier`` is part of the key, and part of what comes back out: a
+        scheduled deep scan whose later libraries were queued must not
+        silently run them as plain scans (S10c).
         """
-        key = (action, library)
+        key = (action, library, int(tier))
         with self._claim_lock:
             if key not in self._library_queued_set:
                 self._library_queued_set.add(key)
                 self._library_queue.append(key)
 
     def pop_library_run(self) -> Optional[tuple]:
-        """``(action, library)`` of the next queued scheduled run, or None."""
+        """``(action, library, tier)`` of the next queued run, or None."""
         with self._claim_lock:
             if not self._library_queue:
                 return None
             key = self._library_queue.pop(0)
             self._library_queued_set.discard(key)
             return key
+
+    def peek_webhook_queue(self) -> List[str]:
+        """Snapshot of the pending single-item FIFO (S11a).
+
+        Read-only and under the same lock the queue itself uses: the Activity
+        Center must be able to SHOW pending work, which until now existed
+        with no way to see it.
+        """
+        with self._claim_lock:
+            return list(self._webhook_queue)
+
+    def peek_library_queue(self) -> List[tuple]:
+        """Snapshot of the pending ``(action, library, tier)`` queue (S11a)."""
+        with self._claim_lock:
+            return list(self._library_queue)
+
+    def drop_webhook_item(self, item_id: str) -> bool:
+        """Remove a pending item that has not started yet. True if dropped."""
+        with self._claim_lock:
+            if item_id not in self._webhook_queued_set:
+                return False
+            self._webhook_queued_set.discard(item_id)
+            self._webhook_queue = [i for i in self._webhook_queue if i != item_id]
+            return True
+
+    def drop_library_run(self, action: str, library: str,
+                         tier: int = 1) -> bool:
+        """Remove a pending library run that has not started yet."""
+        key = (action, library, int(tier))
+        with self._claim_lock:
+            if key not in self._library_queued_set:
+                return False
+            self._library_queued_set.discard(key)
+            self._library_queue = [k for k in self._library_queue if k != key]
+            return True
 
     # -- scheduler hook -----------------------------------------------------
     def reschedule(self) -> None:

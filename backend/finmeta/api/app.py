@@ -26,6 +26,9 @@ from finmeta.api.routes_profiles import router as profiles_router
 from finmeta.api.routes_image_packs import router as image_packs_router
 from finmeta.api.routes_collections import router as collections_router
 from finmeta.api.routes_webhooks import router as webhooks_router
+from finmeta.api.routes_scans import router as scans_router
+from finmeta.api.routes_activity import router as activity_router
+from finmeta.api.routes_backup import router as backup_router
 
 # Where the built UI lives relative to this package (D1: resolved, not hardcoded
 # to an absolute path).
@@ -172,6 +175,9 @@ def create_app(context: AppContext) -> FastAPI:
     app.include_router(image_packs_router)
     app.include_router(collections_router)
     app.include_router(webhooks_router)
+    app.include_router(scans_router)
+    app.include_router(activity_router)
+    app.include_router(backup_router)
 
     # Serve the UI last so /api/* and /api/docs win.
     web = _web_dir()

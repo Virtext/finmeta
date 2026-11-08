@@ -14,6 +14,9 @@ def _series_view(s: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "id": s.get("id"),
         "title": s.get("title"),
+        # S10c: Sonarr's own UI route is /series/<titleSlug>, so a missing-
+        # episode finding can link straight to the series.
+        "titleSlug": s.get("titleSlug"),
         "status": s.get("status"),  # continuing | ended | upcoming | deleted
         "tvdbId": s.get("tvdbId"),
         "tmdbId": s.get("tmdbId"),
