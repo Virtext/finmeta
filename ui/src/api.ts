@@ -1,6 +1,8 @@
 import type {
-  AuthStatus, CandidatesResp, HealthResp, HelpResp, JobResp, LibItemsLightResp, LibItemsResp,
-  LibrariesResp, PlanResp, ProvidersResp, RunResp, SecretsResp, ServiceTestResult,
+  ActivityResp, AuthStatus, BundlesResp, CandidatesResp, FindingsResp, FixResp, HealthResp,
+  HelpResp, InspectResp, JobResp, LatestScanResp, LibItemsLightResp, LibItemsResp,
+  LibrariesResp, PlanResp, ProvidersResp, RestoreResp, RunResp, ScansResp, SecretsResp,
+  ServiceTestResult,
 } from './types';
 
 // Same-origin API (FastAPI serves both /api/* and the built UI at /).
@@ -92,6 +94,107 @@ export const startRun = (action: string, item?: string, library?: string) =>
   });
 
 export const getJob = (id: string) => j<JobResp>(`/api/jobs/${enc(id)}`);
+
+// ---- S10a: library health scanner (SPEC_S10 §E) ----
+
+/** Start a scan. It is a run like plan/apply: one slot, one job log. */
+export const startScan = (library?: string, tier = 1) =>
+  j<RunResp>('/api/runs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'scan', library, tier }),
+  });
+
+export const getScans = () => j<ScansResp>('/api/scans');
+
+// ---- S11a: Activity Center (SPEC_S11 §B) ----
+
+export const getActivity = (opts?: {
+  limit?: number; offset?: number; status?: string; action?: string;
+}) => {
+  const params = new URLSearchParams();
+  if (opts?.limit != null) params.set('limit', String(opts.limit));
+  if (opts?.offset != null) params.set('offset', String(opts.offset));
+  if (opts?.status) params.set('status', opts.status);
+  if (opts?.action) params.set('action', opts.action);
+  const qs = params.toString();
+  return j<ActivityResp>(`/api/activity${qs ? `?${qs}` : ''}`);
+};
+
+// ---- S11c: Backup & Restore (SPEC_S11 §D) ----
+
+/** The bundle is the request BODY (no multipart dependency anywhere). */
+const ZIP = { 'Content-Type': 'application/zip' };
+
+export const backupExportUrl = (includeScan: boolean) =>
+  `/api/backup/export${includeScan ? '?include_scan=true' : ''}`;
+
+export const getBundles = () => j<BundlesResp>('/api/backup/bundles');
+
+export const snapshotBackup = (includeScan: boolean) =>
+  j<{ bundle: string; bytes: number; pruned: string[] }>(
+    `/api/backup/snapshot${includeScan ? '?include_scan=true' : ''}`,
+    { method: 'POST' });
+
+export const deleteBundle = (name: string) =>
+  j<{ deleted: string }>(`/api/backup/bundles/${enc(name)}`, { method: 'DELETE' });
+
+export const inspectBundleFile = (file: File | Blob) =>
+  j<InspectResp>('/api/backup/inspect', { method: 'POST', headers: ZIP, body: file });
+
+export const inspectStoredBundle = (name: string) =>
+  j<InspectResp>('/api/backup/inspect', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ bundle: name }),
+  });
+
+export const restoreBundleFile = (file: File | Blob, mode: string) =>
+  j<RestoreResp>(`/api/backup/restore?confirm=true&mode=${enc(mode)}`,
+    { method: 'POST', headers: ZIP, body: file });
+
+export const restoreStoredBundle = (name: string, mode: string) =>
+  j<RestoreResp>('/api/backup/restore', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ bundle: name, mode, confirm: true }),
+  });
+
+export const retryRun = (runId: string) =>
+  j<RunResp & { action: string; scope: string | null }>(
+    `/api/activity/${enc(runId)}/retry`, { method: 'POST' });
+
+export const dropQueuedItem = (itemId: string) =>
+  j<{ dropped: string }>(`/api/activity/queued/items/${enc(itemId)}`,
+    { method: 'DELETE' });
+
+export const dropQueuedLibrary = (action: string, library: string, tier = 1) =>
+  j<{ dropped: unknown }>(
+    `/api/activity/queued/libraries/${enc(action)}/${enc(library)}?tier=${tier}`,
+    { method: 'DELETE' });
+export const getLatestScan = () => j<LatestScanResp>('/api/scans/latest');
+
+export const getFindings = (
+  scanId: string,
+  opts?: { library?: string; severity?: string; check?: string; limit?: number; offset?: number },
+) => {
+  const params = new URLSearchParams();
+  if (opts?.library) params.set('library', opts.library);
+  if (opts?.severity) params.set('severity', opts.severity);
+  if (opts?.check) params.set('check', opts.check);
+  if (opts?.limit != null) params.set('limit', String(opts.limit));
+  if (opts?.offset != null) params.set('offset', String(opts.offset));
+  const qs = params.toString();
+  return j<FindingsResp>(`/api/scans/${enc(scanId)}/findings${qs ? `?${qs}` : ''}`);
+};
+
+export const fixFindings = (scanId: string, findingIds: number[]) =>
+  j<FixResp>(`/api/scans/${enc(scanId)}/fix`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ finding_ids: findingIds }),
+  });
+
+export const deleteScan = (scanId: string) =>
+  j<{ deleted: string }>(`/api/scans/${enc(scanId)}`, { method: 'DELETE' });
 
 export const getHealth = () => j<HealthResp>('/api/health');
 

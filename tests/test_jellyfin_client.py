@@ -582,3 +582,32 @@ class TestClientConnectionOptions:
         assert kw["timeout"] == 30.0
         assert kw["verify"] is True
         assert c.base_path == ""
+
+
+# --- S10a step 1: ImageTags is a dict ----------------------------------------
+def test_item_image_tags_parses_as_dict():
+    """Jellyfin's ImageTags is a dict {kind: tag}, and the scanner reads it by key.
+
+    It used to be annotated Optional[str]; only the annotation was wrong (the
+    executor already compared it as a dict), but SC1 of SPEC_S10 indexes it.
+    """
+    from finmeta.jellyfin_client.types import Item
+
+    it = Item.from_dict({
+        "Id": "1", "Name": "X", "Type": "Movie",
+        "ImageTags": {"Primary": "aaa", "Logo": "bbb"},
+        "BackdropImageTags": ["ccc"],
+    })
+    assert it.image_tags == {"Primary": "aaa", "Logo": "bbb"}
+    assert it.image_tags.get("Primary") == "aaa"
+    assert it.backdrop_image_tags == ["ccc"]
+
+
+def test_item_image_tags_missing_is_empty_dict():
+    """No ImageTags key (or null) -> {}, never None: 'no image yet'."""
+    from finmeta.jellyfin_client.types import Item
+
+    for payload in ({}, {"ImageTags": None}):
+        it = Item.from_dict({"Id": "1", "Name": "X", "Type": "Movie", **payload})
+        assert it.image_tags == {}
+        assert it.backdrop_image_tags == []

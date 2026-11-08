@@ -85,6 +85,7 @@ def test_sonarr_series_mapping():
     respx.get(SONARR + "/api/v3/series").mock(
         return_value=httpx.Response(200, json=[{
             "id": 1, "title": "Breaking Bad", "status": "ended",
+            "titleSlug": "breaking-bad",
             "tvdbId": 81158, "tmdbId": 1396, "imdbId": "tt0903747",
             "nextAiring": None, "previousAiring": "2013-09-15T20:00:00Z",
             "monitored": True, "somethingElse": 42}]))
@@ -92,6 +93,7 @@ def test_sonarr_series_mapping():
         rows = c.series()
     assert rows == [{
         "id": 1, "title": "Breaking Bad", "status": "ended",
+        "titleSlug": "breaking-bad",
         "tvdbId": 81158, "tmdbId": 1396, "imdbId": "tt0903747",
         "nextAiring": None, "previousAiring": "2013-09-15T20:00:00Z",
         "monitored": True}]

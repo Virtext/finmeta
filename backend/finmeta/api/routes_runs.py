@@ -38,17 +38,23 @@ _MAX_EXPORTED_RUNS = 200
 
 
 class RunRequest(BaseModel):
-    action: str  # "plan" (dry-run) | "apply"
+    action: str  # "plan" (dry-run) | "apply" | "scan"
     library: Optional[str] = None
     item: Optional[str] = None
+    # SPEC_S10: scan tier. 1 = Jellyfin + disk only, 2 = adds the
+    # provider-backed checks. Ignored by plan/apply.
+    tier: int = 1
 
 
 @router.post("/runs", status_code=202)
 def start_run(body: RunRequest, ctx: AppContext = Depends(get_ctx)) -> dict:
-    if body.action not in ("plan", "apply"):
+    if body.action not in ("plan", "apply", "scan"):
         raise HTTPException(status_code=422,
-                            detail="action must be 'plan' or 'apply'")
-    run_id, err = submit_run(ctx, body.action, library=body.library, item_id=body.item)
+                            detail="action must be 'plan', 'apply' or 'scan'")
+    if body.tier not in (1, 2):
+        raise HTTPException(status_code=422, detail="tier must be 1 or 2")
+    run_id, err = submit_run(ctx, body.action, library=body.library,
+                             item_id=body.item, tier=body.tier)
     if err:
         raise HTTPException(status_code=409, detail=err)
     return {"job_id": run_id, "status": "running", "action": body.action}

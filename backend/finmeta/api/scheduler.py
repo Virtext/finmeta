@@ -24,8 +24,9 @@ logger = logging.getLogger("finmeta.api.scheduler")
 _CATCH_UP_WINDOW = timedelta(hours=6)
 
 
-def _job(context: AppContext, action: str, library: Optional[str]) -> None:
-    run_id, err = submit_run(context, action, library=library)
+def _job(context: AppContext, action: str, library: Optional[str],
+         tier: int = 1) -> None:
+    run_id, err = submit_run(context, action, library=library, tier=tier)
     label = library or "all-libraries"
     if err:
         logger.warning("schedule skipped (%s/%s): %s", action, label, err)
@@ -33,7 +34,8 @@ def _job(context: AppContext, action: str, library: Optional[str]) -> None:
         logger.info("schedule started run %s (%s %s)", run_id, action, label)
 
 
-def _libraries_job(context: AppContext, action: str, libraries: list) -> None:
+def _libraries_job(context: AppContext, action: str, libraries: list,
+                   tier: int = 1) -> None:
     """One cron occurrence for a schedule that names several libraries.
 
     Starts the first library and QUEUES the rest, drained one at a time by
@@ -59,14 +61,14 @@ def _libraries_job(context: AppContext, action: str, libraries: list) -> None:
     if not libraries:
         return
     first, rest = libraries[0], list(libraries[1:])
-    run_id, err = submit_run(context, action, library=first)
+    run_id, err = submit_run(context, action, library=first, tier=tier)
     if run_id:
         logger.info("schedule started run %s (%s %s)", run_id, action, first)
     else:
-        context.queue_library_run(action, first)
+        context.queue_library_run(action, first, tier)
         logger.info("schedule queued %s/%s (%s)", action, first, err)
     for lib in rest:
-        context.queue_library_run(action, lib)
+        context.queue_library_run(action, lib, tier)
         logger.info("schedule queued %s/%s behind the active run", action, lib)
 
 
@@ -122,7 +124,7 @@ def _build_jobs(context: AppContext, scheduler: BackgroundScheduler) -> None:
             scheduler.add_job(
                 _libraries_job,
                 trigger=trigger,
-                args=[context, sched.action, libs],
+                args=[context, sched.action, libs, sched.tier],
                 id=f"sched-{i}-libs",
                 name=f"{sched.action}:{','.join(libs)}",
                 max_instances=1,
@@ -141,7 +143,7 @@ def _build_jobs(context: AppContext, scheduler: BackgroundScheduler) -> None:
             scheduler.add_job(
                 _job,
                 trigger=trigger,
-                args=[context, sched.action, None],
+                args=[context, sched.action, None, sched.tier],
                 id=f"sched-{i}-all",
                 name=f"{sched.action}:all-libraries",
                 max_instances=1,

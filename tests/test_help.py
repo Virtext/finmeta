@@ -59,3 +59,18 @@ def test_help_route_serves_all(tmp_path, monkeypatch):
         assert h["dry_run"]["long"].strip()
         assert "provider.tmdb" in h and "provider.fanart" in h
         assert "secret.tmdb_key" in h and "feature.auth" in h
+
+
+# --- S10b: the health scanner's help keys the UI reads ----------------------
+def test_every_scan_check_group_has_feature_help():
+    """HealthPage renders `feature.scan.<group>` per findings group, so a new
+    check group must come with help text instead of an empty (i) bubble."""
+    from finmeta.engine.scanner import CHECK_GROUPS
+
+    cfg = Config(server={"url": "http://x"})
+    help_map = build_help(cfg)
+    expected = [f"feature.scan.{g}" for g in CHECK_GROUPS]
+    expected.append("feature.scan.path_unmapped")   # always-on check, no config switch
+    expected.append("feature.page.health")
+    missing = [k for k in expected if not (help_map.get(k, {}).get("long") or "").strip()]
+    assert missing == [], f"scanner help missing: {missing}"

@@ -233,7 +233,7 @@ def _poll_refresh(
     *,
     poll_interval: float = 2.0,
     timeout: float = 120.0,
-    pre_tags: Optional[Dict[str, Optional[str]]] = None,
+    pre_tags: Optional[Dict[str, Dict[str, str]]] = None,
 ) -> bool:
     """Poll until ImageTags are set for item_ids and ThemeSongs exist for
     theme_song_ids. Returns True when all checks pass, False on timeout.
@@ -260,14 +260,16 @@ def _poll_refresh(
                 it = jf.get_item(iid)
                 pre_tags[iid] = it.image_tags
             except Exception:
-                pre_tags[iid] = None
+                pre_tags[iid] = {}
 
     while True:
         ok_images = True
         for iid in item_ids:
             try:
                 it = jf.get_item(iid)
-                if it.image_tags is None or it.image_tags == pre_tags.get(iid):
+                # Empty dict = Jellyfin has no image for the item yet (what
+                # ImageTags=None used to mean before it was typed as a dict).
+                if not it.image_tags or it.image_tags == pre_tags.get(iid):
                     ok_images = False
             except Exception:
                 ok_images = False
@@ -423,12 +425,12 @@ def apply_plan(
     # Baseline ImageTags, captured BEFORE the refresh calls below -- see
     # _poll_refresh's docstring for why this must happen first, not inside
     # _poll_refresh after the (often-synchronous) refresh already ran.
-    pre_image_tags: Dict[str, Optional[str]] = {}
+    pre_image_tags: Dict[str, Dict[str, str]] = {}
     for iid in image_items:
         try:
             pre_image_tags[iid] = jf.get_item(iid).image_tags
         except Exception:
-            pre_image_tags[iid] = None
+            pre_image_tags[iid] = {}
 
     for iid in set(image_items + theme_items):
         try:

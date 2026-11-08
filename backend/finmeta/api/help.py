@@ -85,6 +85,100 @@ def config_fields_missing_help(model_cls: type = Config) -> list:
 # ---------------------------------------------------------------------------
 
 FEATURES: Dict[str, Dict[str, str]] = {
+    # S10: library health scanner. The UI pulls these instead of hardcoding
+    # "what does this check mean" text in the frontend (SPEC S9 §B).
+    "page.health": {
+        "short": "Library health",
+        "long": "A read-only pass over your configured libraries that reports what is missing or "
+                "wrong: artwork Finmeta can write, posters Jellyfin has not picked up, items it "
+                "never probed, duplicate titles and libraries with no path mapping. Nothing is "
+                "written until you click a fix. A scan uses the same single run slot as plan/apply, "
+                "so an apply waits while one is running.",
+    },
+    "page.backup": {
+        "short": "Backup & Restore",
+        "long": "A backup bundle is one zip holding your DECISIONS: config.yml (so every library, "
+                "overlay profile, schedule and threshold), plus the artwork choices that live "
+                "outside it -- which candidate you picked, which image is locked, which kinds you "
+                "skipped. It never contains secrets.yml, auth.yml, caches, the job database or "
+                "media files; config.yml refers to API keys by name only, so a restored install "
+                "needs those keys re-entered and the bundle tells you which ones. Pack images are "
+                "not included either (they are large and re-downloadable) -- the bundle lists which "
+                "packs to re-import. Inspect a bundle before restoring: it shows what would change "
+                "without writing anything. A restore goes through the same validation as the "
+                "Settings editor, so an invalid bundle is refused before anything is touched, and "
+                "the previous config stays available through Undo.",
+    },
+    "page.activity": {
+        "short": "Activity",
+        "long": "Every plan, apply and scan run Finmeta has made, including the ones you did not "
+                "start yourself: a nightly schedule, Jellyfin's webhook after a new episode, or "
+                "another browser tab. Shows what is running now, what is queued behind it (one run "
+                "happens at a time), when each schedule next fires, and the error/warning count per "
+                "run so a failure is visible without opening anything. **Retry** runs a finished job "
+                "again with exactly the same scope. A running job cannot be cancelled -- it is a "
+                "background thread with no safe stopping point -- but a QUEUED one can be dropped "
+                "before it starts.",
+    },
+    "scan.artwork": {
+        "short": "Artwork presence",
+        "long": "Checks the artwork kinds each library actually manages. Three different problems: "
+                "**missing** (neither on disk nor in Jellyfin — Finmeta can download and write it), "
+                "**not picked up** (the file is there but Jellyfin shows no image, so it needs to "
+                "re-read the folder) and **image without a file** (Jellyfin has an image Finmeta "
+                "owns no file for, so it cannot draw overlay badges on it).",
+    },
+    "scan.artwork_quality": {
+        "short": "Artwork quality",
+        "long": "Reads the header of each artwork file (no full decode) and reports images narrower "
+                "than the configured floor, suspiciously small files (placeholders or truncated "
+                "downloads) and files no image library can open. Low resolution is a 'pick another "
+                "candidate' problem rather than a re-apply: artwork ranking already prefers the "
+                "largest image, so a small poster usually means the source has nothing better.",
+    },
+    "scan.media": {
+        "short": "Resolution and HDR information",
+        "long": "Checks what Jellyfin knows about the video itself: items with no video stream or no "
+                "height (never probed, or an unreadable file), 4K items with no dynamic-range "
+                "information at all (the HDR badge silently disappears), and files whose NAME claims "
+                "something the streams deny — e.g. `2160p HDR` on a 1080p SDR stream. Only Jellyfin "
+                "can fix these by re-probing the file; Finmeta cannot invent stream data. Covers "
+                "movies: a series carries no streams of its own.",
+    },
+    "scan.metadata": {
+        "short": "Metadata",
+        "long": "Checks the metadata on the Jellyfin item. A quick scan reports items with no "
+                "TMDb/IMDb/TVDb id at all (nothing downstream works without one) and empty "
+                "description/year/genre/studio fields. A deep scan adds the match checks: items "
+                "TMDb cannot match, and items whose year is more than one off TMDb's -- which in "
+                "practice means the item is matched to the wrong title. Finmeta can only fix these "
+                "by writing an NFO, and only when the library is set to write NFOs; the provider id "
+                "and the year live in Jellyfin's own database, so those link out instead.",
+    },
+    "scan.episodes": {
+        "short": "Missing episodes",
+        "long": "Deep scan only, and only with Sonarr configured. Asks Sonarr which monitored "
+                "episodes have aired without a file, grouped per season, and flags a season with no "
+                "files at all. Unaired episodes are never counted as missing, so a currently "
+                "running season does not read as half-broken, and specials (season 0) are excluded "
+                "unless you turn `include_specials` on. Finmeta never writes to Sonarr -- the "
+                "finding links to the series there so you can trigger a search yourself.",
+    },
+    "scan.duplicates": {
+        "short": "Duplicates",
+        "long": "Reports items in one library that share a TMDb/IMDb id, two movies that resolve to "
+                "the same folder (they would fight over the same poster.jpg) and items holding "
+                "several versions, which Jellyfin usually treats as deliberate. Report-only: "
+                "Finmeta never deletes or moves media files, so there is no fix button here — open "
+                "the item in Jellyfin and decide yourself.",
+    },
+    "scan.path_unmapped": {
+        "short": "Path mappings",
+        "long": "Items whose Jellyfin path has no entry in `path_mappings`. This is reported as an "
+                "error because every disk-side check is blind for those items, and an apply would "
+                "skip them too. One finding per path prefix, not per item: it is a single config "
+                "mistake. Fix it in Settings → path mappings.",
+    },
     "tab.general": {"short": "General settings",
                     "long": "Global switches that apply to every library: dry-run mode, the Jellyfin "
                             "server, path mappings, language and sync mode."},

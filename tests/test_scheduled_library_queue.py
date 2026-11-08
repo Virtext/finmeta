@@ -58,8 +58,8 @@ class TestLibraryQueue:
     def test_fifo_order(self, context):
         context.queue_library_run("apply", "Anime")
         context.queue_library_run("apply", "Tv serier")
-        assert context.pop_library_run() == ("apply", "Anime")
-        assert context.pop_library_run() == ("apply", "Tv serier")
+        assert context.pop_library_run() == ("apply", "Anime", 1)
+        assert context.pop_library_run() == ("apply", "Tv serier", 1)
         assert context.pop_library_run() is None
 
     def test_same_library_is_not_queued_twice(self, context):
@@ -67,21 +67,28 @@ class TestLibraryQueue:
         waiting must not pile up two identical library runs."""
         context.queue_library_run("apply", "Anime")
         context.queue_library_run("apply", "Anime")
-        assert context.pop_library_run() == ("apply", "Anime")
+        assert context.pop_library_run() == ("apply", "Anime", 1)
         assert context.pop_library_run() is None
+
+    def test_the_scan_tier_is_part_of_the_key(self, context):
+        """S10c: a queued deep scan must not come back out as a plain scan."""
+        context.queue_library_run("scan", "Anime", 2)
+        context.queue_library_run("scan", "Anime", 1)
+        assert context.pop_library_run() == ("scan", "Anime", 2)
+        assert context.pop_library_run() == ("scan", "Anime", 1)
 
     def test_action_is_part_of_the_key(self, context):
         context.queue_library_run("apply", "Anime")
         context.queue_library_run("plan", "Anime")
-        assert context.pop_library_run() == ("apply", "Anime")
-        assert context.pop_library_run() == ("plan", "Anime")
+        assert context.pop_library_run() == ("apply", "Anime", 1)
+        assert context.pop_library_run() == ("plan", "Anime", 1)
 
     def test_requeue_after_a_pop_is_allowed(self, context):
         """``_worker`` puts a library back when something else won the slot."""
         context.queue_library_run("apply", "Anime")
-        assert context.pop_library_run() == ("apply", "Anime")
+        assert context.pop_library_run() == ("apply", "Anime", 1)
         context.queue_library_run("apply", "Anime")
-        assert context.pop_library_run() == ("apply", "Anime")
+        assert context.pop_library_run() == ("apply", "Anime", 1)
 
 
 class TestWorkerDrain:
@@ -103,10 +110,10 @@ class TestWorkerDrain:
         submitted = []
         monkeypatch.setattr(
             run_service, "submit_run",
-            lambda ctx, action, *, library=None, item_id=None: (
+            lambda ctx, action, *, library=None, item_id=None, tier=1: (
                 submitted.append((action, library, item_id)) or ("run-2", None)))
         ctx = self._ctx()
-        ctx.pop_library_run.return_value = ("apply", "Anime")
+        ctx.pop_library_run.return_value = ("apply", "Anime", 1)
 
         run_service._worker(ctx, "run-1", "apply", "Filmer", None)
 
@@ -120,11 +127,11 @@ class TestWorkerDrain:
         submitted = []
         monkeypatch.setattr(
             run_service, "submit_run",
-            lambda ctx, action, *, library=None, item_id=None: (
+            lambda ctx, action, *, library=None, item_id=None, tier=1: (
                 submitted.append((action, library, item_id)) or ("run-2", None)))
         ctx = self._ctx()
         ctx.pop_webhook_item.return_value = "item-9"
-        ctx.pop_library_run.return_value = ("apply", "Anime")
+        ctx.pop_library_run.return_value = ("apply", "Anime", 1)
 
         run_service._worker(ctx, "run-1", "apply", "Filmer", None)
 
@@ -137,11 +144,11 @@ class TestWorkerDrain:
             run_service, "submit_run",
             lambda *a, **k: (None, "a run is already in progress"))
         ctx = self._ctx()
-        ctx.pop_library_run.return_value = ("apply", "Anime")
+        ctx.pop_library_run.return_value = ("apply", "Anime", 1)
 
         run_service._worker(ctx, "run-1", "apply", "Filmer", None)
 
-        ctx.queue_library_run.assert_called_once_with("apply", "Anime")
+        ctx.queue_library_run.assert_called_once_with("apply", "Anime", 1)
 
     def test_a_crashed_run_still_hands_the_slot_on(self, monkeypatch, tmp_path):
         """The drain lives in a finally-block: a failing run must not strand
@@ -153,10 +160,10 @@ class TestWorkerDrain:
         submitted = []
         monkeypatch.setattr(
             run_service, "submit_run",
-            lambda ctx, action, *, library=None, item_id=None: (
+            lambda ctx, action, *, library=None, item_id=None, tier=1: (
                 submitted.append((action, library)) or ("run-2", None)))
         ctx = self._ctx(tmp_path)
-        ctx.pop_library_run.return_value = ("apply", "Anime")
+        ctx.pop_library_run.return_value = ("apply", "Anime", 1)
 
         run_service._worker(ctx, "run-1", "apply", "Filmer", None)
 

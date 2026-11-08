@@ -68,7 +68,7 @@ class Item:
     parent_id: Optional[str] = None
     path: Optional[str] = None
     provider_ids: Dict[str, str] = field(default_factory=dict)
-    image_tags: Optional[str] = None
+    image_tags: Dict[str, str] = field(default_factory=dict)
     backdrop_image_tags: List[str] = field(default_factory=list)
     series_id: Optional[str] = None
     season_id: Optional[str] = None
@@ -76,6 +76,26 @@ class Item:
     parent_index_number: Optional[int] = None
     community_rating: Optional[float] = None
     critic_rating: Optional[float] = None
+    media_source_count: Optional[int] = None
+    # SPEC_S10 SC2 reads these; all are serialized by default on
+    # BaseItemDto except Overview/Genres/Studios, which the scan's own
+    # field list asks for (ImageTags/ProductionYear/OfficialRating are
+    # not valid ItemFields values at all).
+    overview: Optional[str] = None
+    production_year: Optional[int] = None
+    official_rating: Optional[str] = None
+    genres: List[str] = field(default_factory=list)
+    studios: List[str] = field(default_factory=list)
+
+    @classmethod
+    def _parse_int(cls, v) -> Optional[int]:
+        """An optional integer field (MediaSourceCount), or None if absent."""
+        if v is None:
+            return None
+        try:
+            return int(v)
+        except (ValueError, TypeError):
+            return None
 
     @classmethod
     def _parse_rating(cls, v) -> Optional[float]:
@@ -96,7 +116,7 @@ class Item:
             parent_id=d.get("ParentId"),
             path=d.get("Path"),
             provider_ids={k: v for k, v in prov.items() if v is not None},
-            image_tags=d.get("ImageTags"),
+            image_tags=dict(d.get("ImageTags") or {}),
             backdrop_image_tags=list(d.get("BackdropImageTags") or []),
             series_id=d.get("SeriesId"),
             season_id=d.get("SeasonId"),
@@ -104,6 +124,13 @@ class Item:
             parent_index_number=d.get("ParentIndexNumber"),
             community_rating=cls._parse_rating(d.get("CommunityRating")),
             critic_rating=cls._parse_rating(d.get("CriticRating")),
+            media_source_count=cls._parse_int(d.get("MediaSourceCount")),
+            overview=d.get("Overview"),
+            production_year=cls._parse_int(d.get("ProductionYear")),
+            official_rating=d.get("OfficialRating"),
+            genres=[g for g in (d.get("Genres") or []) if g],
+            studios=[s.get("Name") for s in (d.get("Studios") or [])
+                     if isinstance(s, dict) and s.get("Name")],
         )
 
     def tmdb_id(self) -> Optional[str]:
