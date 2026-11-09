@@ -239,6 +239,25 @@ def list_providers(ctx: AppContext = Depends(get_ctx)) -> dict:
     return {"providers": [p.view() for p in build_providers(ctx)]}
 
 
+@router.get("/services/status")
+def services_status(ctx: AppContext = Depends(get_ctx)) -> dict:
+    """Cached connectivity status for every provider, for the modern UI's
+    Overview "Services" card (SPEC_S14_UI.md P2 deferred this exact card
+    pending a cache design). Disabled providers are reported but never
+    tested -- same rule the Settings UI already follows. Each enabled
+    provider's result is at most 5 minutes stale (providers.cached_test)."""
+    from finmeta.providers import build_providers, cached_test
+    out = []
+    for p in build_providers(ctx):
+        if not p.enabled:
+            out.append({"name": p.name, "label": p.label, "enabled": False,
+                       "ok": None, "latency_ms": None, "error": None})
+            continue
+        r = cached_test(ctx, p.name)
+        out.append({"name": p.name, "label": p.label, "enabled": True, **r})
+    return {"services": out, "ttl_seconds": 300}
+
+
 @router.get("/rating-sources")
 def rating_sources(ctx: AppContext = Depends(get_ctx)) -> dict:
     """Per-rating-field provider order (the "Rating sources" tab data).

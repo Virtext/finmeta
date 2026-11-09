@@ -28,7 +28,7 @@ class _Strict(BaseModel):
 class ServerConfig(_Strict):
     url: str = Field(
         description="Jellyfin server URL (scheme + host + port).",
-        json_schema_extra={"help": "The address of your Jellyfin server, e.g. `http://jellyfin:8096` "
+        json_schema_extra={"tier": "basic", "help": "The address of your Jellyfin server, e.g. `http://jellyfin:8096` "
         "or `http://192.168.1.10:8096`. Inside a container, `http://localhost:8096` points at the "
         "container itself, not your Jellyfin — use the LAN IP, or the container/service name when "
         "Finmeta and Jellyfin share a Docker network. A trailing slash is stripped automatically. "
@@ -44,21 +44,21 @@ class ServerConfig(_Strict):
     base_path: Optional[str] = Field(
         default=None,
         description="Optional URL prefix when Jellyfin is behind a reverse proxy.",
-        json_schema_extra={"help": "Prefix added to every API path when Jellyfin is served under a "
+        json_schema_extra={"tier": "advanced", "help": "Prefix added to every API path when Jellyfin is served under a "
         "sub-path by a reverse proxy. With `url: http://home.example.com` and `base_path: /jellyfin`, "
         "Finmeta calls `http://home.example.com/jellyfin/System/Info`. Leave empty for the normal "
         "case; a leading slash is optional and is normalized."})
     verify_ssl: bool = Field(
         default=True,
         description="Verify TLS certificates for https connections.",
-        json_schema_extra={"help": "Verify the server's TLS certificate for `https` URLs (default "
+        json_schema_extra={"tier": "advanced", "help": "Verify the server's TLS certificate for `https` URLs (default "
         "on). Turn off only for a self-signed cert you trust (e.g. a home reverse proxy); then the "
         "connection is not protected from tampering."})
     timeout: float = Field(
         default=30.0,
         gt=0,
         description="Per-request timeout for the Jellyfin client, in seconds.",
-        json_schema_extra={"help": "How long to wait, in seconds, for each Jellyfin request before "
+        json_schema_extra={"tier": "advanced", "help": "How long to wait, in seconds, for each Jellyfin request before "
         "giving up (default 30). Raise it for a slow or distant server."})
 
 
@@ -98,7 +98,7 @@ class FanartSource(_Strict):
     enabled: bool = Field(
         default=False,
         description="Enable fanart.tv as an artwork source.",
-        json_schema_extra={"help": "Turn fanart.tv on/off. Off by default; useful for extra logos and "
+        json_schema_extra={"tier": "basic", "help": "Turn fanart.tv on/off. Off by default; useful for extra logos and "
         "landscape art. Requires a fanart.tv key to be set."})
     api_key_env: str = Field(
         default="FANART_KEY",
@@ -111,12 +111,12 @@ class LocalSource(_Strict):
     enabled: bool = Field(
         default=False,
         description="Enable the local asset directory as an artwork source.",
-        json_schema_extra={"help": "Use artwork files you place on disk (e.g. hand-made overlays or "
+        json_schema_extra={"tier": "basic", "help": "Use artwork files you place on disk (e.g. hand-made overlays or "
         "theme songs). Off by default. See `path` for where to put them."})
     path: str = Field(
         default="/assets",
         description="Local directory holding user-supplied artwork.",
-        json_schema_extra={"help": "Directory (in the local filesystem) where you drop your own "
+        json_schema_extra={"tier": "basic", "help": "Directory (in the local filesystem) where you drop your own "
         "artwork assets. Only used when the local source is enabled. In the shipped container this "
         "is typically `/config/assets`."})
 
@@ -125,7 +125,7 @@ class OmdbSource(_Strict):
     enabled: bool = Field(
         default=False,
         description="Enable OMDb as a ratings source.",
-        json_schema_extra={"help": "Turn OMDb on/off. Off by default. Provides IMDb "
+        json_schema_extra={"tier": "basic", "help": "Turn OMDb on/off. Off by default. Provides IMDb "
         "rating, Rotten Tomatoes critic score and Metacritic score. Requires an "
         "API key (the `omdb_key` secret or env var OMDB_KEY). Responses are "
         "cached with a 7 day TTL. Get a key at https://www.omdbapi.com/apikey.aspx."})
@@ -141,7 +141,7 @@ class MdblistSource(_Strict):
     enabled: bool = Field(
         default=False,
         description="Enable MDBList as a ratings source.",
-        json_schema_extra={"help": "Turn MDBList on/off. Off by default. Aggregates IMDb, Rotten "
+        json_schema_extra={"tier": "basic", "help": "Turn MDBList on/off. Off by default. Aggregates IMDb, Rotten "
         "Tomatoes (critic + audience), Metacritic, Trakt, Letterboxd and TMDb ratings in one call. "
         "Requires an API key (the `mdblist_key` secret or env var MDBLIST_KEY). Responses are cached "
         "with a 7 day TTL and the client is rate-limit aware."})
@@ -362,14 +362,14 @@ class ArtworkSelection(_Strict):
     preset: Literal["best_rated", "random_top_n"] = Field(
         default="best_rated",
         description="How the automatic choice is made among candidates.",
-        json_schema_extra={"help": "`best_rated` picks the highest-rated candidate (TMDb "
+        json_schema_extra={"tier": "basic", "help": "`best_rated` picks the highest-rated candidate (TMDb "
         "`vote_average`, `vote_count` as tiebreak). `random_top_n` picks one of the top N "
         "candidates — deterministically: the same item, kind and reshuffle count always give "
         "the same image; use the Reshuffle button to change it."})
     top_n: int = Field(
         default=3, ge=1, le=50,
         description="How many of the best candidates `random_top_n` may choose from.",
-        json_schema_extra={"help": "For the `random_top_n` preset: how many of the best-ranked "
+        json_schema_extra={"tier": "advanced", "help": "For the `random_top_n` preset: how many of the best-ranked "
         "candidates are eligible for the (deterministic) pick. Default 3."})
 
 
@@ -459,7 +459,7 @@ class TvArtwork(_Strict):
     episode_thumbs: bool = Field(
         default=False,
         description="Write per-episode thumbnails.",
-        json_schema_extra={"help": "Reserved - Finmeta does not write episode thumbnails yet, so "
+        json_schema_extra={"tier": "expert", "help": "Reserved - Finmeta does not write episode thumbnails yet, so "
         "this switch currently does nothing. It does not affect overlays: Jellyfin draws episode "
         "cards from the season/show poster, not from the episode thumbnail."})
 
@@ -613,21 +613,21 @@ class StatusOverlayConfig(_Strict):
         default=14,
         ge=0,
         description="How many days a just-aired premiere/finale still counts as 'just happened'.",
-        json_schema_extra={"help": "Controls the *_aired statuses (new_season_started, "
+        json_schema_extra={"tier": "advanced", "help": "Controls the *_aired statuses (new_season_started, "
         "season_finale_aired, final_episode_aired): an episode that aired more than this many days "
         "ago no longer counts as 'just happened' and the show falls back to a plain status "
         "(returning/ended) instead. Default 14."})
     date_style: Literal["relative", "classic", "weekday"] = Field(
         default="relative",
         description="How a dated status (e.g. 'NEW SEASON') shows its date on the badge.",
-        json_schema_extra={"help": "`relative` (default): TODAY/TOMORROW for the next two days, "
+        json_schema_extra={"tier": "advanced", "help": "`relative` (default): TODAY/TOMORROW for the next two days, "
         "the weekday name for days 2-6 out, else DD.MM. `classic`: always DD.MM, regardless of how "
         "far away the date is. `weekday`: always the weekday name (e.g. 'MONDAY'), never a numeric "
         "date or TODAY/TOMORROW -- ambiguous beyond a week out (operator's choice to accept that)."})
     create_collections: bool = Field(
         default=False,
         description="Also create a Jellyfin collection per status (e.g. 'New Season Soon').",
-        json_schema_extra={"help": "Off by default. When on, every TV show with a computed status "
+        json_schema_extra={"tier": "advanced", "help": "Off by default. When on, every TV show with a computed status "
         "(see the `status` overlay element) is added to a Jellyfin collection named after that "
         "status -- one collection per status value present, created the same way as "
         "`collections` (SPEC override O1, no collection.nfo). Override a status's collection name "
@@ -1129,7 +1129,7 @@ class Config(_Strict):
     dry_run: bool = Field(
         default=True,
         description="Plan-only mode; refuse to write files or call the write API.",
-        json_schema_extra={"help": "Safety switch. While `true` (the shipped default), apply runs "
+        json_schema_extra={"tier": "basic", "help": "Safety switch. While `true` (the shipped default), apply runs "
         "refuse to write anything — the API/CLI only produce a plan. Set to `false` to allow "
         "real writes. See `POST /api/runs`."})
     server: ServerConfig = Field(
@@ -1139,18 +1139,18 @@ class Config(_Strict):
     path_mappings: List[PathMapping] = Field(
         default_factory=list,
         description="Jellyfin-path -> local-path translations.",
-        json_schema_extra={"help": "The set of path mappings used to translate every Jellyfin path "
+        json_schema_extra={"tier": "basic", "help": "The set of path mappings used to translate every Jellyfin path "
         "to a local path before touching disk (SPEC override O6). An unmapped path is skipped with an "
         "error, never guessed."})
     language: str = Field(
         default="en-US",
         description="Preferred metadata/artwork language.",
-        json_schema_extra={"help": "Preferred language for metadata and artwork (BCP-47, e.g. "
+        json_schema_extra={"tier": "basic", "help": "Preferred language for metadata and artwork (BCP-47, e.g. "
         "`en-US`, `en-GB`). Default `en-US`."})
     artwork_language_fallback: List[Optional[str]] = Field(
         default_factory=lambda: [None],
         description="Ordered artwork language fallbacks (null = textless).",
-        json_schema_extra={"help": "Ordered fallback languages for artwork, e.g. `[en, null]`. A "
+        json_schema_extra={"tier": "advanced", "help": "Ordered fallback languages for artwork, e.g. `[en, null]`. A "
         "`null` entry means 'prefer textless artwork'. Finmeta walks this list and uses the first "
         "language that has a matching image."})
     artwork_selection: ArtworkSelection = Field(
@@ -1162,7 +1162,7 @@ class Config(_Strict):
         default="sidecar",
         description="How poster/backdrop/logo/landscape artwork is written (metadata NFO and "
         "theme songs are always sidecar files; Jellyfin has no API for either).",
-        json_schema_extra={"help": "`sidecar` -- the only write method, and the only value this "
+        json_schema_extra={"tier": "expert", "help": "`sidecar` -- the only write method, and the only value this "
         "field accepts. Writes poster.jpg/backdrop.jpg/etc. directly into the media folder next "
         "to the video file. The alternative this field used to also accept, `jellyfin_api` "
         "(uploads straight to Jellyfin via `POST /Items/{id}/Images/{type}`, never touching the "
@@ -1176,7 +1176,7 @@ class Config(_Strict):
         default=14,
         ge=0,
         description="Days a superseded backup copy spends in trash before permanent deletion.",
-        json_schema_extra={"help": "S9d5: every file write backs up the previous version "
+        json_schema_extra={"tier": "advanced", "help": "S9d5: every file write backs up the previous version "
         "(SPEC override O5). Without cleanup these pile up forever. On each apply, Finmeta "
         "moves every superseded backup copy (i.e. not the very first one ever made for a "
         "path, and not the most recent one) into `<config>/trash/`; a trash entry is then "
@@ -1194,7 +1194,7 @@ class Config(_Strict):
     media_apps: MediaAppsConfig = Field(
         default_factory=MediaAppsConfig,
         description="Sonarr and Radarr instances.",
-        json_schema_extra={"help": "Your Sonarr (`media_apps.sonarr`) and Radarr (`media_apps.radarr`) "
+        json_schema_extra={"tier": "basic", "help": "Your Sonarr (`media_apps.sonarr`) and Radarr (`media_apps.radarr`) "
         "instances. Each has a url, the name of the secret holding its API key, timeout, verify_ssl "
         "and enabled. Finmeta is read-only against these — it never adds, edits or deletes anything."})
     libraries: Dict[str, LibraryConfig] = Field(

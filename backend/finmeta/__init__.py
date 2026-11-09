@@ -1,6 +1,6 @@
 """Finmeta: a Kometa-equivalent for Jellyfin."""
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"
 
 
 def _harden_pillow() -> None:

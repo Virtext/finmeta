@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 from unittest.mock import patch
 
-from finmeta.api.routes_candidates import _default_candidates_provider
+from finmeta.api.routes_candidates import _artwork_kinds, _default_candidates_provider
 from finmeta.config.models import Config, Metadata, ServerConfig, TvArtwork, TvLibrary
 from finmeta.jellyfin_client.types import Item, Library
 
@@ -89,3 +89,14 @@ def test_candidates_empty_kinds_when_item_resolves_to_no_library():
         _default_candidates_provider(item, cfg, jf, tmdb=None, sources={}, mapper=None)
 
     assert captured["kinds"] == []
+
+
+def test_episode_thumbs_never_offered_as_a_candidate_kind():
+    """SPEC_S13.md S13b item 5: episode_thumbs is Reserved (plan_builder has
+    no write path for it) -- turning it on in a TV library's artwork config
+    must not surface "episode_thumb" as something an operator can pick, since
+    picking one then went nowhere silently."""
+    lib = TvLibrary(type="tvshows", enabled=True, metadata=Metadata(enabled=False),
+                     artwork=TvArtwork(poster=True, season_posters=True, episode_thumbs=True))
+    assert "episode_thumb" not in _artwork_kinds(lib)
+    assert set(_artwork_kinds(lib)) == {"poster", "season_poster"}

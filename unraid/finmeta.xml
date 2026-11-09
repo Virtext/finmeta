@@ -40,14 +40,14 @@ On first run the web UI starts in dry-run mode with no password set -- open it, 
       <Mode>rw</Mode>
     </Volume>
     <Volume>
-      <HostDir>/mnt/user/media</HostDir>
+      <HostDir>/mnt/user/share_media/media</HostDir>
       <ContainerDir>/media</ContainerDir>
       <Mode>rw</Mode>
     </Volume>
   </Data>
   <Environment>
     <Variable>
-      <Value>Etc/UTC</Value>
+      <Value>Europe/Oslo</Value>
       <Name>TZ</Name>
     </Variable>
     <Variable>
@@ -58,8 +58,8 @@ On first run the web UI starts in dry-run mode with no password set -- open it, 
   <Labels/>
   <Config Name="WebUI Port" Target="8765" Default="8765" Mode="tcp" Description="Port the Finmeta web UI listens on." Type="Port" Display="always" Required="true" Mask="false">8765</Config>
   <Config Name="Config" Target="/config" Default="/mnt/user/appdata/finmeta/config" Mode="rw" Description="Finmeta's own config.yml, auth DB and run history." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/finmeta/config</Config>
-  <Config Name="Media" Target="/media" Default="/mnt/user/media" Mode="rw" Description="Your Jellyfin media library. Must match the path_mappings entry you set in Finmeta's config.yml -- set this before enabling writes." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/media</Config>
-  <Config Name="TZ" Target="TZ" Default="Etc/UTC" Mode="" Description="Timezone, used for scheduled jobs (e.g. poster rotation)." Type="Variable" Display="always" Required="true" Mask="false">Etc/UTC</Config>
+  <Config Name="Media" Target="/media" Default="/mnt/user/share_media/media" Mode="rw" Description="Your Jellyfin media library. Must match the path_mappings entry you set in Finmeta's config.yml -- set this before enabling writes." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/share_media/media</Config>
+  <Config Name="TZ" Target="TZ" Default="Europe/Oslo" Mode="" Description="Timezone, used for scheduled jobs (e.g. poster rotation)." Type="Variable" Display="always" Required="true" Mask="false">Europe/Oslo</Config>
   <Config Name="FINMETA_SECRET_KEY" Target="FINMETA_SECRET_KEY" Default="" Mode="" Description="Encrypts stored provider API keys at rest. Generate one with: python3 -c &quot;import secrets; print(secrets.token_urlsafe(32))&quot; -- leave blank to let Finmeta generate and persist one on first run." Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
   <Config Name="FINMETA_COOKIE_SECURE" Target="FINMETA_COOKIE_SECURE" Default="" Mode="" Description="Set to 1 once Finmeta is served behind HTTPS (e.g. via a reverse proxy). Leave blank otherwise." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
   <Config Name="JELLYFIN_API_KEY" Target="JELLYFIN_API_KEY" Default="" Mode="" Description="Optional: your Jellyfin API key. Can also be entered later from the Finmeta web UI instead." Type="Variable" Display="advanced" Required="false" Mask="true"></Config>

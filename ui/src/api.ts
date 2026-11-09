@@ -21,6 +21,21 @@ export class ApiError extends Error {
   }
 }
 
+// LegacyApp.tsx catches `e.isUnauthorized` at every one of its own call
+// sites to flip its local `unauthed` state back to true when a session
+// expires mid-use (not just on first load) -- ModernApp.tsx had no
+// equivalent for a long time, so an expired session there just 401ed
+// forever with no way back to the login screen (2026-11-09, operator-
+// reported: "fungerer ikke med noen av tingene" after a dev-server restart
+// invalidated the in-memory session store). Rather than repeat that
+// per-call-site pattern across every modern page, one global hook here:
+// ModernApp registers it once and flips its own `unauthed` state for ANY
+// 401 from ANY page, no matter which one happens to be mounted.
+let unauthorizedHandler: (() => void) | null = null;
+export function onUnauthorized(handler: (() => void) | null): void {
+  unauthorizedHandler = handler;
+}
+
 async function j<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(path, init);
   if (!r.ok) {
@@ -31,6 +46,7 @@ async function j<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       /* ignore */
     }
+    if (r.status === 401) unauthorizedHandler?.();
     throw new ApiError(r.status, path, `HTTP ${r.status}: ${detail}`);
   }
   return (await r.json()) as T;
@@ -94,6 +110,22 @@ export const startRun = (action: string, item?: string, library?: string) =>
   });
 
 export const getJob = (id: string) => j<JobResp>(`/api/jobs/${enc(id)}`);
+
+export interface BulkRunResultEntry {
+  item_id: string; run_id: string | null; queued: boolean; error?: string;
+}
+export interface BulkRunResp { results: BulkRunResultEntry[] }
+// Library page bulk selection (SPEC_S14_UI.md S13d). One POST /api/runs per
+// item would race every item after the first into a 409 -- the single run
+// slot only ever holds one run. This is the real multi-item mechanism
+// (POST /api/items/bulk-run), not a client-side retry loop against a
+// 409-raising endpoint.
+export const bulkRun = (action: 'plan' | 'apply', itemIds: string[], library?: string) =>
+  j<BulkRunResp>('/api/items/bulk-run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, item_ids: itemIds, library }),
+  });
 
 // ---- S10a: library health scanner (SPEC_S10 §E) ----
 
@@ -198,6 +230,15 @@ export const deleteScan = (scanId: string) =>
 
 export const getHealth = () => j<HealthResp>('/api/health');
 
+export interface ServiceStatusEntry {
+  name: string; label: string; enabled: boolean;
+  ok: boolean | null; latency_ms: number | null; error: string | null;
+}
+export interface ServicesStatusResp { services: ServiceStatusEntry[]; ttl_seconds: number }
+// Cached server-side (5 min) -- safe to call on every Overview mount without
+// pinging TMDb/Fanart/Jellyfin/etc. each time (SPEC_S14_UI.md Services card).
+export const getServicesStatus = () => j<ServicesStatusResp>('/api/services/status');
+
 // Build a proxy URL from a plan source_ref (the browser never calls
 // TMDb/fanart directly — every byte goes through /api/proxy). The token is
 // base64url("<kind>|<ref>"), matching backend/finmeta/api/proxy.py.
@@ -216,6 +257,15 @@ export function proxyUrl(kind: string, ref: string): string {
 // actually writes.
 export function overlayProxyUrl(digest: string): string {
   return `/api/proxy/overlay/${digest}`;
+}
+
+// One of an item's OWN current Jellyfin images (poster/backdrop/logo/
+// landscape), proxied so the browser never needs the Jellyfin URL or API
+// key. SPEC_S14_UI.md decision D8: used by the Library poster grid --
+// deliberately NOT the candidates path (getCandidates), which does TMDb
+// matching per item and is far too slow for a grid of hundreds of items.
+export function itemImageUrl(itemId: string, kind: 'poster' | 'backdrop' | 'logo' | 'landscape'): string {
+  return `/api/items/${enc(itemId)}/image?kind=${kind}`;
 }
 
 export function findFile(files: { kind: string; source_ref: string }[], kind: string) {

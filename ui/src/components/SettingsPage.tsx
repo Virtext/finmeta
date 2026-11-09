@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   getSecrets, putSecret, deleteSecret, testService, testArrConfig, getHelp,
   getConfig, putConfig, logout, getProviders, getRatingSources,
@@ -22,9 +22,46 @@ interface Props {
    * library) — used by PreviewPane's "Edit overlay profile" link. */
   initialTab?: Tab;
   initialOverlayLibrary?: string | null;
+  /** 2026-11-09, operator-requested: these tabs are 100% redundant once the
+   * modern shell's own Profiles/Automation/Overlay Studio pages exist (same
+   * shared panels and components, SPEC_S14_UI.md §4b) -- SettingsShell.tsx
+   * (the only modern caller) passes this; LegacyApp.tsx never does, so
+   * legacy is unaffected. Overlays joined last, once the Studio reached
+   * parity (base settings/per-element fine-tuning/format rules/named
+   * styles) -- see REDUNDANT_TABS below and OverlaysPage.tsx's header
+   * comment for the full history. */
+  hideRedundantTabs?: boolean;
 }
 
 type Tab = 'general' | 'local' | 'external' | 'secrets' | 'ratings' | 'overlays' | 'libraries' | 'schedules' | 'trending' | 'collections' | 'advanced';
+
+// SPEC_S13.md S13b item 1: cross-category search over GET /api/help's config
+// entries. help keys are dotted paths from help.py's iter_config_fields walk
+// (e.g. "status_overlay.date_style") -- "provider.*"/"feature.*"/"secret.*"
+// keys are merged in by build_help() from OTHER registries and are not
+// config fields, so they're excluded by checking the first segment below.
+// Mapping is first-segment -> tab, 'sources.local' special-cased (it renders
+// under Local services, not alongside the other "sources" entries which are
+// all External services), unmapped segments fall back to 'advanced' (the raw
+// YAML editor reaches every field, so it's a safe universal landing spot).
+const SEARCH_EXCLUDED_PREFIXES = new Set(['provider', 'feature', 'secret']);
+const TAB_FOR_SEGMENT: Record<string, Tab> = {
+  dry_run: 'general', language: 'general', artwork_language_fallback: 'general',
+  artwork_selection: 'general', artwork_write_method: 'general',
+  backup_retention_days: 'general', status_overlay: 'general', path_mappings: 'general',
+  server: 'local', media_apps: 'local',
+  sources: 'external',
+  overlays: 'overlays',
+  libraries: 'libraries',
+  schedules: 'schedules',
+  trending: 'trending',
+  collections: 'collections', collection_presets: 'collections',
+};
+function tabForHelpKey(key: string): Tab {
+  if (key === 'sources.local' || key.startsWith('sources.local.')) return 'local';
+  const seg = key.split('.')[0];
+  return TAB_FOR_SEGMENT[seg] ?? 'advanced';
+}
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'general', label: 'General' },
@@ -65,15 +102,74 @@ function patchParsed(parsed: any, pathParts: string[], value: any): any {
   return clone;
 }
 
+interface ConfigDiffEntry { path: string; before: unknown; after: unknown; change: 'add' | 'remove' | 'update' }
+
+// SPEC_S13.md S13b item 4 ("save-time diff ... the config PUT path can show
+// it"): a plain object-diff over the two parsed YAML docs, flattened to
+// dotted leaf paths. Arrays are compared as whole leaf values (an element
+// reordered or added anywhere inside one shows as that whole array
+// changing) rather than diffed element-by-element -- config arrays here
+// (path_mappings, trending.lists, media_apps instances...) are short lists
+// of small objects, and a leaf-level line like "trending.lists: [...] ->
+// [...]" is still a meaningful, honest "this is what changed" signal.
+function flattenLeaves(obj: unknown, prefix = '', out: Map<string, unknown> = new Map()): Map<string, unknown> {
+  if (obj !== null && typeof obj === 'object' && !Array.isArray(obj)) {
+    const entries = Object.entries(obj as Record<string, unknown>);
+    if (entries.length === 0) { out.set(prefix || '(root)', obj); return out; }
+    for (const [k, v] of entries) flattenLeaves(v, prefix ? `${prefix}.${k}` : k, out);
+    return out;
+  }
+  out.set(prefix || '(root)', obj);
+  return out;
+}
+
+function diffConfigs(before: unknown, after: unknown): ConfigDiffEntry[] {
+  const beforeLeaves = flattenLeaves(before);
+  const afterLeaves = flattenLeaves(after);
+  const paths = new Set([...beforeLeaves.keys(), ...afterLeaves.keys()]);
+  const out: ConfigDiffEntry[] = [];
+  for (const path of paths) {
+    const hasBefore = beforeLeaves.has(path);
+    const hasAfter = afterLeaves.has(path);
+    const b = beforeLeaves.get(path);
+    const a = afterLeaves.get(path);
+    if (hasBefore && !hasAfter) out.push({ path, before: b, after: undefined, change: 'remove' });
+    else if (!hasBefore && hasAfter) out.push({ path, before: undefined, after: a, change: 'add' });
+    else if (JSON.stringify(b) !== JSON.stringify(a)) out.push({ path, before: b, after: a, change: 'update' });
+  }
+  return out.sort((x, y) => x.path.localeCompare(y.path));
+}
+
+function diffValueText(v: unknown): string {
+  if (v === undefined) return '(unset)';
+  if (typeof v === 'string') return v || '""';
+  return JSON.stringify(v);
+}
+
+// SPEC_S13.md S13b item 3: re-applies a field's Pydantic default (never a
+// hand-written list -- GET /api/help's config entries now carry has_default/
+// default straight from the model). Omitted entirely for required fields.
+function ResetButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button type="button" className="btn btn-ghost btn-reset" title="Reset to default" onClick={onClick}>
+      ↺
+    </button>
+  );
+}
+
 function ConfigField({
-  label, help, value, onChange, type = 'text', placeholder,
+  label, help, value, onChange, type = 'text', placeholder, onReset,
 }: {
   label: string; help?: string; value: any;
   onChange: (v: string) => void; type?: string; placeholder?: string;
+  onReset?: () => void;
 }) {
   return (
     <div className="field-row">
-      <label className="field-label">{label} <HelpIcon help={help} /></label>
+      <label className="field-label">
+        {label} <HelpIcon help={help} />
+        {onReset && <ResetButton onClick={onReset} />}
+      </label>
       {type === 'checkbox' ? (
         <input
           type="checkbox"
@@ -413,11 +509,13 @@ function TestTyped({ app, form }: { app: 'sonarr' | 'radarr'; form: ArrInstance 
 
 interface PathMappingRow { jellyfin: string; local: string; }
 
-function GeneralTab({ configParsed, secrets, helpFor, saveConfigPatch }: {
+function GeneralTab({ configParsed, secrets, helpFor, saveConfigPatch, resetHandler, visible }: {
   configParsed: any;
   secrets: SecretsResp | null;
   helpFor: (key: string) => string | undefined;
   saveConfigPatch: (pathParts: string[], value: any) => Promise<void>;
+  resetHandler: (pathParts: string[], key: string) => (() => void) | undefined;
+  visible: (key: string) => boolean;
 }) {
   const [newJellyfin, setNewJellyfin] = useState('');
   const [newLocal, setNewLocal] = useState('');
@@ -448,12 +546,23 @@ function GeneralTab({ configParsed, secrets, helpFor, saveConfigPatch }: {
   // Jellyfin key via server.api_key_env) is shown locked with the env var name.
   const jellyfinKey = secrets?.secrets['jellyfin_api_key'] ?? null;
 
+  const rDryRun = resetHandler(['dry_run'], 'dry_run');
+  const rLanguage = resetHandler(['language'], 'language');
+  const rArtPreset = resetHandler(['artwork_selection', 'preset'], 'artwork_selection.preset');
+  const rArtTopN = resetHandler(['artwork_selection', 'top_n'], 'artwork_selection.top_n');
+  const rBackupRetention = resetHandler(['backup_retention_days'], 'backup_retention_days');
+  const rRecentDays = resetHandler(['status_overlay', 'recent_days'], 'status_overlay.recent_days');
+  const rDateStyle = resetHandler(['status_overlay', 'date_style'], 'status_overlay.date_style');
+  const rCreateCollections = resetHandler(['status_overlay', 'create_collections'], 'status_overlay.create_collections');
+
   return (
     <div className="settings-section">
       <h3>General</h3>
+      {visible('dry_run') && (
       <div className="field-row">
         <label className="field-label">
           dry_run <HelpIcon help={helpFor('dry_run')} />
+          {rDryRun && <ResetButton onClick={rDryRun} />}
         </label>
         <input
           type="checkbox"
@@ -461,9 +570,12 @@ function GeneralTab({ configParsed, secrets, helpFor, saveConfigPatch }: {
           onChange={(e) => void saveConfigPatch(['dry_run'], e.target.checked).catch(() => {})}
         />
       </div>
+      )}
+      {visible('language') && (
       <div className="field-row">
         <label className="field-label">
           language <HelpIcon help={helpFor('language')} />
+          {rLanguage && <ResetButton onClick={rLanguage} />}
         </label>
         <input
           className="login-input config-input"
@@ -473,10 +585,13 @@ function GeneralTab({ configParsed, secrets, helpFor, saveConfigPatch }: {
           onChange={(e) => void saveConfigPatch(['language'], e.target.value).catch(() => {})}
         />
       </div>
+      )}
       {/* S9d4a: global artwork selection preset + top_n */}
+      {visible('artwork_selection.preset') && (
       <div className="field-row">
         <label className="field-label">
           artwork_selection.preset <HelpIcon help={helpFor('artwork_selection.preset')} />
+          {rArtPreset && <ResetButton onClick={rArtPreset} />}
         </label>
         <select
           className="login-input config-input"
@@ -487,9 +602,12 @@ function GeneralTab({ configParsed, secrets, helpFor, saveConfigPatch }: {
           <option value="random_top_n">random_top_n</option>
         </select>
       </div>
+      )}
+      {visible('artwork_selection.top_n') && (
       <div className="field-row">
         <label className="field-label">
           artwork_selection.top_n <HelpIcon help={helpFor('artwork_selection.top_n')} />
+          {rArtTopN && <ResetButton onClick={rArtTopN} />}
         </label>
         <input
           className="login-input config-input"
@@ -498,19 +616,24 @@ function GeneralTab({ configParsed, secrets, helpFor, saveConfigPatch }: {
           onChange={(e) => void saveConfigPatch(['artwork_selection', 'top_n'], Math.max(1, Number(e.target.value) || 1)).catch(() => {})}
         />
       </div>
+      )}
       {/* 2026-10-26: jellyfin_api removed (Jellyfin kept re-asserting a local
           poster/backdrop/logo file over an API-uploaded one) -- sidecar is
           now the only write method, so there's nothing left to choose here. */}
+      {visible('artwork_write_method') && (
       <div className="field-row">
         <label className="field-label">
           artwork_write_method <HelpIcon help={helpFor('artwork_write_method')} />
         </label>
         <input className="login-input config-input" value="sidecar" disabled readOnly />
       </div>
+      )}
       {/* S9d5: backup trash retention (days a superseded backup is kept before deletion) */}
+      {visible('backup_retention_days') && (
       <div className="field-row">
         <label className="field-label">
           backup_retention_days <HelpIcon help={helpFor('backup_retention_days')} />
+          {rBackupRetention && <ResetButton onClick={rBackupRetention} />}
         </label>
         <input
           className="login-input config-input"
@@ -519,6 +642,7 @@ function GeneralTab({ configParsed, secrets, helpFor, saveConfigPatch }: {
           onChange={(e) => void saveConfigPatch(['backup_retention_days'], Math.max(0, Number(e.target.value) || 0)).catch(() => {})}
         />
       </div>
+      )}
       {/* 2026-10-26 operator request: Sonarr/Radarr-style log download --
           deliberately a one-shot file, not a live browsable/searchable
           view, to avoid adding an always-on cost for something used rarely. */}
@@ -527,9 +651,11 @@ function GeneralTab({ configParsed, secrets, helpFor, saveConfigPatch }: {
         <a className="btn" href="/api/logs/export">Download log</a>
       </div>
       {/* S9g1/K7a: TV show status (Sonarr) — recent-days window + optional per-status collections */}
+      {visible('status_overlay.recent_days') && (
       <div className="field-row">
         <label className="field-label">
           status_overlay.recent_days <HelpIcon help={helpFor('status_overlay.recent_days')} />
+          {rRecentDays && <ResetButton onClick={rRecentDays} />}
         </label>
         <input
           className="login-input config-input"
@@ -538,11 +664,14 @@ function GeneralTab({ configParsed, secrets, helpFor, saveConfigPatch }: {
           onChange={(e) => void saveConfigPatch(['status_overlay', 'recent_days'], Math.max(0, Number(e.target.value) || 0)).catch(() => {})}
         />
       </div>
+      )}
       {/* 2026-10-26 operator request: pick between the relative wording
           (TODAY/TOMORROW/weekday) and the plain DD.MM date it replaced. */}
+      {visible('status_overlay.date_style') && (
       <div className="field-row">
         <label className="field-label">
           status_overlay.date_style <HelpIcon help={helpFor('status_overlay.date_style')} />
+          {rDateStyle && <ResetButton onClick={rDateStyle} />}
         </label>
         <select
           className="login-input config-input"
@@ -554,9 +683,12 @@ function GeneralTab({ configParsed, secrets, helpFor, saveConfigPatch }: {
           <option value="weekday">weekday (always a day name, never a date)</option>
         </select>
       </div>
+      )}
+      {visible('status_overlay.create_collections') && (
       <div className="field-row">
         <label className="field-label">
           status_overlay.create_collections <HelpIcon help={helpFor('status_overlay.create_collections')} />
+          {rCreateCollections && <ResetButton onClick={rCreateCollections} />}
         </label>
         <input
           type="checkbox"
@@ -564,6 +696,8 @@ function GeneralTab({ configParsed, secrets, helpFor, saveConfigPatch }: {
           onChange={(e) => void saveConfigPatch(['status_overlay', 'create_collections'], e.target.checked).catch(() => {})}
         />
       </div>
+      )}
+      {visible('artwork_language_fallback') && (
       <div className="field-row">
         <label className="field-label">
           artwork_language_fallback <HelpIcon help={helpFor('artwork_language_fallback')} />
@@ -610,6 +744,7 @@ function GeneralTab({ configParsed, secrets, helpFor, saveConfigPatch }: {
           ))}
         </div>
       </div>
+      )}
       <div className="field-row">
         <label className="field-label">
           path_mappings <HelpIcon help={helpFor('path_mappings')} />
@@ -667,8 +802,15 @@ function GeneralTab({ configParsed, secrets, helpFor, saveConfigPatch }: {
   );
 }
 
-export default function SettingsPage({ onBack, initialTab, initialOverlayLibrary }: Props) {
+// 'overlays' joined this list 2026-11-09 once the modern Overlay Studio
+// page reached parity (base settings/per-element fine-tuning/format rules/
+// named styles) -- see OverlaysPage.tsx's header comment for the full
+// history of what that took.
+const REDUNDANT_TABS: Tab[] = ['libraries', 'schedules', 'trending', 'collections', 'overlays'];
+
+export default function SettingsPage({ onBack, initialTab, initialOverlayLibrary, hideRedundantTabs }: Props) {
   const [tab, setTab] = useState<Tab>(initialTab ?? 'general');
+  const visibleTabs = hideRedundantTabs ? TABS.filter((t) => !REDUNDANT_TABS.includes(t.id)) : TABS;
   // S9d2-fix2 step 1: remount OverlaysEditor when the deep link changes.
   const [overlayKey, setOverlayKey] = useState(0);
   // S9d2-fix2 step 1 (+ S9d4c step 4: also set from PreviewPane's "Edit
@@ -724,10 +866,32 @@ export default function SettingsPage({ onBack, initialTab, initialOverlayLibrary
     try {
       await putConfig(configYaml);
       setConfigMsg('Config saved');
+      setConfigParsed(YAML.load(configYaml));
+      setPendingDiff(null);
       setTimeout(() => setConfigMsg(null), 3000);
     } catch (e: any) {
       setConfigErr(e.message);
     }
+  };
+
+  // SPEC_S13.md S13b item 4: review the diff before committing a raw-YAML
+  // edit. configParsed is always the last value this page actually wrote
+  // (every ConfigField/saveConfigPatch path updates it too), so it's the
+  // correct "before" even when the diff is triggered from a hand-edited
+  // textarea that has drifted from whatever tab was open last.
+  const [pendingDiff, setPendingDiff] = useState<ConfigDiffEntry[] | null>(null);
+  const reviewConfigSave = () => {
+    setConfigErr(null);
+    let parsed: unknown;
+    try {
+      parsed = YAML.load(configYaml);
+    } catch (e: any) {
+      setConfigErr(`Invalid YAML: ${e.message}`);
+      return;
+    }
+    const diff = diffConfigs(configParsed, parsed);
+    if (diff.length === 0) { setConfigMsg('No changes to save.'); setTimeout(() => setConfigMsg(null), 2000); return; }
+    setPendingDiff(diff);
   };
 
   // Edit one config field by dotted path; re-serializes the parsed object to
@@ -749,6 +913,48 @@ export default function SettingsPage({ onBack, initialTab, initialOverlayLibrary
   const helpFor = (key: string): string | undefined =>
     help?.help[key]?.long;
 
+  // SPEC_S13.md S13b item 3: undefined when the field has no Pydantic
+  // default (a required field) -- callers pass this straight to ConfigField/
+  // ResetButton's onReset prop, so a required field just gets no button.
+  const resetHandler = (pathParts: string[], key: string): (() => void) | undefined => {
+    const h = help?.help[key];
+    if (!h?.has_default) return undefined;
+    return () => { void saveConfigPatch(pathParts, h.default ?? null).catch(() => {}); };
+  };
+
+  // SPEC_S13.md S13b item 6: Basic/Advanced/Expert, a filter over fields
+  // that have been hand-tagged with a tier (most of the 159 haven't yet --
+  // a field with no tier recorded always shows, at every level, so an
+  // unclassified setting is never accidentally hidden). Persisted locally;
+  // each level shows its own tier plus everything simpler.
+  const [level, setLevel] = useState<'basic' | 'advanced' | 'expert'>(() => {
+    try { return (localStorage.getItem('finmeta-settings-level') as any) || 'basic'; } catch { return 'basic'; }
+  });
+  useEffect(() => { try { localStorage.setItem('finmeta-settings-level', level); } catch { /* ignore */ } }, [level]);
+  const TIER_RANK: Record<string, number> = { basic: 0, advanced: 1, expert: 2 };
+  const visible = (key: string): boolean => {
+    const tier = help?.help[key]?.tier;
+    if (!tier) return true;
+    return TIER_RANK[tier] <= TIER_RANK[level];
+  };
+
+  // SPEC_S13.md S13b item 1: cross-category search, client-side over the
+  // already-loaded help index -- 159 entries is nothing to filter in-browser.
+  const [search, setSearch] = useState('');
+  const searchResults = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (q.length < 2 || !help) return [];
+    return Object.entries(help.help)
+      .filter(([key]) => {
+        const seg = key.split('.')[0];
+        return !SEARCH_EXCLUDED_PREFIXES.has(seg);
+      })
+      .filter(([key, h]) =>
+        key.toLowerCase().includes(q) || h.short.toLowerCase().includes(q) || h.long.toLowerCase().includes(q))
+      .slice(0, 20)
+      .map(([key, h]) => ({ key, short: h.short, tab: tabForHelpKey(key) }));
+  }, [search, help]);
+
   return (
     <div className="settings-page">
       <header className="settings-header">
@@ -759,8 +965,61 @@ export default function SettingsPage({ onBack, initialTab, initialOverlayLibrary
         </div>
       </header>
 
+      <div className="settings-search">
+        <div className="settings-level">
+          {(['basic', 'advanced', 'expert'] as const).map((lv) => (
+            <button
+              key={lv}
+              type="button"
+              className={`settings-level-btn ${lv === level ? 'active' : ''}`}
+              onClick={() => setLevel(lv)}
+            >
+              {lv === 'basic' ? 'Basic' : lv === 'advanced' ? 'Advanced' : 'Expert'}
+            </button>
+          ))}
+        </div>
+        <input
+          className="login-input config-input"
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search all settings…"
+        />
+        {search.trim().length >= 2 && (
+          <div className="settings-search-results">
+            {searchResults.length === 0 ? (
+              <div className="field-hint muted settings-search-empty">No matches for "{search}".</div>
+            ) : (
+              searchResults.map((r) => (
+                <button
+                  key={r.key}
+                  type="button"
+                  className="settings-search-result"
+                  onClick={() => {
+                    // A hidden (redundant) tab has no nav button to land on --
+                    // send the search there to the page that now owns it
+                    // instead (Automation covers schedules/trending/
+                    // collections, Profiles covers libraries); Advanced's
+                    // raw YAML still reaches the field either way.
+                    if (hideRedundantTabs && REDUNDANT_TABS.includes(r.tab)) setTab('advanced');
+                    else setTab(r.tab);
+                    setSearch('');
+                  }}
+                >
+                  <span className="settings-search-result-key">{r.key}</span>
+                  <span className="settings-search-result-short">{r.short}</span>
+                  <span className="settings-search-result-tab">
+                    {TABS.find((t) => t.id === (hideRedundantTabs && REDUNDANT_TABS.includes(r.tab) ? 'advanced' : r.tab))?.label}
+                  </span>
+                </button>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+
       <nav className="settings-tabs">
-        {TABS.map((t) => (
+        {visibleTabs.map((t) => (
           <button
             key={t.id}
             className={`settings-tab ${t.id === tab ? 'active' : ''}`}
@@ -778,6 +1037,8 @@ export default function SettingsPage({ onBack, initialTab, initialOverlayLibrary
             secrets={secrets}
             helpFor={helpFor}
             saveConfigPatch={saveConfigPatch}
+            resetHandler={resetHandler}
+            visible={visible}
           />
         )}
 
@@ -805,6 +1066,7 @@ export default function SettingsPage({ onBack, initialTab, initialOverlayLibrary
                       help={helpFor('sources.local.path')}
                       value={configParsed.sources?.local?.path ?? ''}
                       onChange={(v) => void saveConfigPatch(['sources','local','path'], v).catch(() => {})}
+                      onReset={resetHandler(['sources','local','path'], 'sources.local.path')}
                     />
                     <span className={`test-result ${configParsed.sources?.local?.enabled ? 'ok' : 'err'}`} style={{ alignSelf: 'center' }}>
                       {configParsed.sources?.local?.enabled ? '✓ enabled' : '✗ disabled (sources.local.enabled)'}
@@ -819,28 +1081,38 @@ export default function SettingsPage({ onBack, initialTab, initialOverlayLibrary
                       help={helpFor('server.url')}
                       value={configParsed.server?.url ?? ''}
                       onChange={(v) => void saveConfigPatch(['server','url'], v).catch(() => {})}
+                      onReset={resetHandler(['server','url'], 'server.url')}
                     />
+                    {visible('server.base_path') && (
                     <ConfigField
                       label="Base path"
                       help={helpFor('server.base_path')}
                       value={configParsed.server?.base_path ?? ''}
                       placeholder="/jellyfin (optional)"
                       onChange={(v) => void saveConfigPatch(['server','base_path'], v || null).catch(() => {})}
+                      onReset={resetHandler(['server','base_path'], 'server.base_path')}
                     />
+                    )}
+                    {visible('server.verify_ssl') && (
                     <ConfigField
                       label="Verify SSL"
                       help={helpFor('server.verify_ssl')}
                       type="checkbox"
                       value={configParsed.server?.verify_ssl ?? true}
                       onChange={(v) => void saveConfigPatch(['server','verify_ssl'], v === 'true').catch(() => {})}
+                      onReset={resetHandler(['server','verify_ssl'], 'server.verify_ssl')}
                     />
+                    )}
+                    {visible('server.timeout') && (
                     <ConfigField
                       label="Timeout (s)"
                       help={helpFor('server.timeout')}
                       type="number"
                       value={configParsed.server?.timeout ?? 30}
                       onChange={(v) => void saveConfigPatch(['server','timeout'], Number(v)).catch(() => {})}
+                      onReset={resetHandler(['server','timeout'], 'server.timeout')}
                     />
+                    )}
                     <WebhookSection />
                   </>
                 )}
@@ -909,6 +1181,7 @@ export default function SettingsPage({ onBack, initialTab, initialOverlayLibrary
                     type="checkbox"
                     value={configParsed.sources?.[p.name]?.enabled ?? false}
                     onChange={(v) => void saveConfigPatch(['sources', p.name, 'enabled'], v === 'true').catch(() => {})}
+                    onReset={resetHandler(['sources', p.name, 'enabled'], `sources.${p.name}.enabled`)}
                   />
                 )}
                 {p.requires_key && p.secret && secret(p.secret) && (
@@ -1048,10 +1321,31 @@ export default function SettingsPage({ onBack, initialTab, initialOverlayLibrary
               spellCheck={false}
             />
             <div className="yaml-actions">
-              <button className="btn primary" onClick={saveConfig}>Save config</button>
+              <button className="btn primary" onClick={reviewConfigSave}>Save config</button>
               {configMsg && <span className="field-msg ok">{configMsg}</span>}
               {configErr && <span className="field-msg err">{configErr}</span>}
             </div>
+            {pendingDiff && (
+              <div className="config-diff-review">
+                <h4>Review before saving — {pendingDiff.length} field{pendingDiff.length === 1 ? '' : 's'} changed</h4>
+                <div className="config-diff-list">
+                  {pendingDiff.map((d) => (
+                    <div key={d.path} className={`config-diff-row config-diff-${d.change}`}>
+                      <span className="config-diff-path">{d.path}</span>
+                      {d.change === 'add' && <span className="config-diff-val">+ {diffValueText(d.after)}</span>}
+                      {d.change === 'remove' && <span className="config-diff-val">− {diffValueText(d.before)}</span>}
+                      {d.change === 'update' && (
+                        <span className="config-diff-val">{diffValueText(d.before)} → {diffValueText(d.after)}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <div className="yaml-actions">
+                  <button className="btn primary" onClick={saveConfig}>Confirm save</button>
+                  <button className="btn btn-ghost" onClick={() => setPendingDiff(null)}>Cancel</button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

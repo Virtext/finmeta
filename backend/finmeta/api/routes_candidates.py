@@ -38,8 +38,11 @@ def _artwork_kinds(lib) -> list:
     if isinstance(art, TvArtwork):
         if art.season_posters:
             kinds.append("season_poster")
-        if art.episode_thumbs:
-            kinds.append("episode_thumb")
+        # episode_thumbs is Reserved (config/models.py TvArtwork.episode_thumbs'
+        # own help text: "Finmeta does not write episode thumbnails yet") --
+        # plan_builder has no write path for this kind, so offering it here
+        # let an operator pick a candidate that then silently went nowhere.
+        # SPEC_S13.md S13b item 5.
     if lib.theme_song:
         kinds.append("theme_song")
     return kinds

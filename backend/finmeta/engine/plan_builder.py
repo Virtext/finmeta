@@ -882,6 +882,8 @@ def build_trending_data(cfg: Config, secrets):
         return rank_by_tmdb, fetched
     from finmeta.sources.mdblist_lists import fetch_list_items
     for lst in cfg.trending.lists:
+        if not lst.url or not lst.url.strip():
+            continue
         try:
             items = fetch_list_items(lst.url, api_key, limit=lst.limit)
         except Exception as exc:
