@@ -54,9 +54,13 @@ SPEC_S9.md
 SPEC_KOMETA.md
 SPEC_S10.md
 SPEC_S11.md
+SPEC_S12.md
+SPEC_S13.md
+SPEC_S14_UI.md
 JELLYFIN_NOTES.md
 docs/HISTORY.md
 docs/HELP_AUDIT.md
 docs/SECURITY_REVIEW.md
 docs/jellyfin-openapi.json
 scripts/ctx.sh
+scripts/build_reference_doc.py

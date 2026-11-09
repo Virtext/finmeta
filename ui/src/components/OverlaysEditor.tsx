@@ -4,22 +4,22 @@
 // built-in presets themselves are never mutated here — only read as starting points.
 import { useEffect, useRef, useState } from 'react';
 import { getConfig, putConfig, getLibraries, getItemsLight, getOverlays,
-       installLogoPack, logoPackStatus, previewOverlay, saveOverlay, getHelp,
-       getDefaultFormatRules, getJellyfinLibraries,
-       getPacks, deletePack, scaffoldPack } from '../api';
-import type { JfLibrary, ImagePackInfo } from '../api';
+       previewOverlay, saveOverlay, getHelp,
+       getDefaultFormatRules, getJellyfinLibraries } from '../api';
+import type { JfLibrary } from '../api';
 import type { HelpResp } from '../types';
 import { load as yamlLoad, dump as yamlDump } from 'js-yaml';
 import type { ItemLightView, LibItemsLightResp } from '../types';
+import PacksPanel from './PacksPanel';
 
 const PREVIEW_PAGE_SIZE = 200;   // same page size as LibraryBrowser.tsx's own list
 
-const ELEMENT_ORDER = [
+export const ELEMENT_ORDER = [
   'imdb', 'rt_critic', 'rt_audience', 'metacritic', 'tmdb', 'letterboxd', 'trakt',
   'resolution', 'hdr', 'audio', 'network', 'status', 'trending_rank', 'ribbon',
 ] as const;
 
-const ELEMENT_LABELS: Record<string, string> = {
+export const ELEMENT_LABELS: Record<string, string> = {
   imdb: 'IMDb', rt_critic: 'RT critic', rt_audience: 'RT audience',
   metacritic: 'Metacritic', tmdb: 'TMDb star rating', letterboxd: 'Letterboxd', trakt: 'Trakt',
   resolution: 'Resolution', hdr: 'HDR / Dolby Vision', audio: 'Audio codec / Atmos',
@@ -37,7 +37,7 @@ const ELEMENT_LABELS: Record<string, string> = {
 
 // "status"/"network" only ever do anything for TV libraries (TV status from
 // Sonarr; TMDb's `networks` field doesn't exist for movies).
-const TV_ONLY_KEYS = new Set(['status', 'network']);
+export const TV_ONLY_KEYS = new Set(['status', 'network']);
 // "rating" is a legacy generic TMDb-star key with no checkbox of its own in
 // this tab (kept for back-compat with configs written before the richer
 // per-provider rating badges below existed) -- not part of ELEMENT_ORDER.
@@ -98,7 +98,7 @@ const GRID_ROWS: (string[])[] = [
 ];
 const ALL_POSITIONS = GRID_ROWS.flat();
 
-interface DocElementState {
+export interface DocElementState {
   enabled?: boolean;
   position?: string | null;   // ''/null => follow base anchor
   x_offset?: number; y_offset?: number; size?: number | null;
@@ -176,11 +176,6 @@ export default function OverlaysEditor({ initialLibrary }: Props) {
   // (turn an element on/off) isn't crowded by this fine-tuning layer.
   const [editTab, setEditTab] = useState<'elements' | 'advanced'>('elements');
 
-  // Logo packs (S9e4 task 3): ordered list of sources from global config, loaded on mount.
-  // Only "kometa" is offered in the UI (the operator-run "custom" flat-logos/
-  // option was removed 2026-10-22) -- any stray "custom" left in an old
-  // config is simply dropped from display state here, not an error.
-  const [logoPacks, setLogoPacks] = useState<'kometa'[]>([]);
   // Global config snapshot, kept around just so the "status" element's date
   // style (status_overlay.date_style — not part of the per-profile style
   // doc, same setting the Settings page edits) can be changed right here
@@ -191,12 +186,7 @@ export default function OverlaysEditor({ initialLibrary }: Props) {
   const [dateStyleErr, setDateStyleErr] = useState<string | null>(null);
   useEffect(() => {
     getConfig()
-      .then((d) => {
-        setGlobalConfig(d.parsed);
-        const v = (d.parsed?.overlays?.logo_packs as string[])
-          ?? (typeof d.parsed?.overlays?.logo_pack === 'string' ? [d.parsed.overlays.logo_pack] : []);
-        setLogoPacks((v ?? []).filter((x): x is 'kometa' => x === 'kometa'));
-      })
+      .then((d) => { setGlobalConfig(d.parsed); })
       .catch(()=>{ /* keep default */ });
   }, []);
 
@@ -212,96 +202,14 @@ export default function OverlaysEditor({ initialLibrary }: Props) {
     }
   }
 
-  // S9d4c/2026-10-20: per-profile image packs (category-based matching)
-  // live here, scoped to whichever profile is being edited above. Operator
-  // feedback (2026-10-20): the old separate "Packs" fieldset (per-pack,
-  // per-category checkboxes) was dropped in favour of one Activate/Deactivate
-  // button per installed pack, right inside "Installed packs" -- activating a
-  // pack now turns ALL its categories on (no more granular per-category
-  // override).
-  // 2026-10-31: the Kometa overlay-import feature (download-on-demand +
-  // the never-shipped local-path variant) was dropped entirely -- it never
-  // reliably translated real-world Kometa configs (see docs/HISTORY.md).
-  // Packs now only ever arrive by hand under config/assets/packs/<name>/.
-  const [availPacks, setAvailPacks] = useState<ImagePackInfo[]>([]);
-  const [selPacks, setSelPacks] = useState<string[]>([]);
-  const [packsMsg, setPacksMsg] = useState<string | null>(null);
-  const [packsErr, setPacksErr] = useState<string | null>(null);
-
-  async function refreshPacks(): Promise<void> {
-    try { setAvailPacks((await getPacks()).packs ?? []); } catch { /* keep last good */ }
-  }
-  useEffect(() => { void refreshPacks(); }, []);
-
-  // 2026-11-01: "New pack" scaffold -- the only path to a new pack now that
-  // Kometa overlay-import is gone. Writes pack.yml (format_rule, K9's own
-  // keys) + empty images/<category>/ dirs; no image files. See
-  // docs/BADGE_PACKS.md for what to drop into those directories afterwards.
-  async function scaffoldNewPack(name: string, categories: string[]): Promise<void> {
-    setPacksErr(null); setPacksMsg(null);
-    try {
-      await scaffoldPack(name, categories);
-      await refreshPacks();
-      setPacksMsg(`"${name}" created — drop images into assets/packs/${name}/images/<category>/`);
-      setTimeout(() => setPacksMsg(null), 6000);
-    } catch (e: any) {
-      setPacksErr(e?.message ?? 'create failed');
-    }
-  }
-
-  // 2026-10-20: one Activate/Deactivate button per installed pack, persisted
-  // immediately (no separate "Save" step) -- replaces the old PacksSection's
-  // per-category checkboxes + explicit save button. Activating turns on
-  // every category the pack defines; pack_overrides (the old per-category
-  // disable mechanism) is dropped since there's no UI for it any more.
-  async function toggleRichPack(pn: string, on: boolean): Promise<void> {
-    setPacksErr(null); setPacksMsg(null);
-    const profileName = activeName || savingAs;
-    try {
-      const d = await getConfig();
-      let cfg: any; try { cfg = (yamlLoad(d.yaml) as any) ?? {}; } catch { cfg = {}; }
-      if (!cfg.overlays || typeof cfg.overlays !== 'object') cfg.overlays = {};
-      if (!cfg.overlays.profiles || typeof cfg.overlays.profiles !== 'object') cfg.overlays.profiles = {};
-      const prof = cfg.overlays.profiles[profileName];
-      if (typeof prof !== 'object' || prof === null) {
-        throw new Error(`save the style above first (“Save as “${profileName || 'name'}”) to create this profile`);
-      }
-      const cur: string[] = Array.isArray(prof.packs) ? prof.packs : [];
-      const next = on ? [...cur.filter((x: string) => x !== pn), pn] : cur.filter((x: string) => x !== pn);
-      prof.packs = next;
-      delete prof.pack_overrides;
-      await putConfig(yamlDump(cfg, { noRefs: true, lineWidth: -1 }));
-      setSelPacks(next);
-      setPacksMsg(`“${pn}” ${on ? 'activated' : 'deactivated'} for “${profileName}”`);
-      setTimeout(() => setPacksMsg(null), 3000);
-    } catch (e: any) {
-      setPacksErr(e?.message ?? 'save failed');
-    }
-  }
-
-  // 2026-10-20: uninstall a downloaded/imported pack entirely (files +
-  // every profile reference to it) -- irreversible, so confirm first.
-  async function deleteRichPack(pn: string): Promise<void> {
-    if (!window.confirm(`Delete pack "${pn}"? This removes its files and deactivates it everywhere — this can't be undone.`)) return;
-    setPacksErr(null); setPacksMsg(null);
-    try {
-      await deletePack(pn);
-      await refreshPacks();
-      setSelPacks(selPacks.filter((x) => x !== pn));
-      setPacksMsg(`“${pn}” deleted`);
-      setTimeout(() => setPacksMsg(null), 3000);
-    } catch (e: any) {
-      setPacksErr(e?.message ?? 'delete failed');
-    }
-  }
+  // S14 (2026-11-09): pack management (install/activate/scaffold/delete)
+  // now lives in PacksPanel.tsx, shared with the modern shell's own Packs
+  // page -- see that file's header comment. This component only needs to
+  // pass it which profile name is being edited; PacksPanel loads/seeds its
+  // own pack selection from that.
 
   // S9d2-fix step 3: when a library is selected, load its overlay_profile into
   // the editor; 'global' keeps today's behavior (user_styles).
-  // Populate the installed-packs section's selection from the profile's
-  // stored `packs` list (mirrors ProfilesPanel's old selectProfile()).
-  function loadPacksFromProfile(prof: any) {
-    setSelPacks(Array.isArray(prof?.packs) ? [...prof.packs] : []);
-  }
 
   useEffect(() => {
     setSaveMsg(null); setSaveErr(null);
@@ -309,7 +217,6 @@ export default function OverlaysEditor({ initialLibrary }: Props) {
       getOverlays().then((ov) => {
         setUserStyles((ov.user_styles ?? []).map(u=>({name:u.name, style:u.style})));
       }).catch(()=>{});
-      setSelPacks([]);   // packs attach to a library profile, not a global style
       return;
     }
     const lib = jfLibs.find((l)=>l.name===scope);
@@ -325,7 +232,6 @@ export default function OverlaysEditor({ initialLibrary }: Props) {
         setSourcePreset('');
         setSavingAs(profName);
         setDoc(seedEnabledFromEffective(normalize(deepClone(prof.style)), effective));
-        loadPacksFromProfile(prof);
       } else {
         // no profile yet: start from a copy of the global defaults for creation,
         // seeded with whichever elements the library's own (pre-profile) `overlays`
@@ -338,7 +244,6 @@ export default function OverlaysEditor({ initialLibrary }: Props) {
           setSavingAs(profName);
           setDoc(seedEnabledFromEffective(normalize(base), effective));
         }).catch(()=>{});
-        setSelPacks([]);
       }
     }).catch(()=>{});
   }, [scope, jfLibs]);   // eslint-disable-line react-hooks/exhaustive-deps
@@ -590,19 +495,6 @@ export default function OverlaysEditor({ initialLibrary }: Props) {
     });
   }
 
-  async function changeLogoPacks(v: 'kometa'[]): Promise<void> {
-    try {
-      const d = await getConfig();
-      let docYaml: any;
-      try { docYaml = (yamlLoad(d.yaml) as any) ?? {}; } catch { docYaml = {}; }
-      if (!docYaml.overlays || typeof docYaml.overlays !== 'object') docYaml.overlays = {};
-      delete docYaml.overlays.logo_pack;   // drop legacy single-value key
-      docYaml.overlays.logo_packs = v;
-      await putConfig(yamlDump(docYaml, { noRefs: true, lineWidth: -1 }));
-      setLogoPacks(v);
-    } catch (e:any) { /* leave selection unchanged on failure */ }
-  }
-
   // S9d2-fix step 3: scope selector (Global + all Jellyfin libraries).
   const jfLibsSorted = [...jfLibs].sort((a,b)=>a.name.localeCompare(b.name));
   const scopeSelector = (
@@ -664,15 +556,7 @@ export default function OverlaysEditor({ initialLibrary }: Props) {
           <BaseSettings doc={el} patchBase={patchBase}/>
 
           {scope !== 'global' && (
-            <InstalledPacksSection
-              logoPacks={logoPacks} onToggleLogoPack={(v)=>void changeLogoPacks(v)}
-              availPacks={availPacks} selPacks={selPacks}
-              onToggleRichPack={(pn, on) => void toggleRichPack(pn, on)}
-              onDeleteRichPack={(pn) => void deleteRichPack(pn)}
-              onScaffoldPack={(name, cats) => void scaffoldNewPack(name, cats)}
-              profileName={activeName || savingAs || null}
-              packsMsg={packsMsg} packsErr={packsErr}
-            />
+            <PacksPanel profileName={activeName || savingAs || null} />
           )}
 
           <div className="overlay-subtabs" role="tablist" style={{display:'flex', gap:'4px', margin:'12px 0 8px'}}>
@@ -752,7 +636,13 @@ function PresetList({presets, userStyles, activeName, sourcePreset, onSelectPres
 }
 
 // ---------------------------------------------------------------------------
-function BaseSettings({doc, patchBase}:{doc:OverlayDoc; patchBase:(k:keyof OverlayDoc,v:any)=>void}) {
+// BaseSettings, ElementControls and FormatRulesSection (further below)
+// exported 2026-11-09 for reuse in the modern shell's OverlaysPage.tsx --
+// operator-requested feature parity before Settings' own Overlays tab can
+// be hidden there (same redundancy-removal reasoning as Packs/Profiles/
+// Automation). Reused as-is, not duplicated -- these three components are
+// already correct and already exercised by the classic Overlays tab.
+export function BaseSettings({doc, patchBase}:{doc:OverlayDoc; patchBase:(k:keyof OverlayDoc,v:any)=>void}) {
   return (
     <fieldset className="overlay-fieldset">
       <legend>Base settings</legend>
@@ -773,302 +663,24 @@ function BaseSettings({doc, patchBase}:{doc:OverlayDoc; patchBase:(k:keyof Overl
 }
 
 // ---------------------------------------------------------------------------
-// S9d4c: moved here from the Libraries tab so toggling the Kometa logo pack
-// and assigning richer packs to the profile being edited above happen in one
-// place. 2026-10-20 operator feedback: "Logo packs" (the global Kometa/custom
-// chooser + install button) and the old "Packs" fieldset (per-profile,
-// per-category checkboxes) were three overlapping pack-related controls
-// scattered across the tab. Merged into one: one Activate/Deactivate button
-// per installed source (the Kometa logo pack, plus any richer pack placed by
-// hand under config/assets/packs/) -- no more granular per-category toggles.
-// 2026-10-31: the Kometa overlay-import feature (download-on-demand) was
-// dropped entirely -- see docs/HISTORY.md. Richer packs now only ever arrive
-// by hand; this section no longer offers a download/import path for them.
-function KometaLogoRow({active, onToggle}: {active: boolean; onToggle: (on: boolean) => void}) {
-  const [status, setStatus] = useState<string>('');
-  const [busy, setBusy] = useState(false);
-  const [detail, setDetail] = useState<{installed:boolean;have:number;total:number;complete:boolean}|null>(null);
-
-  async function refresh(): Promise<void> {
-    try { setDetail(await logoPackStatus('kometa')); } catch { /* ignore transient failure */ }
-  }
-  useEffect(() => { void refresh(); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
-
-  async function doInstall() {
-    setBusy(true); setStatus(detail && detail.installed ? 'Updating…' : 'Installing…');
-    try {
-      const r = await installLogoPack('kometa');
-      setStatus(`Done: ${r.downloaded} new, ${r.skipped} already present${r.failed ? `, ${r.failed} failed` : ''}.`);
-      await refresh();
-    } catch (e: any) {
-      setStatus(e?.message ?? 'install failed');
-    } finally { setBusy(false); }
-  }
-
-  return (
-    <div className="pack-row">
-      <label className="pack-name">
-        <strong>Kometa logo pack</strong>
-        <span className="field-hint muted"> — resolution/audio/rating icons, downloaded from the Kometa project</span>
-      </label>
-      <div style={{display:'flex', gap:'10px', alignItems:'center', flexWrap:'wrap', marginTop:'4px'}}>
-        <button type="button" className={`btn ${active ? '' : 'primary'}`} onClick={() => onToggle(!active)}>
-          {active ? 'Deactivate' : 'Activate'}
-        </button>
-        {detail && !detail.installed && (
-          <button type="button" className="btn" onClick={() => void doInstall()} disabled={busy}>Install Kometa logos</button>
-        )}
-        {detail?.installed && (
-          <>
-            <span className="field-msg ok">Installed{detail.complete ? '' : ` (${detail.have}/${detail.total})`}</span>
-            <button type="button" className="btn" onClick={() => void doInstall()} disabled={busy}>Update</button>
-          </>
-        )}
-        {status && <span className="field-msg">{status}</span>}
-      </div>
-    </div>
-  );
-}
-
-// `id` is the literal folder name on disk (assets/packs/<pack>/images/<id>/)
-// -- it must stay visible next to the friendly `label`, not replace it.
-// Real operator mistake (2026-11-01): typed the friendly label itself
-// ("Dynamic range (HDR)") as a folder name, so nothing in it was ever found.
-const SCAFFOLD_CATEGORIES: { id: string; label: string; exampleKey: string }[] = [
-  { id: 'resolution', label: 'Resolution', exampleKey: 'res_4k' },
-  { id: 'dynamic_range', label: 'Dynamic range (HDR)', exampleKey: 'hdr10' },
-  { id: 'audio', label: 'Audio', exampleKey: 'dts' },
-];
-
-// 2026-11-01: the only way to start a new pack now that Kometa overlay-import
-// is gone -- writes pack.yml pre-filled with K9's own format_rule keys (see
-// docs/BADGE_PACKS.md), the operator then drops images into the folders it
-// creates. Own small form, not a modal -- matches this fieldset's existing
-// inline-row style.
-function NewPackForm({ onCreate }: { onCreate: (name: string, categories: string[]) => void }) {
-  const [open, setOpen] = useState(false);
-  const [name, setName] = useState('');
-  const [cats, setCats] = useState<string[]>(SCAFFOLD_CATEGORIES.map((c) => c.id));
-
-  if (!open) {
-    return (
-      <div style={{marginTop:'6px'}}>
-        <button type="button" className="btn btn-ghost" onClick={() => setOpen(true)}>
-          + New pack
-        </button>
-        <p className="field-hint muted" style={{margin:'4px 0 0'}}>
-          Tip: for a resolution/HDR/audio-only pack you can skip this form entirely — create{' '}
-          <code>assets/packs/&lt;name&gt;/images/</code> yourself and drop correctly-named PNGs
-          straight into it, no pack.yml or subfolders needed. See docs/BADGE_PACKS.md.
-        </p>
-      </div>
-    );
-  }
-  const valid = /^[A-Za-z0-9_.-]+$/.test(name.trim());
-  return (
-    <div className="pack-row" style={{border:'1px dashed var(--border)', padding:'10px'}}>
-      <label className="form-label">Pack name
-        <input type="text" value={name} placeholder="my-badges"
-               onChange={(e) => setName(e.target.value)} className="config-input"/>
-      </label>
-      <div style={{display:'flex', gap:'14px', margin:'8px 0', flexWrap:'wrap'}}>
-        {SCAFFOLD_CATEGORIES.map((c) => (
-          <label key={c.id} style={{display:'flex', gap:'4px', alignItems:'center'}}>
-            <input type="checkbox" checked={cats.includes(c.id)}
-                   onChange={(e) => setCats(e.target.checked
-                     ? [...cats, c.id] : cats.filter((x) => x !== c.id))}/>
-            {c.label} <code className="field-hint muted">({c.id})</code>
-          </label>
-        ))}
-      </div>
-      <div style={{display:'flex', gap:'8px', alignItems:'center'}}>
-        <button type="button" className="btn primary" disabled={!valid || cats.length === 0}
-                onClick={() => { onCreate(name.trim(), cats); setOpen(false); setName(''); }}>
-          Create
-        </button>
-        <button type="button" className="btn btn-ghost" onClick={() => setOpen(false)}>Cancel</button>
-      </div>
-      <div className="field-hint muted" style={{marginBottom:0}}>
-        <p style={{margin:'0 0 4px'}}>
-          Creates an empty pack.yml with the right keys pre-filled. Then drop <strong>PNG</strong> files
-          (not SVG — the renderer only reads PNG) into the exact folder named in parentheses above, using
-          the exact key names from docs/BADGE_PACKS.md, e.g.:
-        </p>
-        {cats.length > 0 ? (
-          <ul style={{margin:0, paddingLeft:'18px'}}>
-            {SCAFFOLD_CATEGORIES.filter((c) => cats.includes(c.id)).map((c) => (
-              <li key={c.id}>
-                <code>assets/packs/{name.trim() || '…'}/images/{c.id}/{c.exampleKey}.png</code>
-              </li>
-            ))}
-          </ul>
-        ) : <p style={{margin:0}}>(pick at least one category above to see example paths)</p>}
-      </div>
-    </div>
-  );
-}
-
-function InstalledPacksSection({
-  logoPacks, onToggleLogoPack, availPacks, selPacks, onToggleRichPack, onDeleteRichPack,
-  onScaffoldPack, profileName, packsMsg, packsErr}: {
-  logoPacks: 'kometa'[]; onToggleLogoPack: (v: 'kometa'[]) => void;
-  availPacks: ImagePackInfo[]; selPacks: string[];
-  onToggleRichPack: (pn: string, on: boolean) => void;
-  onDeleteRichPack: (pn: string) => void;
-  onScaffoldPack: (name: string, categories: string[]) => void;
-  profileName: string | null; packsMsg: string | null; packsErr: string | null;
-}) {
-  const toggleKometa = (on: boolean) =>
-    onToggleLogoPack(on ? ['kometa'] : []);
-  return (
-    <fieldset className="overlay-fieldset">
-      <legend>Installed packs</legend>
-      <p className="field-hint muted" style={{marginTop:0}}>
-        Activate a pack to use its images for {profileName ? <>profile “{profileName}”</> : <>this profile (save the style above first)</>}.
-        Missing images always fall back to plain text badges.
-      </p>
-      <KometaLogoRow active={logoPacks.includes('kometa')} onToggle={toggleKometa}/>
-      {availPacks.filter((x) => !x.valid).map((pk) => (
-        <div key={pk.name} className="pack-row">
-          <div className="field-msg err">invalid pack “{pk.name}”: {pk.error}</div>
-          <button type="button" className="btn btn-ghost" onClick={() => onDeleteRichPack(pk.name)} style={{marginTop:'4px'}}>
-            Delete
-          </button>
-        </div>
-      ))}
-      {availPacks.filter((x) => x.valid).map((pk) => {
-        const checked = selPacks.includes(pk.name);
-        return (
-          <div key={pk.name} className="pack-row">
-            <label className="pack-name">
-              <strong>{pk.name}</strong>
-              {pk.description && <span className="field-hint muted"> — {pk.description}</span>}
-            </label>
-            {pk.missing_images.length > 0 && (
-              <div className="pack-missing field-hint" style={{ color: 'var(--update)' }}>
-                missing images: {pk.missing_images.join(', ')}
-              </div>
-            )}
-            {pk.warnings?.length > 0 && (
-              <div className="pack-missing field-hint" style={{ color: 'var(--update)' }}>
-                {pk.warnings.join(' · ')}
-              </div>
-            )}
-            <div style={{display:'flex', gap:'8px', marginTop:'4px', alignItems:'center', flexWrap:'wrap'}}>
-              <button type="button" className={`btn ${checked ? '' : 'primary'}`} disabled={!profileName}
-                      onClick={() => onToggleRichPack(pk.name, !checked)}>
-                {checked ? 'Deactivate' : 'Activate'}
-              </button>
-              <button type="button" className="btn btn-ghost" onClick={() => onDeleteRichPack(pk.name)}>Delete</button>
-            </div>
-          </div>
-        );
-      })}
-      <NewPackForm onCreate={onScaffoldPack}/>
-      <PackNamingHelp/>
-      {packsMsg && <span className="field-msg ok">{packsMsg}</span>}
-      {packsErr && <span className="error">{packsErr}</span>}
-    </fieldset>
-  );
-}
-
-// 2026-11-01: every key format_rule actually matches on, with a plain-
-// language description, grouped the same way images/<category>/ is on
-// disk. The single most-requested piece of info once an operator starts
-// dropping their own PNGs in -- "what do I name this file, exactly."
-const KEY_REFERENCE: { category: string; label: string; rows: { key: string; means: string }[] }[] = [
-  { category: 'resolution', label: 'Resolution', rows: [
-    { key: 'res_4k', means: '4K / UHD (source width ≥ 3200px)' },
-    { key: 'res_1080p', means: '1080p / Full HD' },
-    { key: 'res_720p', means: '720p / HD' },
-    { key: 'res_576p', means: '576p (PAL SD)' },
-    { key: 'res_480p', means: '480p (NTSC SD)' },
-  ]},
-  { category: 'dynamic_range', label: 'Dynamic range (HDR)', rows: [
-    { key: 'dv_hdr_plus', means: 'Dolby Vision + HDR10+' },
-    { key: 'dv_hdr', means: 'Dolby Vision + HDR10' },
-    { key: 'dv', means: 'Dolby Vision (no HDR10 layer)' },
-    { key: 'hdr10plus', means: 'HDR10+' },
-    { key: 'hdr10', means: 'HDR10' },
-    { key: 'hlg', means: 'HLG (Hybrid Log-Gamma)' },
-  ]},
-  { category: 'audio', label: 'Audio', rows: [
-    { key: 'truehd_atmos', means: 'Dolby TrueHD with Atmos' },
-    { key: 'ddplus_atmos', means: 'Dolby Digital+ (E-AC3) with Atmos' },
-    { key: 'dtsx', means: 'DTS:X' },
-    { key: 'dtshd_ma', means: 'DTS-HD Master Audio' },
-    { key: 'truehd', means: 'Dolby TrueHD' },
-    { key: 'ddplus', means: 'Dolby Digital+ (E-AC3)' },
-    { key: 'dts', means: 'DTS (plain, no X/HD MA)' },
-    { key: 'dd', means: 'Dolby Digital (AC3)' },
-    { key: 'aac', means: 'AAC' },
-  ]},
-];
-
-// Collapsible <details> (native disclosure widget, no new component library
-// needed) living right in Installed Packs -- operator-requested: a
-// reference for exactly what to name every single image, not just the
-// mechanism, surfaced in the app itself rather than only in
-// docs/BADGE_PACKS.md (which still has the advanced matchers/full schema).
-function PackNamingHelp() {
-  return (
-    <details className="pack-row" style={{marginTop:'10px'}}>
-      <summary style={{cursor:'pointer', fontWeight:600}}>
-        How do I add my own badge images?
-      </summary>
-      <div style={{marginTop:'10px'}}>
-        <p className="field-hint muted" style={{marginTop:0}}>
-          Create <code>assets/packs/&lt;your-pack-name&gt;/images/</code> and drop PNG files
-          straight into it — one file per key below, named exactly as shown (no subfolders, no
-          pack.yml). Finmeta reads each filename and works out on its own which badge it is;
-          every key is unique across all three categories, so the name alone is enough. Add only
-          the keys you want to override — anything you skip just has no badge for that case.
-        </p>
-        <p className="field-hint muted">
-          <strong>Format:</strong> PNG with a transparent background, tightly cropped to the
-          visible artwork (not a full poster-sized canvas) — roughly 150–250px tall is a good
-          native size. Finmeta always scales to fit, so exact width doesn't matter.
-        </p>
-        {KEY_REFERENCE.map((group) => (
-          <div key={group.category} style={{marginTop:'10px'}}>
-            <div style={{fontWeight:600, fontSize:'0.9em'}}>
-              {group.label} <code className="field-hint muted">({group.category})</code>
-            </div>
-            <div style={{overflowX:'auto'}}>
-              <table style={{width:'100%', borderCollapse:'collapse', fontSize:'0.88em', marginTop:'4px'}}>
-                <tbody>
-                  {group.rows.map((r) => (
-                    <tr key={r.key} style={{borderTop:'1px solid var(--border)'}}>
-                      <td style={{padding:'3px 8px 3px 0', whiteSpace:'nowrap'}}>
-                        <code>{r.key}.png</code>
-                      </td>
-                      <td style={{padding:'3px 0', color:'var(--text-muted, inherit)'}}>{r.means}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        ))}
-        <p className="field-hint muted" style={{marginTop:'10px', marginBottom:0}}>
-          Want badges keyed off the video <em>filename</em> instead (scene-release tags like
-          "2160p", "DTS-X"), your own categories, or TMDb-rating tiers? Those need a hand-written
-          <code> pack.yml</code> — see <code>docs/BADGE_PACKS.md</code> in the repo for the full
-          schema and every matcher type.
-        </p>
-      </div>
-    </details>
-  );
-}
-
+// KometaLogoRow, NewPackForm, InstalledPacksSection, PackNamingHelp and their
+// supporting tables moved to PacksPanel.tsx 2026-11-09 (S14) -- see that
+// file's header comment for why.
 // ---------------------------------------------------------------------------
 
-function ElementControls({doc, updateElement, setRibbonText, updateStatusColor, collectionType,
-                          dateStyle, onDateStyleChange, dateStyleErr}:{
+export function ElementControls({doc, updateElement, setRibbonText, updateStatusColor, collectionType,
+                          dateStyle, onDateStyleChange, dateStyleErr, hidePositionControls}:{
   doc:OverlayDoc; updateElement:(k:string,p:any)=>void; setRibbonText:(v:string|null)=>void;
   updateStatusColor:(statusKey:string, color:string|null)=>void;
   collectionType?: string | null;
   dateStyle: string; onDateStyleChange: (v: string) => void; dateStyleErr: string | null;
+  /** The modern Overlay Studio page (OverlaysPage.tsx) has a live draggable
+   * canvas that already covers position (NineGrid) and size -- passing this
+   * true there hides those three controls so there's one obvious place to
+   * set them, not two that can silently disagree. Classic callers never
+   * pass it (undefined = false), so the Settings ▸ Overlays tab is
+   * unaffected -- it has no canvas, so these remain its only way in. */
+  hidePositionControls?: boolean;
 }) {
   const [openKey, setOpenKey] = useState<string|''>('imdb');
   // Hide elements that can never do anything for this library's type (e.g.
@@ -1097,12 +709,16 @@ function ElementControls({doc, updateElement, setRibbonText, updateStatusColor, 
             </span>
             {isOpen && (
               <div className="element-controls-grid" onClick={(ev)=>ev.stopPropagation()}>
-                <NineGrid current={e.position || null} basePosition={doc.base_position} onSelect={(pos)=>updateElement(key,{position:pos})}/>
+                {!hidePositionControls && (
+                  <>
+                    <NineGrid current={e.position || null} basePosition={doc.base_position} onSelect={(pos)=>updateElement(key,{position:pos})}/>
 
-                <NumField label="X offset" value={e.x_offset??0} min={-500} max={500} onCommit={(v)=>updateElement(key,{x_offset:v})}/>
-                <NumField label="Y offset" value={e.y_offset??0} min={-500} max={500} onCommit={(v)=>updateElement(key,{y_offset:v})}/>
-                <SizeInput value={e.size ?? null} placeholder={`inherit (${doc.font_size}px)`}
-                           onCommit={(v)=>updateElement(key,{size:v===null? null : Math.max(8,Math.min(240,v))})}/>
+                    <NumField label="X offset" value={e.x_offset??0} min={-500} max={500} onCommit={(v)=>updateElement(key,{x_offset:v})}/>
+                    <NumField label="Y offset" value={e.y_offset??0} min={-500} max={500} onCommit={(v)=>updateElement(key,{y_offset:v})}/>
+                    <SizeInput value={e.size ?? null} placeholder={`inherit (${doc.font_size}px)`}
+                               onCommit={(v)=>updateElement(key,{size:v===null? null : Math.max(8,Math.min(240,v))})}/>
+                  </>
+                )}
                 <ColorField label="Text color" value={e.color??''} allowAlpha onChange={(v)=>updateElement(key,{color:v||undefined})}/>
                 <ColorField label="Backdrop" value={e.back_color??''} allowAlpha onChange={(v)=>updateElement(key,{back_color:v||undefined})}/>
                 <NullableNumField label="Radius (px)" value={e.radius ?? ''} min={0} max={100}
@@ -1190,7 +806,7 @@ const FORMAT_CATEGORIES = [
   { id: 'audio', title: 'Audio' },
 ] as const;
 
-function FormatRulesSection({ helpResp, selectedIds, previews }: {
+export function FormatRulesSection({ helpResp, selectedIds, previews }: {
   helpResp: HelpResp | null;
   selectedIds: string[];
   previews: { item_id: string; format_rule_matches?: Record<string, { key: string; label: string } | null> }[];

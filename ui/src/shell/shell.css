@@ -1,0 +1,108 @@
+/* ============================================================
+   Finmeta modern shell layout — SPEC_S14_UI.md §3, phase P2.
+   Same scoping discipline as tokens.css/primitives.css: everything
+   here lives inside the .fm-modern, data-ui="modern" subtree that
+   ModernApp.tsx renders, so it can never touch the classic shell.
+   ============================================================ */
+
+.fm-shell {
+  display: grid;
+  grid-template-columns: 232px 1fr;
+  background: var(--canvas);
+  color: var(--text);
+  font-family: var(--ui-font);
+  font-size: var(--text-base);
+  height: 100vh;
+}
+
+.fm-sidebar {
+  background: var(--surface-1);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 12px 10px;
+  gap: 2px;
+  overflow-y: auto;
+}
+
+.fm-sidebar__brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 8px 16px;
+}
+
+.fm-sidebar__mark {
+  width: 24px; height: 24px;
+  border-radius: var(--r-md);
+  background: linear-gradient(145deg, var(--accent), #0b7fae);
+  display: grid; place-items: center;
+  color: var(--accent-fg);
+  font-weight: 700;
+  font-size: 13px;
+  flex: none;
+}
+
+.fm-sidebar__name { font-weight: 600; letter-spacing: -0.01em; font-size: 15px; }
+
+.fm-navitem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 9px;
+  border-radius: var(--r-md);
+  color: var(--text-muted);
+  font-size: 13.5px;
+  position: relative;
+  background: none;
+  border: none;
+  text-align: left;
+  width: 100%;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.fm-navitem:hover { background: var(--surface-3); color: var(--text); }
+.fm-navitem--active { background: var(--surface-3); color: var(--text); font-weight: 500; }
+.fm-navitem--active .fm-navitem__icon { color: var(--accent); opacity: 1; }
+.fm-navitem__icon { opacity: 0.75; flex: none; }
+
+.fm-navitem--active::before {
+  content: "";
+  position: absolute;
+  left: -10px; top: 7px; bottom: 7px;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+  background: var(--accent);
+}
+
+.fm-main { display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+
+.fm-topbar {
+  height: 52px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-1);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 18px;
+  flex: none;
+}
+
+.fm-topbar__crumb { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--text-faint); }
+.fm-topbar__sep { opacity: 0.5; }
+.fm-topbar__here { color: var(--text); font-weight: 500; }
+.fm-topbar__spacer { flex: 1; }
+
+.fm-content { flex: 1; overflow-y: auto; padding: 22px 24px 28px; }
+
+.fm-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+@media (max-width: 900px) {
+  .fm-shell { grid-template-columns: 1fr; }
+  .fm-sidebar { display: none; }
+}

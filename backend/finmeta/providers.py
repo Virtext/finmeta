@@ -406,6 +406,34 @@ _TESTS: Dict[str, Callable] = {
     "imdb_datasets": _test_imdb_datasets,
 }
 
+# ---------------------------------------------------------------------------
+# Cached status, for the modern UI's Overview "Services" card
+# (SPEC_S14_UI.md P2 deferred this exact card pending this design: every
+# .test() above fires a real outbound request, so calling all of them on
+# every Overview page load would ping TMDb/Fanart/Jellyfin/etc. on every
+# visit. A module-level cache keyed by provider name, same lifetime as the
+# process -- AppContext itself is a long-lived singleton, not per-request,
+# so this is no less durable than anything already on it.
+# ---------------------------------------------------------------------------
+
+_STATUS_TTL_SECONDS = 300.0
+_status_cache: Dict[str, "tuple[float, Dict[str, Any]]"] = {}
+
+
+def cached_test(ctx, name: str) -> Dict[str, Any]:
+    """The named provider's last test() result if under 5 minutes old,
+    else a fresh one (which is then cached). Never called for a disabled
+    provider -- callers check ``enabled`` first, same as the UI does."""
+    now = time.time()
+    hit = _status_cache.get(name)
+    if hit is not None and now - hit[0] < _STATUS_TTL_SECONDS:
+        return hit[1]
+    test_fn = _TESTS.get(name)
+    result = test_fn(ctx) if test_fn else {"ok": False, "latency_ms": None,
+                                           "version": None, "error": "no test available"}
+    _status_cache[name] = (now, result)
+    return result
+
 
 def build_providers(ctx) -> List[Provider]:
     """Build all registered providers with their enabled state and test fn."""

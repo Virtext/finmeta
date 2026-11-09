@@ -1,9 +1,11 @@
 """Core routes: health, libraries, items (with current plan diff), item plan."""
 from __future__ import annotations
 
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
+from pydantic import BaseModel
 
 from finmeta import __version__
 from finmeta.config.models import Config
@@ -13,10 +15,17 @@ from finmeta.engine.plan_builder import _profile_overlay_names
 from finmeta.jellyfin_client.client import JellyfinError
 
 from finmeta.api.deps import get_ctx
+from finmeta.api.run_service import submit_run
 from finmeta.api.state import AppContext
 from finmeta.config.secretspec import valid_api_key_ref
 
 router = APIRouter(prefix="/api", tags=["core"])
+
+# SPEC_S14_UI.md P3 follow-up: Library page bulk selection. Same cap
+# routes_scans.py's fix_findings uses for the same reason -- an unbounded
+# selection turning into an unbounded number of run submissions/queue
+# entries in one request.
+MAX_BULK_ITEMS = 50
 
 
 @router.get("/format-rules/defaults")
@@ -307,6 +316,93 @@ def item_plan(item_id: str, library: Optional[str] = None,
         "diff": counts, "status": status, "skipped": skipped,
         "plan": item.model_dump(),
     }
+
+
+# Jellyfin's own ImageType name for each artwork kind (same mapping
+# scanner.py's _IMAGE_TAG_KEY uses for the tag Jellyfin reports back,
+# kept here rather than imported to avoid a scanner->core dependency for
+# one small dict).
+_IMAGE_TYPE = {"poster": "Primary", "backdrop": "Backdrop",
+              "logo": "Logo", "landscape": "Thumb"}
+
+
+@router.get("/items/{item_id}/image")
+def item_image(item_id: str, kind: str = Query(default="poster"),
+               ctx: AppContext = Depends(get_ctx)) -> Response:
+    """One of an item's OWN current Jellyfin images, proxied through Finmeta.
+
+    SPEC_S14_UI.md phase P3 (decision D8): the modern UI's Library poster
+    grid needs an image per item far too cheaply for the TMDb-matching
+    candidates path (~7s/item cold) to be an option -- this is one plain
+    HTTP GET to Jellyfin, so the browser never sees the Jellyfin URL or API
+    key. 404 (no such image on this item) is a normal, expected outcome for
+    a library with incomplete artwork, not a server error.
+    """
+    image_type = _IMAGE_TYPE.get(kind)
+    if image_type is None:
+        raise HTTPException(status_code=400, detail=f"unknown image kind {kind!r}")
+    jf = ctx.make_jellyfin()
+    try:
+        result = jf.get_image_bytes(item_id, image_type)
+    except JellyfinError as exc:
+        raise HTTPException(status_code=502, detail=f"jellyfin error: {exc}")
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"no {kind} image for {item_id}")
+    data, content_type = result
+    # Jellyfin's own image bytes for a given item+kind don't change without
+    # the item itself changing -- safe for the browser to cache instead of
+    # re-fetching every time a poster grid re-renders (same reasoning as
+    # the candidates proxy's Cache-Control in routes_candidates.py).
+    return Response(content=data, media_type=content_type,
+                    headers={"Cache-Control": "public, max-age=3600"})
+
+
+class BulkRunRequest(BaseModel):
+    action: str  # "plan" | "apply"
+    item_ids: List[str]
+    library: Optional[str] = None
+
+
+@router.post("/items/bulk-run", status_code=202)
+def bulk_run(body: BulkRunRequest, ctx: AppContext = Depends(get_ctx)) -> dict:
+    """Plan or apply several items from one selection (Library page bulk
+    mode, SPEC_S14_UI.md S13d). One POST /api/runs per item would race every
+    item after the first into a 409 -- the single run slot only ever holds
+    one run. For `action="apply"` this reuses the EXACT mechanism
+    routes_scans.py's fix_findings already uses for the same problem: submit
+    each item, and if the slot is busy, `queue_webhook_item` -- the same
+    FIFO the webhook drains, one run at a time, in order. `action="plan"`
+    does NOT use that queue: the drain in run_service._worker always
+    re-submits a queued item as "apply", so queuing a plan would silently
+    turn it into an apply once the slot frees -- wrong action, not a cosmetic
+    detail. A busy plan is reported back as `queued: false` so the UI can
+    say "try again shortly" instead of lying about what will happen.
+    """
+    if body.action not in ("plan", "apply"):
+        raise HTTPException(status_code=422, detail="action must be 'plan' or 'apply'")
+    if not body.item_ids:
+        raise HTTPException(status_code=422, detail="item_ids must not be empty")
+    if len(body.item_ids) > MAX_BULK_ITEMS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"too many items in one request ({len(body.item_ids)} > "
+                   f"{MAX_BULK_ITEMS}); narrow the selection and run in batches")
+    if body.action == "apply" and ctx.config.dry_run:
+        raise HTTPException(
+            status_code=409,
+            detail="dry_run is true -- set it to false in config before applying")
+
+    results = []
+    for item_id in body.item_ids:
+        run_id, err = submit_run(ctx, body.action, library=body.library, item_id=item_id)
+        if run_id:
+            results.append({"item_id": item_id, "run_id": run_id, "queued": False})
+        elif body.action == "apply":
+            ctx.queue_webhook_item(item_id)
+            results.append({"item_id": item_id, "run_id": None, "queued": True})
+        else:
+            results.append({"item_id": item_id, "run_id": None, "queued": False, "error": err})
+    return {"results": results}
 
 
 __all__ = ["router"]

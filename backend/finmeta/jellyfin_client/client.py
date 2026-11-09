@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence
+from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Tuple
 
 import httpx
 
@@ -17,7 +17,7 @@ from .types import AuthResult, Item, Library, MediaStream, SystemInfo, Task
 
 _AUTH_HEADER = (
     'MediaBrowser Client="Finmeta", Device="dev", '
-    'DeviceId="finmeta-dev", Version="1.0.0"'
+    'DeviceId="finmeta-dev", Version="2.0.0"'
 )
 DEFAULT_ITEM_FIELDS = "Path,ProviderIds,Overview"
 
@@ -376,6 +376,28 @@ class JellyfinClient:
         d = self._request("GET", f"/Items/{item_id}",
                           params=self._params(userId=self.user_id))
         return Item.from_dict(d or {})
+
+    def get_image_bytes(self, item_id: str, image_type: str, *,
+                        index: int = 0) -> Optional[Tuple[bytes, str]]:
+        """Raw bytes of one of an item's OWN current Jellyfin images.
+
+        Deliberately separate from the candidates/resolution machinery
+        (``engine/resolution.py``): that path does TMDb matching + provider
+        collection per item (~7s/item cold, see routes_core.py's docstring
+        on ``/items/{id}/plan``) -- far too slow for a poster grid of
+        hundreds of items. This is one plain HTTP GET against Jellyfin's
+        own image endpoint, used by the modern UI's Library grid
+        (SPEC_S14_UI.md phase P3, decision D8) to show what Jellyfin is
+        ACTUALLY serving today. Returns ``None`` on a 404 (no such image)
+        rather than raising -- a library grid expects many items to be
+        missing one kind or another; that is data, not an error.
+        """
+        path = f"{self.base_path}/Items/{item_id}/Images/{image_type}/{index}"
+        resp = self._client.get(path, headers=self._headers())
+        if resp.status_code == 404:
+            return None
+        self._raise_for(resp)
+        return resp.content, resp.headers.get("Content-Type", "application/octet-stream")
 
     def get_items_by_type(self, item_type: str, *, parent_id: Optional[str] = None,
                           recursive: bool = True) -> List[Item]:

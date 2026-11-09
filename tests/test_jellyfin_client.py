@@ -611,3 +611,38 @@ def test_item_image_tags_missing_is_empty_dict():
         it = Item.from_dict({"Id": "1", "Name": "X", "Type": "Movie", **payload})
         assert it.image_tags == {}
         assert it.backdrop_image_tags == []
+
+
+# ---------------------------------------------------------------------------
+# get_image_bytes (SPEC_S14_UI.md P3, decision D8 -- the modern UI's poster
+# grid needs a cheap per-item image fetch with no TMDb matching)
+# ---------------------------------------------------------------------------
+
+class TestGetImageBytes:
+    @respx.mock
+    def test_returns_bytes_and_content_type(self):
+        respx.get(f"{BASE}/Items/abc/Images/Primary/0").mock(
+            return_value=httpx.Response(200, content=b"\xff\xd8fake-jpeg",
+                                        headers={"Content-Type": "image/jpeg"})
+        )
+        with JellyfinClient(BASE, token="tok", user_id="uid") as c:
+            result = c.get_image_bytes("abc", "Primary")
+        assert result == (b"\xff\xd8fake-jpeg", "image/jpeg")
+
+    @respx.mock
+    def test_404_returns_none_not_an_error(self):
+        """A missing image is normal library state, not a failure."""
+        respx.get(f"{BASE}/Items/abc/Images/Logo/0").mock(
+            return_value=httpx.Response(404)
+        )
+        with JellyfinClient(BASE, token="tok", user_id="uid") as c:
+            assert c.get_image_bytes("abc", "Logo") is None
+
+    @respx.mock
+    def test_server_error_raises(self):
+        respx.get(f"{BASE}/Items/abc/Images/Primary/0").mock(
+            return_value=httpx.Response(500, text="boom")
+        )
+        with JellyfinClient(BASE, token="tok", user_id="uid") as c:
+            with pytest.raises(JellyfinError):
+                c.get_image_bytes("abc", "Primary")

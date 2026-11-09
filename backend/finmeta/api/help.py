@@ -60,13 +60,57 @@ def iter_config_fields(model_cls: type = Config, prefix: str = "",
                 yield from iter_config_fields(bm, path, _visited)
 
 
-def config_help(model_cls: type = Config) -> Dict[str, Dict[str, str]]:
-    """Build ``{field_path: {"short": ..., "long": ...}}`` from the Pydantic
-    model annotations (the single source of truth for config-field help)."""
-    out: Dict[str, Dict[str, str]] = {}
+def _json_safe(val: Any) -> Any:
+    """Coerce a Pydantic field default into something ``json.dumps`` accepts.
+    Scalars/lists/dicts pass through; nested models are dumped; anything else
+    (an Enum, say) falls back to its ``.value`` or a plain ``str()``."""
+    if isinstance(val, BaseModel):
+        return val.model_dump(mode="json")
+    if isinstance(val, (list, tuple)):
+        return [_json_safe(v) for v in val]
+    if isinstance(val, dict):
+        return {k: _json_safe(v) for k, v in val.items()}
+    if val is None or isinstance(val, (str, int, float, bool)):
+        return val
+    return getattr(val, "value", str(val))
+
+
+def _field_default(info: FieldInfo) -> Tuple[bool, Any]:
+    """``(has_default, default_value)`` for one field -- SPEC_S13.md S13b item
+    3 ("reset to default ... from the Pydantic defaults, never a hand-written
+    list"). A required field (``server.url`` etc.) has nothing to reset to."""
+    if info.is_required():
+        return False, None
+    try:
+        return True, _json_safe(info.get_default(call_default_factory=True))
+    except Exception:
+        return False, None
+
+
+def config_help(model_cls: type = Config) -> Dict[str, Dict[str, Any]]:
+    """Build ``{field_path: {"short": ..., "long": ..., "has_default": ...,
+    "default": ..., "tier": ...}}`` from the Pydantic model annotations (the
+    single source of truth for config-field help, defaults AND tiering).
+
+    ``tier`` is SPEC_S13.md S13b item 6 (Basic/Advanced/Expert): one of
+    "basic"/"advanced"/"expert", hand-tagged per field via
+    ``json_schema_extra={"tier": ...}`` -- there is no way to infer this from
+    a type annotation, so unlike help/default it is NOT automatically
+    computed. A field with no tag omits the key entirely (never a bare
+    ``None``) so the frontend's "no tier recorded yet" case is a plain
+    missing key, not a value it has to special-case."""
+    out: Dict[str, Dict[str, Any]] = {}
     for path, info in iter_config_fields(model_cls):
         extra = info.json_schema_extra or {}
-        out[path] = {"short": info.description or "", "long": extra.get("help", "")}
+        has_default, default_val = _field_default(info)
+        entry: Dict[str, Any] = {
+            "short": info.description or "", "long": extra.get("help", ""),
+            "has_default": has_default, "default": default_val,
+        }
+        tier = extra.get("tier")
+        if tier:
+            entry["tier"] = tier
+        out[path] = entry
     return out
 
 

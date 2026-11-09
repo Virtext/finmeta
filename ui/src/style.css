@@ -346,6 +346,41 @@ button { font: inherit; cursor: pointer; }
 .settings-back { font-size: 0.85rem; }
 .settings-actions { display: flex; gap: 8px; }
 
+/* ---- cross-category search (SPEC_S13.md S13b item 1) ---- */
+.settings-search {
+  position: relative; padding: 10px 18px; background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 12px;
+}
+.settings-search .config-input { flex: 1; width: auto; }
+
+/* ---- Basic/Advanced/Expert level (SPEC_S13.md S13b item 6) ---- */
+.settings-level { display: flex; gap: 2px; background: var(--bg-3); border-radius: 8px; padding: 2px; }
+.settings-level-btn {
+  padding: 5px 12px; border-radius: 6px; background: transparent;
+  color: var(--fg-muted); border: none; font-size: 0.78rem; cursor: pointer;
+}
+.settings-level-btn:hover { color: var(--fg); }
+.settings-level-btn.active { background: var(--bg); color: var(--fg); }
+.settings-search-results {
+  position: absolute; left: 18px; top: 100%; width: 480px; max-width: calc(100% - 36px);
+  max-height: 360px; overflow-y: auto; z-index: 50;
+  background: var(--bg-3); border: 1px solid var(--border); border-radius: 0 0 8px 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+}
+.settings-search-empty { padding: 10px 14px; }
+.settings-search-result {
+  display: flex; align-items: baseline; gap: 10px; width: 100%;
+  text-align: left; padding: 8px 14px; background: transparent;
+  border: none; border-bottom: 1px solid var(--border); cursor: pointer;
+  font-family: inherit; color: var(--fg);
+}
+.settings-search-result:last-child { border-bottom: none; }
+.settings-search-result:hover { background: var(--bg); }
+.settings-search-result-key { font-size: 0.8rem; font-weight: 600; white-space: nowrap; }
+.settings-search-result-short { font-size: 0.8rem; color: var(--fg-muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-search-result-tab { font-size: 0.72rem; color: var(--accent-2); white-space: nowrap; }
+
 .settings-tabs {
   display: flex; gap: 4px; padding: 10px 18px 0;
   background: var(--bg-2); border-bottom: 1px solid var(--border);
@@ -412,6 +447,13 @@ button { font: inherit; cursor: pointer; }
   margin-left: 4px;
 }
 .help-icon:hover { color: var(--accent-2); }
+
+/* ---- reset-to-default (SPEC_S13.md S13b item 3) ---- */
+.btn-reset {
+  padding: 0 4px; margin: 0; line-height: 1; font-size: 0.85rem;
+  color: var(--fg-muted); border: none;
+}
+.btn-reset:hover { color: var(--accent-2); }
 .help-pop {
   display: block; position: absolute; left: 0; top: 110%;
   width: 320px; padding: 10px 12px;
@@ -452,6 +494,24 @@ button { font: inherit; cursor: pointer; }
 }
 .yaml-editor:focus { outline: none; border-color: var(--accent); }
 .yaml-actions { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
+
+/* ---- save-time diff review (SPEC_S13.md S13b item 4) ---- */
+.config-diff-review {
+  margin-top: 16px; padding: 14px 16px; background: var(--bg-2);
+  border: 1px solid var(--border); border-radius: 8px;
+}
+.config-diff-review h4 { margin: 0 0 10px; font-size: 0.85rem; color: var(--fg); }
+.config-diff-list {
+  max-height: 320px; overflow-y: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem; line-height: 1.6;
+}
+.config-diff-row { display: flex; gap: 10px; padding: 3px 0; border-bottom: 1px solid var(--border); }
+.config-diff-row:last-child { border-bottom: none; }
+.config-diff-path { color: var(--fg-muted); white-space: nowrap; }
+.config-diff-val { color: var(--fg); overflow-wrap: anywhere; }
+.config-diff-add .config-diff-val { color: var(--create); }
+.config-diff-remove .config-diff-val { color: var(--error); }
+.config-diff-update .config-diff-val { color: var(--update); }
 
 /* ---- warning banner ---- */
 .warn-banner {
@@ -562,13 +622,66 @@ button { font: inherit; cursor: pointer; }
   border:1px solid #8a7028;
 }
 /* Match the Rating-sources-tab inputs (.login-input) for text/border/background/
-   placeholder so overlay editor fields don't look washed out by default UA styles. */
-.overlays-tab input:not([type="checkbox"]):not([type="range"]), .overlays-tab select {
+   placeholder so overlay editor fields don't look washed out by default UA styles.
+   .overlay-studio-modern (OverlaysPage.tsx's wrapper around the SAME reused
+   BaseSettings/ElementControls/FormatRulesSection components) gets this base
+   rule too -- without it those inputs rendered with zero custom styling at
+   all (unlike .overlays-tab, nothing else was giving them one). */
+.overlays-tab input:not([type="checkbox"]):not([type="range"]), .overlays-tab select,
+.overlay-studio-modern input:not([type="checkbox"]):not([type="range"]), .overlay-studio-modern select {
   background: var(--bg-3); border: 1px solid var(--border); border-radius: 8px;
   color: var(--fg); font-size: 0.9rem; padding: 4px 8px;
 }
-.overlays-tab input::placeholder, .overlays-tab textarea::placeholder { color: var(--fg-muted); }
-.overlays-tab input:focus, .overlays-tab select:focus { outline: none; border-color: var(--accent); }
+.overlays-tab input::placeholder, .overlays-tab textarea::placeholder,
+.overlay-studio-modern input::placeholder, .overlay-studio-modern textarea::placeholder { color: var(--fg-muted); }
+.overlays-tab input:focus, .overlays-tab select:focus,
+.overlay-studio-modern input:focus, .overlay-studio-modern select:focus { outline: none; border-color: var(--accent); }
+
+/* ---- Overlay Studio: modern shape pass (2026-11-09, operator-requested)
+   for the reused classic widgets (BaseSettings/ElementControls/
+   FormatRulesSection) -- colors already inherit via tokens.css's alias
+   layer, this updates radius/spacing/the fieldset-as-card treatment so the
+   SHAPE matches the rest of the modern shell too. Scoped to
+   .overlay-studio-modern so the classic Settings editor and every other
+   shared panel elsewhere in the modern shell (ProfilesPanel, SchedulesPanel,
+   etc.) are untouched. */
+[data-ui="modern"] .overlay-studio-modern .overlay-fieldset {
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--r-lg); padding: var(--sp-6);
+}
+[data-ui="modern"] .overlay-studio-modern .overlay-fieldset legend {
+  padding: 0; font-size: var(--text-sm); font-weight: 600; color: var(--text);
+  margin-bottom: var(--sp-4);
+}
+[data-ui="modern"] .overlay-studio-modern .form-label {
+  font-size: var(--text-xs); color: var(--text-muted); gap: var(--sp-2);
+}
+[data-ui="modern"] .overlay-studio-modern input:not([type="checkbox"]):not([type="range"]),
+[data-ui="modern"] .overlay-studio-modern select {
+  background: var(--surface-1); border: 1px solid var(--border);
+  border-radius: var(--r-md); color: var(--text); font-size: var(--text-sm);
+  padding: 6px 10px;
+}
+[data-ui="modern"] .overlay-studio-modern input:focus,
+[data-ui="modern"] .overlay-studio-modern select:focus {
+  border-color: var(--accent); outline: 2px solid var(--accent-weak); outline-offset: 0;
+}
+[data-ui="modern"] .overlay-studio-modern .element-row {
+  border-bottom: 1px solid var(--border-subtle); border-radius: var(--r-sm);
+  padding: var(--sp-3) var(--sp-2);
+}
+[data-ui="modern"] .overlay-studio-modern .element-row:hover { background: var(--surface-3); }
+[data-ui="modern"] .overlay-studio-modern .nine-cell {
+  border-radius: var(--r-sm); background: var(--surface-3); border-color: var(--border);
+}
+[data-ui="modern"] .overlay-studio-modern .nine-cell.active { background: var(--accent); border-color: transparent; }
+[data-ui="modern"] .overlay-studio-modern .format-rules-table th,
+[data-ui="modern"] .overlay-studio-modern .format-rules-table td {
+  border-color: var(--border-subtle);
+}
+[data-ui="modern"] .overlay-studio-modern .format-rules-table tr.matched td {
+  background: var(--accent-weak);
+}
 
 /* Format rules section (K9) in the overlay editor */
 .format-rules-section .format-rules-cat-head { display:flex; gap:8px; align-items:baseline; margin-bottom:4px; }

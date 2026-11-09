@@ -123,6 +123,25 @@ class TestBuildTrendingData:
         assert ranks == {10: 1}
 
     @patch("finmeta.sources.mdblist_lists.fetch_list_items")
+    def test_empty_url_entry_is_skipped_not_fetched(self, mock_fetch):
+        # STATE.md deferred bug (surfaced 2026-11-05): a blank `url` used to
+        # reach fetch_list_items("") and raise, logging a warning every run.
+        # Harmless (continue) but noisy, and now fixed with a cheap guard --
+        # this list should never even be attempted.
+        mock_fetch.return_value = [
+            MdblistListItem(rank=1, title="A", imdb_id=None, tmdb_id=10, media_type="movie"),
+        ]
+        cfg = _trending_cfg([
+            TrendingListConfig(url="", collection_name="Blank", rank_overlay=True),
+            TrendingListConfig(url="   ", collection_name="Blank2", rank_overlay=True),
+            TrendingListConfig(url=LIST_URL, collection_name="Real", rank_overlay=True),
+        ])
+        ranks, fetched = build_trending_data(cfg, _FakeSecrets({"mdblist_key": "k"}))
+        assert ranks == {10: 1}
+        assert len(fetched) == 1
+        assert mock_fetch.call_count == 1
+
+    @patch("finmeta.sources.mdblist_lists.fetch_list_items")
     def test_one_list_failing_does_not_break_the_others(self, mock_fetch):
         mock_fetch.side_effect = [
             RuntimeError("timeout"),

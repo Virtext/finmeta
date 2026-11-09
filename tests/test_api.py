@@ -135,7 +135,7 @@ def test_health(client):
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "ok"
-    assert body["version"] == "1.0.0"
+    assert body["version"] == "2.0.0"
     assert body["dry_run"] is True
     assert body["active_run"] is None
     assert body["active_run_scope"] is None
@@ -210,6 +210,106 @@ def test_item_plan_not_found(client):
 
 
 # ---------------------------------------------------------------------------
+# item image proxy (SPEC_S14_UI.md P3, decision D8 -- the modern UI's
+# poster grid needs a cheap per-item image, no TMDb matching)
+# ---------------------------------------------------------------------------
+
+def test_item_image_returns_bytes(client, context):
+    from unittest.mock import MagicMock
+    mock_jf = MagicMock()
+    mock_jf.get_image_bytes.return_value = (b"\xff\xd8fake-jpeg", "image/jpeg")
+    mock_jf.close.return_value = None
+    context.make_jellyfin = lambda cfg=None: mock_jf
+
+    r = client.get("/api/items/item-1/image?kind=poster")
+    assert r.status_code == 200
+    assert r.content == b"\xff\xd8fake-jpeg"
+    assert r.headers["content-type"] == "image/jpeg"
+    mock_jf.get_image_bytes.assert_called_once_with("item-1", "Primary")
+
+
+def test_item_image_404_when_jellyfin_has_none(client, context):
+    from unittest.mock import MagicMock
+    mock_jf = MagicMock()
+    mock_jf.get_image_bytes.return_value = None
+    mock_jf.close.return_value = None
+    context.make_jellyfin = lambda cfg=None: mock_jf
+
+    r = client.get("/api/items/item-1/image?kind=logo")
+    assert r.status_code == 404
+
+
+def test_item_image_unknown_kind_is_400(client):
+    r = client.get("/api/items/item-1/image?kind=not-a-real-kind")
+    assert r.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# bulk run (SPEC_S14_UI.md P3 follow-up: Library page bulk selection, S13d)
+# ---------------------------------------------------------------------------
+
+def test_bulk_run_empty_items_422(client):
+    r = client.post("/api/items/bulk-run", json={"action": "apply", "item_ids": []})
+    assert r.status_code == 422
+
+
+def test_bulk_run_too_many_items_422(client):
+    ids = [f"item-{i}" for i in range(60)]
+    r = client.post("/api/items/bulk-run", json={"action": "apply", "item_ids": ids})
+    assert r.status_code == 422
+    assert "too many items" in r.json()["detail"]
+
+
+def test_bulk_run_invalid_action_422(client):
+    r = client.post("/api/items/bulk-run", json={"action": "bogus", "item_ids": ["item-1"]})
+    assert r.status_code == 422
+
+
+def test_bulk_run_apply_refused_under_dry_run(client, context):
+    assert context.config.dry_run is True
+    r = client.post("/api/items/bulk-run", json={"action": "apply", "item_ids": ["item-1"]})
+    assert r.status_code == 409
+    assert "dry_run" in r.json()["detail"]
+
+
+def test_bulk_run_apply_queues_when_slot_busy(client, context):
+    """Every item queues on the SAME FIFO the webhook drains -- not a
+    second, parallel queueing mechanism."""
+    cfg2 = context.config.model_copy(update={"dry_run": False})
+    context._cfg = cfg2
+    assert context.claim_run("test-run-block")
+    try:
+        r = client.post("/api/items/bulk-run",
+                        json={"action": "apply", "item_ids": ["item-1", "item-2"]})
+        assert r.status_code == 202
+        results = r.json()["results"]
+        assert all(res["queued"] is True for res in results)
+        assert all(res["run_id"] is None for res in results)
+        assert set(context.peek_webhook_queue()) == {"item-1", "item-2"}
+    finally:
+        context.release_run("test-run-block")
+        for i in ("item-1", "item-2"):
+            context.drop_webhook_item(i)
+
+
+def test_bulk_run_plan_does_not_use_the_apply_only_queue_when_busy(client, context):
+    """A busy plan is reported, not silently turned into a queued apply --
+    the webhook queue's drain always re-submits as "apply"."""
+    assert context.claim_run("test-run-block")
+    try:
+        r = client.post("/api/items/bulk-run",
+                        json={"action": "plan", "item_ids": ["item-1"]})
+        assert r.status_code == 202
+        result = r.json()["results"][0]
+        assert result["queued"] is False
+        assert result["run_id"] is None
+        assert "already in progress" in result["error"]
+        assert context.peek_webhook_queue() == []  # nothing silently queued
+    finally:
+        context.release_run("test-run-block")
+
+
+# ---------------------------------------------------------------------------
 # config routes
 # ---------------------------------------------------------------------------
 
@@ -261,6 +361,46 @@ def test_config_undo_no_last_good(client, context):
     # No prior put means no last-good file
     r = client.post("/api/config/undo")
     assert r.status_code == 404
+
+
+def test_overlay_profile_elements_and_style_round_trip(client, context):
+    """Regression guard, SPEC_S14_UI.md phase P5: a profile's FLAT `elements`
+    list and its nested `style.elements` must BOTH survive a full config
+    round trip. The 2026-10-19 bug was exactly this -- the Overlays tab's
+    save button wrote only `{style: doc}` and silently discarded the
+    profile's flat `elements` list the engine actually reads to decide which
+    badges a real apply draws. Required to exist BEFORE any Overlay Studio
+    work (the new UI shares this same PUT /api/config save path)."""
+    new_yaml = CONFIG_YAML + """
+overlays:
+  profiles:
+    my-profile:
+      elements: ["imdb", "resolution"]
+      style:
+        elements:
+          imdb:
+            enabled: true
+            x_offset: 7
+"""
+    r = client.put("/api/config", json={"yaml": new_yaml})
+    assert r.status_code == 200, r.text
+
+    got = client.get("/api/config").json()["parsed"]
+    profile = got["overlays"]["profiles"]["my-profile"]
+    assert profile["elements"] == ["imdb", "resolution"]
+    assert profile["style"]["elements"]["imdb"]["x_offset"] == 7
+
+    # And a second, unrelated config write (e.g. toggling dry_run, exactly
+    # what the Studio's OWN save does for a different key) must not touch
+    # this profile at all -- the failure mode was a save silently dropping
+    # fields it didn't know to preserve.
+    again_yaml = new_yaml.replace("dry_run: true", "dry_run: false")
+    r2 = client.put("/api/config", json={"yaml": again_yaml})
+    assert r2.status_code == 200, r2.text
+    got2 = client.get("/api/config").json()["parsed"]
+    profile2 = got2["overlays"]["profiles"]["my-profile"]
+    assert profile2["elements"] == ["imdb", "resolution"]
+    assert profile2["style"]["elements"]["imdb"]["x_offset"] == 7
 
 
 # ---------------------------------------------------------------------------

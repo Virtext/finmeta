@@ -222,7 +222,11 @@ export interface ServiceTestResult {
 }
 
 export interface HelpResp {
-  help: Record<string, { short: string; long: string }>;
+  // has_default/default/tier are only populated for config-field entries
+  // (SPEC_S13.md S13b items 3 and 6) -- provider/feature/secret help entries
+  // omit them. tier is hand-tagged per field and most of the 159 don't have
+  // one yet, so it's always optional, never a bare null.
+  help: Record<string, { short: string; long: string; has_default?: boolean; default?: unknown; tier?: 'basic' | 'advanced' | 'expert' }>;
 }
 
 // ---- S9b: provider registry types ----

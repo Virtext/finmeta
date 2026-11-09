@@ -709,3 +709,75 @@ def test_a_logo_that_exists_only_as_svg_yields_no_candidate():
     client.image_base = "https://image.tmdb.org/t/p"
     data = {"logos": [{"file_path": "/only.SVG", "vote_average": 9.0}]}
     assert client._to_candidates(data, ["logo"], None, [None]) == []
+
+
+# ---------------------------------------------------------------------------
+# cached_test / GET /api/services/status (SPEC_S14_UI.md Overview "Services"
+# card, deferred from P2 pending exactly this cache -- every .test() fires a
+# real outbound request, so an uncached card would ping TMDb/Fanart/etc. on
+# every Overview page load.)
+# ---------------------------------------------------------------------------
+
+def test_cached_test_only_calls_the_real_test_once_within_the_ttl(ctx, monkeypatch):
+    import finmeta.providers as prov
+    prov._status_cache.clear()
+    calls = {"n": 0}
+
+    def fake_test(_ctx):
+        calls["n"] += 1
+        return {"ok": True, "latency_ms": 1, "version": None, "error": None}
+
+    monkeypatch.setitem(prov._TESTS, "local", fake_test)
+    first = prov.cached_test(ctx, "local")
+    second = prov.cached_test(ctx, "local")
+    assert first == second
+    assert calls["n"] == 1  # second call was served from cache
+
+
+def test_cached_test_refreshes_after_ttl_expires(ctx, monkeypatch):
+    import finmeta.providers as prov
+    prov._status_cache.clear()
+    calls = {"n": 0}
+
+    def fake_test(_ctx):
+        calls["n"] += 1
+        return {"ok": True, "latency_ms": calls["n"], "version": None, "error": None}
+
+    monkeypatch.setitem(prov._TESTS, "local", fake_test)
+    monkeypatch.setattr(prov, "_STATUS_TTL_SECONDS", 0.0)
+    prov.cached_test(ctx, "local")
+    prov.cached_test(ctx, "local")
+    assert calls["n"] == 2  # TTL of 0 means every call is fresh
+
+
+def test_api_services_status_reports_disabled_without_testing(client, monkeypatch):
+    """omdb is disabled in this fixture (enabled requires BOTH the config
+    flag and a resolvable key; the fixture clears OMDB_KEY) -- reported, but
+    its .test() must never be called, same rule the Settings UI follows."""
+    import finmeta.providers as prov
+    prov._status_cache.clear()
+    called = []
+    monkeypatch.setitem(prov._TESTS, "omdb", lambda c: called.append(1) or {"ok": True})
+
+    r = client.get("/api/services/status")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ttl_seconds"] == 300
+    by_name = {s["name"]: s for s in body["services"]}
+    assert by_name["omdb"]["enabled"] is False
+    assert by_name["omdb"]["ok"] is None
+    assert called == []  # the stubbed test() never ran
+
+
+def test_api_services_status_reports_enabled_provider_result(client):
+    """jellyfin is always enabled (per build_providers); with no API key
+    configured in this fixture, its real test() returns a deterministic
+    'no key' error -- confirming the route actually calls through."""
+    import finmeta.providers as prov
+    prov._status_cache.clear()
+
+    r = client.get("/api/services/status")
+    by_name = {s["name"]: s for s in r.json()["services"]}
+    assert by_name["jellyfin"]["enabled"] is True
+    assert by_name["jellyfin"]["ok"] is False
+    assert "no Jellyfin API key" in by_name["jellyfin"]["error"]
