@@ -3,7 +3,7 @@ import {
   Badge, Button, Card, Checkbox, EmptyState, ErrorState, PageHeader, Skeleton, useToast,
 } from '../ui';
 import type { BadgeTone } from '../ui';
-import { fixFindings, getFindings, getLatestScan, startScan } from '../api';
+import { fixFindingsBatched, getFindings, getLatestScan, startScan } from '../api';
 import type { ScanFinding } from '../types';
 import { navigate } from './router';
 
@@ -39,6 +39,9 @@ function severityTone(s: string): BadgeTone {
 const FIX_LABELS: Record<string, string> = {
   apply_item: 'Fix (apply)',
   refresh_item: 'Refresh in Jellyfin',
+  // Best-effort, not guaranteed -- ranking already preferred this
+  // candidate over every other source, so there may be nothing better.
+  candidate_picker: 'Try to upgrade',
 };
 
 export function ArtworkPage({ dryRun }: { dryRun: boolean }): React.ReactElement {
@@ -80,11 +83,16 @@ export function ArtworkPage({ dryRun }: { dryRun: boolean }): React.ReactElement
       .finally(() => setScanning(false));
   };
 
-  const fixable = (f: ScanFinding) => f.fix_kind === 'apply_item' || f.fix_kind === 'refresh_item';
+  const fixable = (f: ScanFinding) => f.fix_kind === 'apply_item' || f.fix_kind === 'refresh_item'
+    || f.fix_kind === 'candidate_picker';
 
-  const submitFix = (ids: number[]) => {
+  const submitFix = (targets: ScanFinding[]) => {
+    const ids = targets.map((f) => f.id);
     if (!scanId || ids.length === 0) return;
-    fixFindings(scanId, ids)
+    // Batched (not a single fixFindings call): the backend refuses more
+    // than 50 distinct items in one request, and a real deployment's
+    // "fix all" routinely has hundreds (operator hit "153 > 50").
+    fixFindingsBatched(scanId, targets)
       .then((r) => {
         const started = r.submitted.filter((s) => s.run_id).length;
         const refreshed = r.submitted.filter((s) => s.action === 'refresh_item' && !s.error).length;
@@ -110,7 +118,7 @@ export function ArtworkPage({ dryRun }: { dryRun: boolean }): React.ReactElement
   if (error) return <ErrorState title="Could not load artwork findings" description={error} action={<Button onClick={load}>Retry</Button>} />;
 
   const loading = scanId === undefined || findings === null;
-  const fixableIds = (findings ?? []).filter(fixable).map((f) => f.id);
+  const fixableFindings = (findings ?? []).filter(fixable);
 
   return (
     <div>
@@ -131,11 +139,11 @@ export function ArtworkPage({ dryRun }: { dryRun: boolean }): React.ReactElement
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 14 }}>
             <Button
               size="sm"
-              disabled={fixableIds.length === 0 || dryRun}
+              disabled={fixableFindings.length === 0 || dryRun}
               loading={fixingAll}
-              onClick={() => { setFixingAll(true); submitFix(fixableIds); }}
+              onClick={() => { setFixingAll(true); submitFix(fixableFindings); }}
             >
-              Fix all {fixableIds.length} automatic
+              Fix/try {fixableFindings.length} automatically
             </Button>
             {dryRun && <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-faint)' }}>dry_run is on — fixes are refused until it's off</span>}
           </div>
@@ -167,8 +175,8 @@ export function ArtworkPage({ dryRun }: { dryRun: boolean }): React.ReactElement
                     {fixable(f) && (
                       <Button
                         size="sm"
-                        disabled={f.fix_kind === 'apply_item' && dryRun}
-                        onClick={() => submitFix([f.id])}
+                        disabled={(f.fix_kind === 'apply_item' || f.fix_kind === 'candidate_picker') && dryRun}
+                        onClick={() => submitFix([f])}
                       >
                         {FIX_LABELS[f.fix_kind]}
                       </Button>

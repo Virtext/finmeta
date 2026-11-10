@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  deleteScan, fixFindings, getConfig, getFindings, getHelp, getJob, getLatestScan, startScan,
+  deleteScan, fixFindingsBatched, getConfig, getFindings, getHelp, getJob, getLatestScan, startScan,
 } from '../api';
 import type {
   FindingsResp, HelpResp, JobResp, LatestScanResp, LibraryView, ScanFinding, Severity,
@@ -178,7 +178,10 @@ function detailLines(f: ScanFinding): string[] {
 const FIX_LABELS: Record<string, string> = {
   apply_item: 'Fix (apply)',
   refresh_item: 'Refresh in Jellyfin',
-  candidate_picker: 'Pick artwork…',
+  // 2026-11-10: "try to upgrade low quality artwork" -- best-effort
+  // reshuffle+apply via the same endpoint, alongside the still-offered
+  // manual "Pick artwork…" link (onPickArtwork) for when it doesn't help.
+  candidate_picker: 'Try to upgrade',
   external: '',
   none: '',
 };
@@ -290,7 +293,8 @@ export default function HealthPage({ libraries, dryRun, onBack, onPickArtwork }:
   }, [findings]);
 
   const fixable = useCallback(
-    (f: ScanFinding) => f.fix_kind === 'apply_item' || f.fix_kind === 'refresh_item',
+    (f: ScanFinding) => f.fix_kind === 'apply_item' || f.fix_kind === 'refresh_item'
+      || f.fix_kind === 'candidate_picker',
     [],
   );
 
@@ -306,11 +310,15 @@ export default function HealthPage({ libraries, dryRun, onBack, onPickArtwork }:
     return next;
   });
 
-  const submitFix = useCallback(async (ids: number[]) => {
-    if (!latest?.scan || !ids.length) return;
+  const submitFix = useCallback(async (targets: ScanFinding[]) => {
+    if (!latest?.scan || !targets.length) return;
     setFixMsg(null); setFixErr(null);
     try {
-      const r = await fixFindings(latest.scan.scan_id, ids);
+      // Batched: the backend refuses more than 50 distinct items in one
+      // request, and "fix selected" across a whole library's findings
+      // routinely exceeds that (operator hit "153 > 50" on a real
+      // deployment, same endpoint this page also calls).
+      const r = await fixFindingsBatched(latest.scan.scan_id, targets);
       const started = r.submitted.filter((s) => s.run_id).length;
       const queued = r.submitted.filter((s) => s.queued).length;
       const refreshed = r.submitted.filter((s) => s.action === 'refresh_item' && !s.error).length;
@@ -483,7 +491,7 @@ export default function HealthPage({ libraries, dryRun, onBack, onPickArtwork }:
                 <span>{selectedFixable.length} selected</span>
                 <button
                   className="btn primary"
-                  onClick={() => submitFix(selectedFixable.map((f) => f.id))}
+                  onClick={() => submitFix(selectedFixable)}
                 >
                   Fix selected
                 </button>
@@ -537,11 +545,11 @@ export default function HealthPage({ libraries, dryRun, onBack, onPickArtwork }:
                           {fixable(f) && (
                             <button
                               className="btn"
-                              disabled={f.fix_kind === 'apply_item' && dryRun}
-                              title={f.fix_kind === 'apply_item' && dryRun
+                              disabled={(f.fix_kind === 'apply_item' || f.fix_kind === 'candidate_picker') && dryRun}
+                              title={(f.fix_kind === 'apply_item' || f.fix_kind === 'candidate_picker') && dryRun
                                 ? 'dry_run is true — set it false in config to write files'
                                 : undefined}
-                              onClick={() => submitFix([f.id])}
+                              onClick={() => submitFix([f])}
                             >
                               {FIX_LABELS[f.fix_kind]}
                             </button>

@@ -281,6 +281,53 @@ def test_apply_fix_starts_one_item_run_and_queues_the_rest(ctx_factory):
     assert all(r["fixed_at"] for r in rows)
 
 
+def test_candidate_picker_fix_reshuffles_then_applies_once(ctx_factory):
+    """2026-11-10: operator-requested "try to upgrade low quality artwork" --
+    candidate_picker findings now reshuffle the flagged kind(s) and fold
+    into the SAME apply as any apply_item finding on that item, instead of
+    only offering a manual pick."""
+    ctx = ctx_factory(dry_run=False)
+    scan_id, rows = _seed(ctx, [
+        Finding(library="Movies", check_code="artwork_quality.low_resolution.poster",
+                severity="warning", item_id="item-1", item_name="A",
+                media_type="movie", fix_kind="candidate_picker",
+                detail={"kind": "poster"}),
+        Finding(library="Movies", check_code="artwork_quality.low_resolution.backdrop",
+                severity="warning", item_id="item-1", item_name="A",
+                media_type="movie", fix_kind="candidate_picker",
+                detail={"kind": "backdrop"}),
+        _f("artwork.missing.logo", "warning", item="item-1", name="A"),
+    ])
+    with _client(ctx) as client:
+        assert ctx.claim_run("blocking-run", action="apply")   # deterministic: queues
+        r = client.post(f"/api/scans/{scan_id}/fix",
+                        json={"finding_ids": [x["id"] for x in rows]})
+        assert r.status_code == 200
+        body = r.json()
+        # three findings on one item -> ONE apply, not three
+        assert [s["item_id"] for s in body["submitted"]] == ["item-1"]
+        ctx.release_run("blocking-run")
+    assert ctx.overrides.reshuffle_counts("item-1") == {"poster": 1, "backdrop": 1}
+    rows, _ = scan_store.list_findings(ctx.db_path, scan_id)
+    assert all(r["fixed_at"] for r in rows)
+
+
+def test_candidate_picker_fix_refused_while_dry_run(ctx_factory):
+    ctx = ctx_factory(dry_run=True)
+    scan_id, rows = _seed(ctx, [
+        Finding(library="Movies", check_code="artwork_quality.low_resolution.poster",
+                severity="warning", item_id="item-1", item_name="A",
+                media_type="movie", fix_kind="candidate_picker",
+                detail={"kind": "poster"}),
+    ])
+    with _client(ctx) as client:
+        r = client.post(f"/api/scans/{scan_id}/fix",
+                        json={"finding_ids": [rows[0]["id"]]})
+        assert r.status_code == 409
+    # refused before any reshuffle happened -- not half-applied
+    assert ctx.overrides.reshuffle_counts("item-1") == {}
+
+
 def test_refresh_fix_works_under_dry_run_and_calls_jellyfin(ctx_factory):
     ctx = ctx_factory(dry_run=True)
     scan_id, rows = _seed(ctx, [

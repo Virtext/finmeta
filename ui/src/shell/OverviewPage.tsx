@@ -5,7 +5,7 @@ import {
 } from '../ui';
 import type { BadgeTone } from '../ui';
 import {
-  fixFindings, getActivity, getFindings, getLatestScan, getLibraries, getServicesStatus, startScan,
+  fixFindingsBatched, getActivity, getFindings, getLatestScan, getLibraries, getServicesStatus, startScan,
 } from '../api';
 import type { ServiceStatusEntry } from '../api';
 import type { ActivityResp, ActivityRun, LatestScanResp, LibraryView, ScanFinding } from '../types';
@@ -117,10 +117,17 @@ export function OverviewPage(): React.ReactElement {
 
   const fixAllArtwork = () => {
     const scanId = scan?.scan?.scan_id;
-    const fixable = (artworkFindings ?? []).filter((f) => f.fix_kind === 'apply_item' || f.fix_kind === 'refresh_item');
+    // candidate_picker (2026-11-10): the backend now reshuffles+applies
+    // these too -- best-effort, but worth trying automatically rather
+    // than only offering a manual pick.
+    const fixable = (artworkFindings ?? []).filter(
+      (f) => f.fix_kind === 'apply_item' || f.fix_kind === 'refresh_item' || f.fix_kind === 'candidate_picker');
     if (!scanId || fixable.length === 0) return;
     setFixingAll(true);
-    fixFindings(scanId, fixable.map((f) => f.id))
+    // Batched: the backend refuses >50 distinct items in one request, and
+    // a real deployment's fixable count across libraries routinely exceeds
+    // that (operator hit "153 > 50" testing this exact button).
+    fixFindingsBatched(scanId, fixable)
       .then((r) => {
         const started = r.submitted.filter((s) => s.run_id || s.queued).length;
         push({ message: `${started} fix${started === 1 ? '' : 'es'} submitted. Rescan to confirm.` });
@@ -148,8 +155,9 @@ export function OverviewPage(): React.ReactElement {
   const itemsScanned = scan?.scan?.items_scanned ?? 0;
   const affectedItems = new Set((artworkFindings ?? []).map((f) => f.item_id).filter(Boolean)).size;
   const coveragePct = itemsScanned > 0 ? Math.max(0, Math.round(100 * (1 - affectedItems / itemsScanned))) : null;
-  const fixableCount = (artworkFindings ?? []).filter((f) => f.fix_kind === 'apply_item' || f.fix_kind === 'refresh_item').length;
-  const needsHumanCount = (artworkFindings ?? []).filter((f) => f.fix_kind === 'candidate_picker').length;
+  const guaranteedFixCount = (artworkFindings ?? []).filter((f) => f.fix_kind === 'apply_item' || f.fix_kind === 'refresh_item').length;
+  const upgradeTryCount = (artworkFindings ?? []).filter((f) => f.fix_kind === 'candidate_picker').length;
+  const fixableCount = guaranteedFixCount + upgradeTryCount;
 
   return (
     <div>
@@ -159,8 +167,8 @@ export function OverviewPage(): React.ReactElement {
         actions={<Button variant="primary" loading={scanning} onClick={runScan}>Scan libraries</Button>}
       />
 
-      <div className="fm-grid-3">
-        <Card>
+      <div className="fm-overview-grid">
+        <Card className="fm-span-2">
           <CardHeader title="Latest scan" />
           <CardBody>
             {loading ? (
@@ -234,7 +242,7 @@ export function OverviewPage(): React.ReactElement {
           </CardBody>
         </Card>
 
-        <Card>
+        <Card className="fm-span-2">
           <CardHeader title="Libraries" />
           <CardBody>
             {loading ? <Skeleton height={60} /> : (
@@ -305,7 +313,7 @@ export function OverviewPage(): React.ReactElement {
           </CardBody>
         </Card>
 
-        <Card>
+        <Card className="fm-span-2">
           <CardHeader title="Needs attention" />
           <CardBody>
             {loading || artworkFindings === null ? <Skeleton height={60} /> : (
@@ -314,14 +322,14 @@ export function OverviewPage(): React.ReactElement {
                   <EmptyState icon="check" title="Nothing needs attention" description="The latest scan found no findings." />
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 'var(--text-sm)' }}>
-                    {fixableCount > 0 && <div><Badge tone="warn">{fixableCount}</Badge> <span style={{ marginLeft: 6 }}>fixable automatically right now</span></div>}
-                    {needsHumanCount > 0 && <div><Badge tone="neutral">{needsHumanCount}</Badge> <span style={{ marginLeft: 6 }}>need a manual artwork pick</span></div>}
+                    {guaranteedFixCount > 0 && <div><Badge tone="warn">{guaranteedFixCount}</Badge> <span style={{ marginLeft: 6 }}>fixable automatically right now</span></div>}
+                    {upgradeTryCount > 0 && <div><Badge tone="neutral">{upgradeTryCount}</Badge> <span style={{ marginLeft: 6 }}>low-quality — worth trying to upgrade</span></div>}
                     {(severities.error ?? 0) > 0 && <div><Badge tone="danger">{severities.error}</Badge> <span style={{ marginLeft: 6 }}>error-severity findings overall</span></div>}
                   </div>
                 )}
                 <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
                   {fixableCount > 0 && (
-                    <Button size="sm" loading={fixingAll} onClick={fixAllArtwork}>Fix {fixableCount} automatically</Button>
+                    <Button size="sm" loading={fixingAll} onClick={fixAllArtwork}>Fix/try {fixableCount} automatically</Button>
                   )}
                   {groups.length > 0 && (
                     <Button size="sm" variant="ghost" onClick={() => navigate('/artwork')}>Open Artwork →</Button>
