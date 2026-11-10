@@ -11,7 +11,8 @@ interface Props {
   libraries: LibraryView[];
   dryRun: boolean;
   onBack: () => void;
-  /** Open the artwork candidate picker for an item (main page, item scope). */
+  /** Open an item on the main page (item scope) -- despite the name, used
+   * for any finding row's item name, not just the candidate_picker button. */
   onPickArtwork?: (itemId: string, itemName: string, library: string) => void;
 }
 
@@ -530,7 +531,25 @@ export default function HealthPage({ libraries, dryRun, onBack, onPickArtwork }:
                         )}
                         <div className="health-row-main">
                           <div className="health-row-head">
-                            <strong>{f.item_name || f.library}</strong>
+                            {/* Clickable regardless of fix_kind (operator-
+                                requested 2026-11-10): even a finding with
+                                no automatic fix should let you open the
+                                real item and look/fix it by hand. Reuses
+                                the SAME onPickArtwork callback the
+                                candidate_picker button below already
+                                calls -- it was never actually specific to
+                                that fix kind. */}
+                            {f.item_id && onPickArtwork ? (
+                              <button
+                                className="link"
+                                style={{ fontWeight: 600, fontSize: 'inherit' }}
+                                onClick={() => onPickArtwork(f.item_id!, f.item_name, f.library)}
+                              >
+                                {f.item_name || f.library}
+                              </button>
+                            ) : (
+                              <strong>{f.item_name || f.library}</strong>
+                            )}
                             <span className="muted">{f.library}</span>
                             {f.fixed_at && (
                               <span className="badge skipped">fix submitted — rescan to confirm</span>

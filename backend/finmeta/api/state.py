@@ -535,6 +535,25 @@ class AppContext:
             self._library_queue = [k for k in self._library_queue if k != key]
             return True
 
+    def clear_queues(self) -> int:
+        """Drop every pending item/library run. Returns how many were dropped.
+
+        Operator-requested 2026-11-10: a bulk "fix all" can queue hundreds
+        of single-item runs (each ~5-7s of live provider lookups) behind
+        whichever one is currently running -- dropping them one at a time
+        via drop_webhook_item/drop_library_run is not a realistic way out
+        of that. Does NOT touch the run that is active right now (there is
+        no cancellation point inside a running apply) -- only what has not
+        started yet.
+        """
+        with self._claim_lock:
+            n = len(self._webhook_queue) + len(self._library_queue)
+            self._webhook_queue = []
+            self._webhook_queued_set = set()
+            self._library_queue = []
+            self._library_queued_set = set()
+            return n
+
     # -- scheduler hook -----------------------------------------------------
     def reschedule(self) -> None:
         if self.scheduler is not None:

@@ -156,6 +156,18 @@ def retry_run(run_id: str, ctx: AppContext = Depends(get_ctx)) -> dict:
             "status": "running"}
 
 
+@router.delete("/activity/queued")
+def clear_queued(ctx: AppContext = Depends(get_ctx)) -> dict:
+    """Drop every pending item/library run (operator-requested 2026-11-10).
+
+    A bulk fix can queue far more single-item runs than dropping them one
+    at a time is a realistic way to undo. The run already in progress is
+    untouched -- there is no cancellation point inside a running apply,
+    only the backlog behind it.
+    """
+    return {"dropped": ctx.clear_queues()}
+
+
 @router.delete("/activity/queued/items/{item_id}")
 def drop_queued_item(item_id: str, ctx: AppContext = Depends(get_ctx)) -> dict:
     """Drop a pending single-item run that has not started yet."""

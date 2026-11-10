@@ -6,7 +6,7 @@ export type IconName =
   | 'overview' | 'library' | 'artwork' | 'overlays' | 'profiles' | 'packs'
   | 'automation' | 'activity' | 'settings' | 'search' | 'bell' | 'user'
   | 'collapse' | 'expand' | 'check' | 'close' | 'chevron-down' | 'chevron-right'
-  | 'warning' | 'clock' | 'external' | 'undo' | 'lock' | 'sun' | 'moon' | 'menu';
+  | 'warning' | 'clock' | 'external' | 'undo' | 'lock' | 'sun' | 'moon' | 'menu' | 'health';
 
 const PATHS: Record<IconName, React.ReactNode> = {
   overview: <><rect x="2" y="2" width="5" height="5" rx="1" /><rect x="9" y="2" width="5" height="5" rx="1" /><rect x="2" y="9" width="5" height="5" rx="1" /><rect x="9" y="9" width="5" height="5" rx="1" /></>,
@@ -35,6 +35,7 @@ const PATHS: Record<IconName, React.ReactNode> = {
   sun: <><circle cx="8" cy="8" r="3" /><path d="M8 1.6v2M8 12.4v2M1.6 8h2M12.4 8h2M3.5 3.5l1.4 1.4M11.1 11.1l1.4 1.4M12.5 3.5l-1.4 1.4M4.9 11.1 3.5 12.5" /></>,
   moon: <path d="M13.5 9.6A5.8 5.8 0 0 1 6.4 2.5a5.8 5.8 0 1 0 7.1 7.1Z" />,
   menu: <path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11" />,
+  health: <path d="M1.5 8.5h3l1.5-3.5 2.5 6 2-7 1.5 4.5h3" />,
 };
 
 export interface IconProps {
