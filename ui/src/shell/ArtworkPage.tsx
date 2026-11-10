@@ -95,6 +95,13 @@ export function ArtworkPage({ dryRun }: { dryRun: boolean }): React.ReactElement
         if (failed) parts.push(`${failed} failed`);
         push({ message: `${parts.join(' · ') || 'Nothing to do'}. Rescan to confirm.` });
         setSelected(new Set());
+        // The backend stamps fixed_at on every submitted finding regardless
+        // of run_id/queued (routes_scans.py's fix_findings), so the row is
+        // genuinely done with here -- drop it from view instead of leaving
+        // it sitting unchanged with only a 5s toast as evidence anything
+        // happened (operator-reported: "nothing visible happens" on click).
+        const failedIds = new Set(r.submitted.filter((s) => s.error).map((s) => s.item_id));
+        setFindings((prev) => prev && prev.filter((f) => !ids.includes(f.id) || failedIds.has(f.item_id ?? '')));
       })
       .catch((e: any) => push({ message: e?.message ?? 'Could not submit the fix.', tone: 'danger' }))
       .finally(() => setFixingAll(false));

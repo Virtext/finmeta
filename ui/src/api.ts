@@ -264,8 +264,17 @@ export function overlayProxyUrl(digest: string): string {
 // key. SPEC_S14_UI.md decision D8: used by the Library poster grid --
 // deliberately NOT the candidates path (getCandidates), which does TMDb
 // matching per item and is far too slow for a grid of hundreds of items.
-export function itemImageUrl(itemId: string, kind: 'poster' | 'backdrop' | 'logo' | 'landscape'): string {
-  return `/api/items/${enc(itemId)}/image?kind=${kind}`;
+//
+// maxWidth defaults to a grid-thumbnail size (2x a ~160px CSS tile) so
+// Jellyfin downscales server-side -- without it, every tile in a grid of
+// hundreds fetched the original file, often several MB (operator-reported
+// general slowness loading images). Pass null to get the real
+// full-resolution image.
+export function itemImageUrl(
+  itemId: string, kind: 'poster' | 'backdrop' | 'logo' | 'landscape', maxWidth: number | null = 320,
+): string {
+  const w = maxWidth != null ? `&maxWidth=${maxWidth}` : '';
+  return `/api/items/${enc(itemId)}/image?kind=${kind}${w}`;
 }
 
 export function findFile(files: { kind: string; source_ref: string }[], kind: string) {
@@ -470,7 +479,7 @@ export interface ImagePackInfo {
   valid: boolean;
   error?: string | null;
 }
-export interface PacksResp { packs: ImagePackInfo[] }
+export interface PacksResp { packs: ImagePackInfo[]; packs_dir: string }
 export const getPacks = () => j<PacksResp>('/api/packs');
 export const deletePack = (name: string) =>
   j<{ ok: boolean; name: string }>(`/api/packs/${enc(name)}`, { method: 'DELETE' });

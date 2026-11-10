@@ -378,7 +378,8 @@ class JellyfinClient:
         return Item.from_dict(d or {})
 
     def get_image_bytes(self, item_id: str, image_type: str, *,
-                        index: int = 0) -> Optional[Tuple[bytes, str]]:
+                        index: int = 0,
+                        max_width: Optional[int] = None) -> Optional[Tuple[bytes, str]]:
         """Raw bytes of one of an item's OWN current Jellyfin images.
 
         Deliberately separate from the candidates/resolution machinery
@@ -391,9 +392,17 @@ class JellyfinClient:
         ACTUALLY serving today. Returns ``None`` on a 404 (no such image)
         rather than raising -- a library grid expects many items to be
         missing one kind or another; that is data, not an error.
+
+        ``max_width`` asks Jellyfin to resize server-side (``?maxWidth=``,
+        the same param its own web client uses for thumbnails) -- without
+        it, Jellyfin returns the original file, often several MB, for every
+        tile in a grid of hundreds (operator-reported: image loading is slow
+        throughout the modern UI). Omitted (``None``) for callers that need
+        the real full-resolution image (e.g. the single-item detail view).
         """
         path = f"{self.base_path}/Items/{item_id}/Images/{image_type}/{index}"
-        resp = self._client.get(path, headers=self._headers())
+        params = {"maxWidth": max_width, "quality": 90} if max_width else None
+        resp = self._client.get(path, headers=self._headers(), params=params)
         if resp.status_code == 404:
             return None
         self._raise_for(resp)

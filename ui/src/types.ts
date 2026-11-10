@@ -48,6 +48,8 @@ export interface LibraryView {
   metadata: boolean;
   theme_song: boolean;
   overlays: string[];
+  overlay_profile: string | null;
+  overlay_element_count: number;
   artwork_enabled: string[];
 }
 

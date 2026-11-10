@@ -41,9 +41,17 @@ def list_packs(ctx: AppContext = Depends(get_ctx)):
 
     Each pack reports its categories, expected keys, and which images are
     missing on disk. Invalid packs appear with ``valid: false`` and an error.
+
+    ``packs_dir`` is the real resolved absolute path (``ctx.config_dir``) --
+    the UI used to tell operators to drop files in a bare relative
+    "assets/packs/<name>/", which reads as a path inside the app itself,
+    not the folder they actually bind-mounted into the container (operator
+    feedback: this should point at the Docker-mounted config folder, not a
+    generic "assets").
     """
     packs = load_packs(ctx.config_dir)
-    return {"packs": [p.model_dump() for p in packs]}
+    return {"packs": [p.model_dump() for p in packs],
+            "packs_dir": str((ctx.config_dir / "assets" / "packs").resolve())}
 
 
 @router.post("/scaffold")

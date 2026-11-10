@@ -21,29 +21,41 @@ const NAV: NavItem[] = [
 
 export interface SidebarProps {
   activePath: string;
+  /** Below the 900px breakpoint the sidebar is an off-canvas drawer
+   * (shell.css) instead of a permanent column -- these control it. */
+  mobileOpen?: boolean;
+  onMobileClose?: () => void;
 }
 
-export function Sidebar({ activePath }: SidebarProps): React.ReactElement {
+export function Sidebar({ activePath, mobileOpen, onMobileClose }: SidebarProps): React.ReactElement {
   const activeTop = '/' + activePath.split('/')[1];
   return (
-    <aside className="fm-sidebar">
-      <div className="fm-sidebar__brand">
-        <span className="fm-sidebar__mark">F</span>
-        <span className="fm-sidebar__name">Finmeta</span>
-      </div>
-      <nav>
-        {NAV.map((item) => (
-          <button
-            key={item.id}
-            className={['fm-navitem', item.path === activeTop ? 'fm-navitem--active' : ''].filter(Boolean).join(' ')}
-            onClick={() => navigate(item.path)}
-          >
-            <Icon name={item.icon} size={16} className="fm-navitem__icon" />
-            {item.label}
-          </button>
-        ))}
-      </nav>
-    </aside>
+    <>
+      {mobileOpen && <div className="fm-sidebar__backdrop" onClick={onMobileClose} />}
+      <aside className={['fm-sidebar', mobileOpen ? 'fm-sidebar--open' : ''].filter(Boolean).join(' ')}>
+        <button
+          type="button"
+          className="fm-sidebar__brand"
+          onClick={() => navigate('/overview')}
+          title="Back to Overview"
+        >
+          <img src="/finmeta-icon.svg" alt="" className="fm-sidebar__mark" />
+          <span className="fm-sidebar__name">Finmeta</span>
+        </button>
+        <nav>
+          {NAV.map((item) => (
+            <button
+              key={item.id}
+              className={['fm-navitem', item.path === activeTop ? 'fm-navitem--active' : ''].filter(Boolean).join(' ')}
+              onClick={() => navigate(item.path)}
+            >
+              <Icon name={item.icon} size={16} className="fm-navitem__icon" />
+              {item.label}
+            </button>
+          ))}
+        </nav>
+      </aside>
+    </>
   );
 }
 

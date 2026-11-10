@@ -44,6 +44,12 @@ function ModernShell(): React.ReactElement {
   const [dryRun, setDryRun] = useState<boolean | null>(null);
   const [activeRunLabel, setActiveRunLabel] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
+
+  // The drawer only makes sense below the breakpoint where the sidebar is
+  // hidden (shell.css) -- closing it on every navigation keeps a phone from
+  // being stuck on an open drawer over the new page.
+  useEffect(() => { setNavOpen(false); }, [path]);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -75,7 +81,7 @@ function ModernShell(): React.ReactElement {
 
   return (
     <div className="fm-modern fm-shell">
-      <Sidebar activePath={path} />
+      <Sidebar activePath={path} mobileOpen={navOpen} onMobileClose={() => setNavOpen(false)} />
       <div className="fm-main">
         <Topbar
           crumb={TITLES[section] ?? section}
@@ -85,6 +91,7 @@ function ModernShell(): React.ReactElement {
           onToggleTheme={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
           onLogout={() => { logout().catch(() => {}); window.location.reload(); }}
           onOpenSearch={() => setSearchOpen(true)}
+          onOpenNav={() => setNavOpen(true)}
         />
         <CommandPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
         <div className="fm-content">
