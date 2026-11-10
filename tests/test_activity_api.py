@@ -179,6 +179,28 @@ def test_clear_queued_drops_everything_but_not_the_active_run(ctx_factory):
     ctx.release_run("live")
 
 
+def test_cancel_active_run_releases_the_slot_and_marks_it_error(ctx_factory):
+    """2026-11-10: a stuck apply left the operator with no way past it --
+    clear_queued() only ever covered the queue, never the run actually in
+    progress. POST /api/activity/active/cancel releases the slot and
+    marks the run's own row 'error' instead of leaving it 'running'
+    forever; a second submission can then claim the slot immediately."""
+    ctx = ctx_factory(dry_run=False)
+    _run(ctx, "stuck", action="apply", scope="item:item-1", status="running")
+    assert ctx.claim_run("stuck", action="apply", item_id="item-1")
+    with _client(ctx) as client:
+        assert client.post("/api/activity/active/cancel").json() == {"cancelled": "stuck"}
+        # idempotent-ish: nothing active now, so a second call 404s
+        assert client.post("/api/activity/active/cancel").status_code == 404
+        body = client.get("/api/activity").json()
+        assert body["active"] is None
+        row = next(r for r in body["runs"] if r["run_id"] == "stuck")
+        assert row["status"] == "error"
+        # the slot is free -- something else can claim it right away
+        assert ctx.claim_run("next-one", action="apply", item_id="item-2")
+    ctx.release_run("next-one")
+
+
 def test_scheduled_jobs_and_their_next_run_are_listed(ctx_factory):
     ctx = ctx_factory()
 

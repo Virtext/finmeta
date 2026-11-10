@@ -5,7 +5,8 @@ import {
 } from '../ui';
 import type { BadgeTone } from '../ui';
 import {
-  fixFindingsBatched, getActivity, getFindings, getLatestScan, getLibraries, getServicesStatus, startScan,
+  cancelActiveRun, fixFindingsBatched, getActivity, getFindings, getLatestScan, getLibraries,
+  getServicesStatus, startScan,
 } from '../api';
 import type { ServiceStatusEntry } from '../api';
 import type { ActivityResp, ActivityRun, LatestScanResp, LibraryView, ScanFinding } from '../types';
@@ -80,6 +81,7 @@ export function OverviewPage(): React.ReactElement {
   const [error, setError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [fixingAll, setFixingAll] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
 
   const load = useCallback(() => {
     setError(null);
@@ -113,6 +115,20 @@ export function OverviewPage(): React.ReactElement {
       .then(() => { push({ message: 'Scan started — check Activity for progress.' }); load(); })
       .catch((e: any) => push({ message: e?.message ?? 'Could not start the scan.', tone: 'danger' }))
       .finally(() => setScanning(false));
+  };
+
+  // Operator-requested 2026-11-10 (a stuck apply left no way past it):
+  // force-releases the run slot. NOT a real cancellation -- there is no
+  // cancellation point inside a running apply, so an abandoned worker may
+  // keep running in the background; this only frees the slot for the next
+  // run and marks the run's own row 'error' instead of stuck "running".
+  const cancelActive = () => {
+    if (!window.confirm('Force-stop the run in progress? This frees the slot for the next run, but the abandoned worker may keep running in the background -- it is not actually killed.')) return;
+    setCancelling(true);
+    cancelActiveRun()
+      .then(() => { push({ message: 'Run slot force-released.' }); load(); })
+      .catch((e: any) => push({ message: e?.message ?? 'Could not cancel the run.', tone: 'danger' }))
+      .finally(() => setCancelling(false));
   };
 
   const fixAllArtwork = () => {
@@ -222,7 +238,15 @@ export function OverviewPage(): React.ReactElement {
                     onClick={() => navigate('/activity')}
                   >
                     <Badge tone="accent">now</Badge>
-                    <span>{runLabel(activity!.active)}</span>
+                    <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {runLabel(activity!.active)}
+                    </span>
+                    <Button
+                      size="sm" variant="ghost" disabled={cancelling}
+                      onClick={(ev) => { ev.stopPropagation(); cancelActive(); }}
+                    >
+                      {cancelling ? 'Cancelling…' : 'Cancel'}
+                    </Button>
                   </div>
                 )}
                 {activity!.runs.slice(0, 4).map((r: ActivityRun) => (

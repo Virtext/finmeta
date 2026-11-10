@@ -208,6 +208,13 @@ export const dropQueuedLibrary = (action: string, library: string, tier = 1) =>
 // realistic way to undo. Never touches whatever is actively running.
 export const clearQueuedRuns = () =>
   j<{ dropped: number }>('/api/activity/queued', { method: 'DELETE' });
+
+// Force-releases the single run slot (operator-requested 2026-11-10: a
+// stuck apply left no way past it). NOT a real cancellation -- the
+// worker has no cancellation point and may keep running in the
+// background; this only frees the slot and marks the run's row 'error'.
+export const cancelActiveRun = () =>
+  j<{ cancelled: string }>('/api/activity/active/cancel', { method: 'POST' });
 export const getLatestScan = () => j<LatestScanResp>('/api/scans/latest');
 
 export const getFindings = (
