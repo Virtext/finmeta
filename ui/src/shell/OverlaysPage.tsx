@@ -115,7 +115,56 @@ const ANCHOR_CSS: Record<string, React.CSSProperties> = {
   bottom_right: { bottom: 0, right: 0 },
 };
 
-interface DragState { key: string; mode: 'move' | 'resize'; startX: number; startY: number; startOffX: number; startOffY: number; startSize: number }
+// Keys the real renderer can turn into a full-width band (engine/
+// overlay_render.py: `kind = "band" if el.full_width else "text"`) instead
+// of a small positioned badge -- x_offset is then completely ignored
+// server-side (bands always span the whole poster width; only y_offset,
+// nudging it away from its edge, does anything). `ribbon` has no UI
+// toggle to turn this off (always a band); status/trending_rank default
+// to it (OverlaysEditor.tsx's "Full-width bar" checkbox, `full_width !==
+// false`). Operator-reported 2026-11-10: dragging these left/right in the
+// canvas visibly moved the chip but had NO effect on the real poster --
+// pure placebo -- so the chip should not offer that drag at all.
+function isBandKey(key: string, draftStyle: Record<string, DocElementState>): boolean {
+  if (key === 'ribbon') return true;
+  if (key === 'status' || key === 'trending_rank') return draftStyle[key]?.full_width !== false;
+  return false;
+}
+
+// 'top_*' / 'bottom_*' / 'center*' -> which edge a position anchors to.
+function anchorRow(position: string | null | undefined): 'top' | 'bottom' | 'center' {
+  if (!position) return 'top';
+  if (position.startsWith('bottom')) return 'bottom';
+  if (position.startsWith('top')) return 'top';
+  return 'center';
+}
+function anchorCol(position: string | null | undefined): 'left' | 'right' | 'center' {
+  if (!position) return 'left';
+  if (position.endsWith('right')) return 'right';
+  if (position.endsWith('left')) return 'left';
+  return 'center';
+}
+
+// `marginLeft`/`marginTop` only move a chip the way a drag expects when
+// the anchor's `left`/`top` is the side ANCHOR_CSS actually specifies --
+// for an abs-positioned box, the browser solves the AUTO side from the
+// OPPOSITE margin, so a box anchored by `right`/`bottom` instead needs
+// `marginRight`/`marginBottom` (sign flipped, so increasing x/y_offset
+// still visually means "right"/"down"); the margin on the SPECIFIED side
+// has no effect on position at all. Operator-reported 2026-11-10:
+// dragging some elements only seemed to respond left/right, or jumped to
+// odd positions near an edge -- this is why: every chip used
+// marginLeft/marginTop regardless of which corner it was anchored to.
+function nudgeStyle(position: string | null | undefined, xOff: number, yOff: number, scale: number): React.CSSProperties {
+  const out: React.CSSProperties = {};
+  if (anchorCol(position) === 'right') out.marginRight = -xOff * scale;
+  else out.marginLeft = xOff * scale;
+  if (anchorRow(position) === 'bottom') out.marginBottom = -yOff * scale;
+  else out.marginTop = yOff * scale;
+  return out;
+}
+
+interface DragState { key: string; mode: 'move' | 'resize'; startX: number; startY: number; startOffX: number; startOffY: number; startSize: number; band: boolean }
 
 export function OverlaysPage(): React.ReactElement {
   const { push } = useToast();
@@ -435,6 +484,7 @@ export function OverlaysPage(): React.ReactElement {
     dragRef.current = {
       key, mode, startX: e.clientX, startY: e.clientY,
       startOffX: cur.x_offset ?? 0, startOffY: cur.y_offset ?? 0, startSize: cur.size ?? 1,
+      band: isBandKey(key, draftStyle),
     };
     (e.target as Element).setPointerCapture?.(e.pointerId);
   };
@@ -443,7 +493,11 @@ export function OverlaysPage(): React.ReactElement {
     if (!d) return;
     const rect = canvasRef.current?.getBoundingClientRect();
     const scale = rect && rect.width > 0 ? naturalSize.w / rect.width : 1;
-    const dx = (e.clientX - d.startX) * scale;
+    // A band ignores x_offset entirely server-side (always full width) --
+    // dragging it sideways moved the chip with no effect on the real
+    // poster, so horizontal movement is locked here instead of offering
+    // a drag that does nothing.
+    const dx = d.band ? 0 : (e.clientX - d.startX) * scale;
     const dy = (e.clientY - d.startY) * scale;
     if (d.mode === 'move') {
       updateElement(d.key, { x_offset: Math.round(d.startOffX + dx), y_offset: Math.round(d.startOffY + dy) });
@@ -735,6 +789,31 @@ function OverlayCanvas({
   const displayHeight = Math.round(displayWidth * (naturalSize.h / naturalSize.w));
   const enabledKeys = ELEMENT_ORDER.filter((k) => draftStyle[k]?.enabled === true);
 
+  // The real renderer auto-stacks every non-band badge sharing one anchor
+  // corner into a column (engine/overlay_render.py groups by anchor, then
+  // lays each one below the last) -- the chip canvas has no equivalent, so
+  // same-anchor chips used to render exactly on top of each other with
+  // only the last-painted one actually clickable (operator-reported:
+  // several rating-source badges "had nothing you could move" -- they
+  // were buried under whichever chip happened to paint last). This is a
+  // rough visual stagger, not a layout replica: real stacking depends on
+  // each badge's actual rendered size, which this canvas doesn't compute.
+  // It only needs to put each chip somewhere independently grabbable.
+  const STAGGER = 46; // natural-image px per stacked position
+  const groupIndex: Record<string, number> = {};
+  const groupSize: Record<string, number> = {};
+  {
+    const byAnchor: Record<string, string[]> = {};
+    for (const key of enabledKeys) {
+      if (isBandKey(key, draftStyle)) continue;
+      const pos = draftStyle[key]?.position || 'top_left';
+      (byAnchor[pos] ??= []).push(key);
+    }
+    for (const keys of Object.values(byAnchor)) {
+      keys.forEach((key, i) => { groupIndex[key] = i; groupSize[key] = keys.length; });
+    }
+  }
+
   return (
     <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', alignItems: 'flex-start' }}>
       <div>
@@ -763,12 +842,62 @@ function OverlayCanvas({
           {enabledKeys.map((key) => {
             const e = draftStyle[key] ?? {};
             const scale = displayWidth / naturalSize.w;
-            const anchor = ANCHOR_CSS[e.position || 'top_left'] ?? ANCHOR_CSS.top_left;
-            const nudge: React.CSSProperties = {
-              marginLeft: (e.x_offset ?? 0) * scale,
-              marginTop: (e.y_offset ?? 0) * scale,
-            };
             const size = e.size ?? 1;
+            const resizeHandle = (
+              <span
+                onPointerDown={(ev) => { ev.stopPropagation(); onChipPointerDown(key, 'resize')(ev); }}
+                style={{
+                  position: 'absolute', right: -4, bottom: -4, width: 8, height: 8,
+                  background: 'var(--accent)', borderRadius: '50%', cursor: 'nwse-resize',
+                }}
+                title="Drag to resize"
+              />
+            );
+
+            if (isBandKey(key, draftStyle)) {
+              // Matches the real renderer: always full width, only the
+              // vertical nudge (y_offset) does anything -- see isBandKey's
+              // comment. Rendered as a strip across the canvas, not a
+              // small chip, and drag is vertical-only (onChipPointerMove
+              // already locks dx for band keys).
+              const row = anchorRow(e.position);
+              const edge: React.CSSProperties = row === 'bottom'
+                ? { bottom: 0, ...nudgeStyle(e.position, 0, e.y_offset ?? 0, scale) }
+                : row === 'top'
+                  ? { top: 0, ...nudgeStyle(e.position, 0, e.y_offset ?? 0, scale) }
+                  : { top: '50%', marginTop: (e.y_offset ?? 0) * scale - 10 };
+              return (
+                <div
+                  key={key}
+                  onPointerDown={onChipPointerDown(key, 'move')}
+                  onPointerMove={onChipPointerMove}
+                  onPointerUp={onChipPointerUp}
+                  style={{
+                    position: 'absolute', left: 0, right: 0, ...edge,
+                    padding: `${Math.min(2 * size, 5)}px 6px`, fontSize: Math.min(10 * size, 13),
+                    textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    background: 'rgba(0,0,0,0.72)', color: '#fff',
+                    cursor: 'ns-resize', userSelect: 'none',
+                    borderTop: '1px solid rgba(255,255,255,0.3)', borderBottom: '1px solid rgba(255,255,255,0.3)',
+                  }}
+                  title={`${ELEMENT_LABELS[key] ?? key} — full width, drag up/down only`}
+                >
+                  {ELEMENT_LABELS[key] ?? key}
+                  {resizeHandle}
+                </div>
+              );
+            }
+
+            const anchor = ANCHOR_CSS[e.position || 'top_left'] ?? ANCHOR_CSS.top_left;
+            const idx = groupIndex[key] ?? 0;
+            const n = groupSize[key] ?? 1;
+            // Stagger, in natural y_offset units: 'bottom'-anchored groups
+            // stack upward from the edge (the real renderer's LAST item in
+            // anchor order sits closest to that edge), everything else
+            // stacks downward. Sign-matched to nudgeStyle's own
+            // "down-positive" convention so it composes with it below.
+            const stepsFromAnchor = anchorRow(e.position) === 'bottom' ? -(n - 1 - idx) : idx;
+            const nudge = nudgeStyle(e.position, e.x_offset ?? 0, (e.y_offset ?? 0) + stepsFromAnchor * STAGGER, scale);
             return (
               <div
                 key={key}
@@ -793,14 +922,7 @@ function OverlayCanvas({
                 title={`${ELEMENT_LABELS[key] ?? key} — drag to move`}
               >
                 {ELEMENT_LABELS[key] ?? key}
-                <span
-                  onPointerDown={(ev) => { ev.stopPropagation(); onChipPointerDown(key, 'resize')(ev); }}
-                  style={{
-                    position: 'absolute', right: -4, bottom: -4, width: 8, height: 8,
-                    background: 'var(--accent)', borderRadius: '50%', cursor: 'nwse-resize',
-                  }}
-                  title="Drag to resize"
-                />
+                {resizeHandle}
               </div>
             );
           })}

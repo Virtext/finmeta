@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from finmeta.api.deps import get_ctx
 from finmeta.api.run_service import scope_parts, submit_run
 from finmeta.api.state import AppContext
-from finmeta.engine.jobs import get_run, list_runs_page, run_log_summary
+from finmeta.engine.jobs import finish_run, get_run, list_runs_page, log as job_log, run_log_summary
 
 logger = logging.getLogger("finmeta.api.activity")
 
@@ -121,6 +121,35 @@ def _schedules(ctx: AppContext) -> List[Dict[str, Any]]:
         logger.warning("could not list scheduled jobs: %s", exc)
         return []
     return sorted(out, key=lambda j: (j["next_run_at"] or "~"))
+
+
+@router.post("/activity/active/cancel")
+def cancel_active_run(ctx: AppContext = Depends(get_ctx)) -> dict:
+    """Force-release the single run slot (operator-requested 2026-11-10: a
+    stuck apply left the operator with no way to get past it -- the queue
+    had a bulk clear already, but the run actually IN PROGRESS did not).
+
+    This is NOT a real cancellation -- the worker thread has no
+    cancellation point (same limitation ``clear_queues()`` documents) and
+    keeps running in the background until it finishes or errors on its
+    own; this only releases the slot so the next queued/submitted run can
+    start, and marks the run's own row ``error`` so Activity stops
+    showing it as perpetually "running". If the abandoned worker DOES
+    eventually finish for real, it will call ``finish_run``/
+    ``release_run`` again itself -- harmless (release_run no-ops once a
+    different run holds the slot; finish_run just overwrites this row's
+    status with whatever actually happened).
+    """
+    run_id = ctx.active_run
+    if not run_id:
+        raise HTTPException(status_code=404, detail="no run is active")
+    job_log(ctx.db_path, run_id, "warning",
+           "Cancelled by operator: the run slot was force-released. The "
+           "in-flight worker is not actually killed and may still be "
+           "writing in the background.")
+    finish_run(ctx.db_path, run_id, "error")
+    ctx.release_run(run_id)
+    return {"cancelled": run_id}
 
 
 @router.post("/activity/{run_id}/retry")

@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  clearQueuedRuns, dropQueuedItem, dropQueuedLibrary, getActivity, getHelp, getJob, retryRun,
+  cancelActiveRun, clearQueuedRuns, dropQueuedItem, dropQueuedLibrary, getActivity, getHelp, getJob, retryRun,
 } from '../api';
 import type { ActivityResp, ActivityRun, HelpResp, JobResp } from '../types';
 import HelpIcon from './HelpIcon';
@@ -153,6 +153,27 @@ export default function ActivityPage({ onBack, onOpenHealth }: Props) {
     }
   }, [load]);
 
+  // Operator-requested 2026-11-10 (a stuck apply left no way past it):
+  // force-releases the run slot. NOT a real cancellation -- there is no
+  // cancellation point inside a running apply, so the abandoned worker
+  // may keep running in the background; this only frees the slot for the
+  // next thing and marks the run's own row 'error' so it stops showing
+  // as perpetually "running".
+  const [cancelling, setCancelling] = useState(false);
+  const cancelActive = useCallback(async () => {
+    if (!window.confirm('Force-stop the run in progress? This frees the slot for the next run, but the abandoned worker may keep running in the background -- it is not actually killed.')) return;
+    setCancelling(true);
+    try {
+      await cancelActiveRun();
+      setMsg('Run slot force-released.');
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setCancelling(false);
+    }
+  }, [load]);
+
   const active = data?.active ?? null;
   const queuedCount = (data?.queued.items.length ?? 0)
     + (data?.queued.libraries.length ?? 0);
@@ -178,6 +199,9 @@ export default function ActivityPage({ onBack, onOpenHealth }: Props) {
               <strong>{ACTION_LABELS[active.action ?? ''] ?? active.action ?? 'Run'}</strong>
               {' '}on {scopeLabel(active.scope)}
               <span className="muted"> · {elapsed(active.started_at)}</span>
+              <button className="btn btn-ghost" disabled={cancelling} onClick={() => void cancelActive()} style={{ marginLeft: 10 }}>
+                {cancelling ? 'Cancelling…' : 'Cancel'}
+              </button>
             </>
           ) : (
             <span className="muted">Idle — nothing running.</span>
