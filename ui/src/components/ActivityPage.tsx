@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  dropQueuedItem, dropQueuedLibrary, getActivity, getHelp, getJob, retryRun,
+  clearQueuedRuns, dropQueuedItem, dropQueuedLibrary, getActivity, getHelp, getJob, retryRun,
 } from '../api';
 import type { ActivityResp, ActivityRun, HelpResp, JobResp } from '../types';
 import HelpIcon from './HelpIcon';
@@ -135,6 +135,24 @@ export default function ActivityPage({ onBack, onOpenHealth }: Props) {
     catch (e) { setError((e as Error).message); }
   }, [load]);
 
+  // Operator-requested 2026-11-10: a bulk "fix all" can queue hundreds of
+  // single-item runs behind whatever is currently running -- dropping
+  // them one chip at a time is not realistic at that scale.
+  const [clearing, setClearing] = useState(false);
+  const clearAllQueued = useCallback(async () => {
+    if (!window.confirm(`Drop all ${queuedCount} queued run${queuedCount === 1 ? '' : 's'}? The run already in progress keeps going.`)) return;
+    setClearing(true);
+    try {
+      const r = await clearQueuedRuns();
+      setMsg(`Dropped ${r.dropped} queued run${r.dropped === 1 ? '' : 's'}.`);
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setClearing(false);
+    }
+  }, [load]);
+
   const active = data?.active ?? null;
   const queuedCount = (data?.queued.items.length ?? 0)
     + (data?.queued.libraries.length ?? 0);
@@ -167,7 +185,7 @@ export default function ActivityPage({ onBack, onOpenHealth }: Props) {
         </div>
         {queuedCount > 0 && (
           <div className="activity-queue">
-            <span className="muted">Queued:</span>
+            <span className="muted">Queued ({queuedCount}):</span>
             {data?.queued.libraries.map((q) => (
               <span className="activity-chip" key={`${q.action}-${q.library}-${q.tier}`}>
                 {ACTION_LABELS[q.action] ?? q.action} · {q.library}
@@ -179,7 +197,12 @@ export default function ActivityPage({ onBack, onOpenHealth }: Props) {
                 >×</button>
               </span>
             ))}
-            {data?.queued.items.map((id) => (
+            {/* A bulk fix can queue hundreds of single-item runs -- one
+                DOM chip + poll-driven re-render per item is itself what
+                made this page feel sluggish at that scale (operator-
+                reported). Past a small count, stop rendering them
+                individually; "Cancel all queued" is the real way out. */}
+            {(data?.queued.items ?? []).slice(0, 15).map((id) => (
               <span className="activity-chip" key={id}>
                 one item
                 <button
@@ -189,6 +212,12 @@ export default function ActivityPage({ onBack, onOpenHealth }: Props) {
                 >×</button>
               </span>
             ))}
+            {(data?.queued.items.length ?? 0) > 15 && (
+              <span className="muted">+{data!.queued.items.length - 15} more</span>
+            )}
+            <button className="btn btn-ghost" disabled={clearing} onClick={() => void clearAllQueued()}>
+              {clearing ? 'Cancelling…' : 'Cancel all queued'}
+            </button>
           </div>
         )}
         {data?.dry_run && <div className="dryflag on">DRY RUN</div>}

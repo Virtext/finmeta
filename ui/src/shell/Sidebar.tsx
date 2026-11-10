@@ -16,6 +16,9 @@ const NAV: NavItem[] = [
   { id: 'packs', label: 'Packs', icon: 'packs', path: '/packs' },
   { id: 'automation', label: 'Automation', icon: 'automation', path: '/automation' },
   { id: 'activity', label: 'Activity', icon: 'activity', path: '/activity' },
+  // 2026-11-10: every scan group needed a modern destination, not just
+  // artwork (shell/HealthShell.tsx wraps the shared HealthPage.tsx).
+  { id: 'health', label: 'Health', icon: 'health', path: '/health' },
   { id: 'settings', label: 'Settings', icon: 'settings', path: '/settings' },
 ];
 

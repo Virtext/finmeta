@@ -194,7 +194,7 @@ export function OverviewPage(): React.ReactElement {
                       <button
                         key={g}
                         className="fm-overview-grouprow"
-                        onClick={() => navigate(ARTWORK_GROUPS.includes(g) ? '/artwork' : '/activity')}
+                        onClick={() => navigate(ARTWORK_GROUPS.includes(g) ? '/artwork' : '/health')}
                       >
                         <span>{GROUP_LABELS[g] ?? g}</span>
                         <span style={{ color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{n}</span>
@@ -212,18 +212,25 @@ export function OverviewPage(): React.ReactElement {
         </Card>
 
         <Card>
-          <CardHeader title="Runs" />
+          <CardHeader title="Runs" action={<Button size="sm" variant="ghost" onClick={() => navigate('/activity')}>View all →</Button>} />
           <CardBody>
             {loading ? <Skeleton height={60} /> : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {activity!.active && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--text-sm)' }}>
+                  <div
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--text-sm)', cursor: 'pointer' }}
+                    onClick={() => navigate('/activity')}
+                  >
                     <Badge tone="accent">now</Badge>
                     <span>{runLabel(activity!.active)}</span>
                   </div>
                 )}
                 {activity!.runs.slice(0, 4).map((r: ActivityRun) => (
-                  <div key={r.run_id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--text-sm)' }}>
+                  <div
+                    key={r.run_id}
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--text-sm)', cursor: 'pointer' }}
+                    onClick={() => navigate('/activity')}
+                  >
                     <StatusDot tone={runTone(r.status)} title={r.status} />
                     <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{runLabel(r)}</span>
                     <span style={{ color: 'var(--text-faint)', fontSize: 'var(--text-xs)' }}>{timeAgo(r.finished_at)}</span>
@@ -259,6 +266,7 @@ export function OverviewPage(): React.ReactElement {
                 ]}
                 rows={libs!}
                 rowKey={(l) => l.name}
+                onRowClick={(l) => navigate(`/library/${encodeURIComponent(l.name)}`)}
               />
             )}
           </CardBody>
@@ -331,8 +339,13 @@ export function OverviewPage(): React.ReactElement {
                   {fixableCount > 0 && (
                     <Button size="sm" loading={fixingAll} onClick={fixAllArtwork}>Fix/try {fixableCount} automatically</Button>
                   )}
-                  {groups.length > 0 && (
+                  {(guaranteedFixCount > 0 || upgradeTryCount > 0) && (
                     <Button size="sm" variant="ghost" onClick={() => navigate('/artwork')}>Open Artwork →</Button>
+                  )}
+                  {/* The error/warning badges above cover the WHOLE scan,
+                      not just artwork -- give a way to see those too. */}
+                  {groups.some((g) => !ARTWORK_GROUPS.includes(g[0])) && (
+                    <Button size="sm" variant="ghost" onClick={() => navigate('/health')}>Open Health →</Button>
                   )}
                 </div>
               </>

@@ -165,7 +165,23 @@ export function ArtworkPage({ dryRun }: { dryRun: boolean }): React.ReactElement
                   )}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <strong style={{ fontSize: 'var(--text-sm)' }}>{f.item_name}</strong>
+                      {/* Clickable regardless of fix_kind -- even when
+                          nothing here can auto-fix it, the operator can
+                          still open the real item and look/fix by hand
+                          (operator-requested, 2026-11-10). */}
+                      {f.item_id ? (
+                        <button
+                          style={{
+                            font: 'inherit', background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                            color: 'var(--accent)', fontWeight: 600, fontSize: 'var(--text-sm)',
+                          }}
+                          onClick={() => navigate(`/library/${encodeURIComponent(f.library)}/item/${encodeURIComponent(f.item_id!)}`)}
+                        >
+                          {f.item_name}
+                        </button>
+                      ) : (
+                        <strong style={{ fontSize: 'var(--text-sm)' }}>{f.item_name}</strong>
+                      )}
                       <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-faint)' }}>{f.library}</span>
                       <Badge tone={severityTone(f.severity)}>{f.severity}</Badge>
                     </div>

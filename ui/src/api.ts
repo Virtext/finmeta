@@ -202,6 +202,12 @@ export const dropQueuedLibrary = (action: string, library: string, tier = 1) =>
   j<{ dropped: unknown }>(
     `/api/activity/queued/libraries/${enc(action)}/${enc(library)}?tier=${tier}`,
     { method: 'DELETE' });
+
+// Drops every pending item/library run in one call -- a bulk fix can queue
+// far more than dropping them one at a time (dropQueuedItem above) is a
+// realistic way to undo. Never touches whatever is actively running.
+export const clearQueuedRuns = () =>
+  j<{ dropped: number }>('/api/activity/queued', { method: 'DELETE' });
 export const getLatestScan = () => j<LatestScanResp>('/api/scans/latest');
 
 export const getFindings = (

@@ -15,6 +15,7 @@ import { PacksPage } from './PacksPage';
 import { AutomationPage } from './AutomationPage';
 import { SettingsShell } from './SettingsShell';
 import { ActivityShell } from './ActivityShell';
+import { HealthShell } from './HealthShell';
 import { CommandPalette } from './CommandPalette';
 import { NotBuiltYet } from './NotBuiltYet';
 import './shell.css';
@@ -28,6 +29,7 @@ const TITLES: Record<string, string> = {
   packs: 'Packs',
   automation: 'Automation',
   activity: 'Activity',
+  health: 'Health',
   settings: 'Settings',
 };
 
@@ -104,7 +106,8 @@ function ModernShell(): React.ReactElement {
           {section === 'automation' && <AutomationPage />}
           {section === 'settings' && <SettingsShell />}
           {section === 'activity' && <ActivityShell />}
-          {!['overview', 'library', 'artwork', 'overlays', 'profiles', 'packs', 'automation', 'settings', 'activity'].includes(section) && (
+          {section === 'health' && <HealthShell dryRun={dryRun ?? true} />}
+          {!['overview', 'library', 'artwork', 'overlays', 'profiles', 'packs', 'automation', 'settings', 'activity', 'health'].includes(section) && (
             <NotBuiltYet title={TITLES[section] ?? section} />
           )}
         </div>

@@ -159,6 +159,26 @@ def test_queued_entries_can_be_dropped_before_they_start(ctx_factory):
     assert body["queued"] == {"items": [], "libraries": []}
 
 
+def test_clear_queued_drops_everything_but_not_the_active_run(ctx_factory):
+    """2026-11-10: a bulk fix can queue far more than is realistic to drop
+    one at a time -- DELETE /api/activity/queued clears both queues in
+    one call, and never touches whatever is actually running."""
+    ctx = ctx_factory()
+    _run(ctx, "live", action="apply", scope="item:item-1", status="running")
+    assert ctx.claim_run("live", action="apply", item_id="item-1")
+    ctx.queue_webhook_item("item-9")
+    ctx.queue_webhook_item("item-10")
+    ctx.queue_library_run("apply", "Movies", 1)
+    with _client(ctx) as client:
+        r = client.delete("/api/activity/queued")
+        assert r.status_code == 200
+        assert r.json() == {"dropped": 3}
+        body = client.get("/api/activity").json()
+    assert body["queued"] == {"items": [], "libraries": []}
+    assert body["active"]["run_id"] == "live"      # untouched
+    ctx.release_run("live")
+
+
 def test_scheduled_jobs_and_their_next_run_are_listed(ctx_factory):
     ctx = ctx_factory()
 
