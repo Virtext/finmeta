@@ -10,14 +10,19 @@ export interface TopbarProps {
   onToggleTheme: () => void;
   onLogout: () => void;
   onOpenSearch: () => void;
+  onOpenNav: () => void;
 }
 
 // D3 (SPEC_S14_UI.md §7): still no Notifications bell -- S12e doesn't exist.
 // The search box WAS omitted for the same reason until there was something
 // real behind it -- see shell/CommandPalette.tsx.
-export function Topbar({ crumb, dryRun, activeRunLabel, theme, onToggleTheme, onLogout, onOpenSearch }: TopbarProps): React.ReactElement {
+export function Topbar({ crumb, dryRun, activeRunLabel, theme, onToggleTheme, onLogout, onOpenSearch, onOpenNav }: TopbarProps): React.ReactElement {
   return (
     <header className="fm-topbar">
+      {/* Mobile-only: the sidebar is hidden below 900px (shell.css) and
+          becomes an off-canvas drawer this opens -- there is otherwise no
+          way to navigate at all on a phone/tablet width. */}
+      <IconButton icon="menu" label="Open navigation" className="fm-topbar__navbtn" onClick={onOpenNav} />
       <div className="fm-topbar__crumb">
         <span>Finmeta</span>
         <span className="fm-topbar__sep">›</span>

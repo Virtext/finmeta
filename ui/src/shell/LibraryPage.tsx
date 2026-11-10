@@ -307,7 +307,7 @@ export function LibraryPage({ path, dryRun }: LibraryPageProps): React.ReactElem
         </Button>}
       />
       {itemId ? (
-        <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 20, alignItems: 'start' }}>
+        <div className="fm-stack-on-mobile" style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 20, alignItems: 'start' }}>
           <PosterGrid library={library} selectedId={itemId} narrow />
           <ItemDetail library={library} itemId={itemId} dryRun={dryRun} />
         </div>

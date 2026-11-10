@@ -59,7 +59,7 @@ built for Jellyfin's data model rather than translated from Plex's. Its
 overlay badges are rendered in a style compatible with Kometa's own
 defaults, but Finmeta does not import a Kometa `config.yml` or any other
 Kometa configuration — image packs are placed by hand under
-`config/assets/packs/`.
+the `assets/packs/` folder inside wherever you mounted Finmeta's config volume in Docker (not this repo's own `config/`).
 
 ## Features
 
@@ -73,7 +73,7 @@ Kometa configuration — image packs are placed by hand under
 - **Poster overlays** — resolution, HDR, audio codec, ratings, network
   badges, TV show status — rendered in a style compatible with Kometa's
   defaults, with richer image packs placed by hand under
-  `config/assets/packs/`.
+  the `assets/packs/` folder inside wherever you mounted Finmeta's config volume in Docker (not this repo's own `config/`).
 - **Collections** — preset builders (TMDb collections, genre/year filters,
   curated lists) plus an "Adaptive Seasonal Collections" toggle that
   mirrors Kometa's own seasonal calendar (Halloween, Christmas, etc.).

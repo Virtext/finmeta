@@ -765,7 +765,15 @@ function OverlayCanvas({
                 onPointerUp={onChipPointerUp}
                 style={{
                   position: 'absolute', ...anchor, ...nudge,
-                  padding: `${2 * size}px ${5 * size}px`, fontSize: 10 * size,
+                  // `size` is the element's real on-poster scale (often 2-4x
+                  // for visibility on a full-resolution render) -- applied
+                  // directly to padding/fontSize here it could make a chip
+                  // with a long label (e.g. "TV status") cover the entire
+                  // 280px preview canvas. Clamp so the chip stays a grabbable
+                  // label at any configured size instead of a full-image veil.
+                  padding: `${Math.min(2 * size, 5)}px ${Math.min(5 * size, 10)}px`,
+                  fontSize: Math.min(10 * size, 13),
+                  maxWidth: '85%', overflow: 'hidden', textOverflow: 'ellipsis',
                   background: 'rgba(0,0,0,0.72)', color: '#fff', borderRadius: 4,
                   cursor: 'move', userSelect: 'none', whiteSpace: 'nowrap',
                   border: '1px solid rgba(255,255,255,0.3)',

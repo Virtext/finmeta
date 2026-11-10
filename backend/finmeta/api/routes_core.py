@@ -99,11 +99,21 @@ def libraries(ctx: AppContext = Depends(get_ctx)) -> dict:
     for name, lib in cfg.libraries.items():
         art = lib.artwork
         art_fields = [k for k in art.model_dump() if getattr(art, k, False)]
+        # `lib.overlays` is the deprecated per-library kind list (Fase A step
+        # 2b: config-load auto-migrates it into a profile, and only the
+        # profile is used from then on) -- showing it here told the operator
+        # nothing about what overlays a library actually gets once it's been
+        # migrated to a profile. `overlay_profile`/`overlay_element_count` are
+        # the same single source of truth /libraries/{name}/items already
+        # reports.
+        overlay_elements = _profile_overlay_names(lib, cfg)
         out.append({
             "name": name, "type": lib.type,
             "metadata": lib.metadata.enabled,
             "theme_song": lib.theme_song,
             "overlays": list(lib.overlays),
+            "overlay_profile": getattr(lib, "overlay_profile", None),
+            "overlay_element_count": len(overlay_elements),
             "artwork_enabled": art_fields,
         })
     # `sample_size` was exposed here (S9d4c Fase A step 5) only so
@@ -328,6 +338,7 @@ _IMAGE_TYPE = {"poster": "Primary", "backdrop": "Backdrop",
 
 @router.get("/items/{item_id}/image")
 def item_image(item_id: str, kind: str = Query(default="poster"),
+               max_width: Optional[int] = Query(default=None, ge=50, le=2000),
                ctx: AppContext = Depends(get_ctx)) -> Response:
     """One of an item's OWN current Jellyfin images, proxied through Finmeta.
 
@@ -337,13 +348,17 @@ def item_image(item_id: str, kind: str = Query(default="poster"),
     HTTP GET to Jellyfin, so the browser never sees the Jellyfin URL or API
     key. 404 (no such image on this item) is a normal, expected outcome for
     a library with incomplete artwork, not a server error.
+
+    ``max_width`` lets a caller ask Jellyfin to downscale (grid thumbnails
+    don't need the original file) -- omitted by default so a caller that
+    wants the real image doesn't have to know this exists.
     """
     image_type = _IMAGE_TYPE.get(kind)
     if image_type is None:
         raise HTTPException(status_code=400, detail=f"unknown image kind {kind!r}")
     jf = ctx.make_jellyfin()
     try:
-        result = jf.get_image_bytes(item_id, image_type)
+        result = jf.get_image_bytes(item_id, image_type, max_width=max_width)
     except JellyfinError as exc:
         raise HTTPException(status_code=502, detail=f"jellyfin error: {exc}")
     if result is None:

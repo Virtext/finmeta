@@ -225,7 +225,20 @@ def test_item_image_returns_bytes(client, context):
     assert r.status_code == 200
     assert r.content == b"\xff\xd8fake-jpeg"
     assert r.headers["content-type"] == "image/jpeg"
-    mock_jf.get_image_bytes.assert_called_once_with("item-1", "Primary")
+    mock_jf.get_image_bytes.assert_called_once_with("item-1", "Primary", max_width=None)
+
+
+def test_item_image_forwards_max_width(client, context):
+    """2026-11-10: grid thumbnails ask Jellyfin to downscale server-side."""
+    from unittest.mock import MagicMock
+    mock_jf = MagicMock()
+    mock_jf.get_image_bytes.return_value = (b"\xff\xd8fake-jpeg", "image/jpeg")
+    mock_jf.close.return_value = None
+    context.make_jellyfin = lambda cfg=None: mock_jf
+
+    r = client.get("/api/items/item-1/image?kind=poster&max_width=320")
+    assert r.status_code == 200
+    mock_jf.get_image_bytes.assert_called_once_with("item-1", "Primary", max_width=320)
 
 
 def test_item_image_404_when_jellyfin_has_none(client, context):

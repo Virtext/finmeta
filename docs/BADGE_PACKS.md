@@ -14,6 +14,12 @@ Metacritic/Letterboxd/Trakt) plus Rotten Tomatoes' fresh/rotten icons, fetched
 on demand because they're real trademarks. Everything in this document is
 about resolution/HDR/audio-codec badges, which have no such restriction.
 
+Every `<config>` below means **the folder you mounted as Finmeta's config
+volume in your `docker run`/compose file** (commonly `/config` inside the
+container) — never a folder named `assets` or `config` inside the Finmeta
+project/image itself. The Packs page in the app shows the exact resolved
+absolute path for your install if you're unsure.
+
 ## Quick start: adding your own badge images
 
 ### The simple way: one flat folder, no pack.yml

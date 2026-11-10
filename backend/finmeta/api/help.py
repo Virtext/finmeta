@@ -260,7 +260,10 @@ FEATURES: Dict[str, Dict[str, str]] = {
                              "Kometa logo pack (a small fixed set of icons for ratings + the common "
                              "codec/resolution badges — install it once under \"Installed packs\") "
                              "and/or a richer image pack placed by hand under "
-                             "`config/assets/packs/<name>/` and activated under \"Installed packs\" "
+                             "`assets/packs/<name>/` **inside the folder you mounted as "
+                             "Finmeta's config volume in Docker** (not a folder inside the app "
+                             "itself — the Packs page shows the exact resolved path for this "
+                             "install) and activated under \"Installed packs\" "
                              "below. Either way, a badge with no matching image "
                              "simply falls back to plain text — nothing ever breaks, it just looks "
                              "plainer."},

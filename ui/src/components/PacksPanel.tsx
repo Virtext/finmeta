@@ -30,6 +30,11 @@ export default function PacksPanel({ profileName }: Props) {
   const [selPacks, setSelPacks] = useState<string[]>([]);
   const [packsMsg, setPacksMsg] = useState<string | null>(null);
   const [packsErr, setPacksErr] = useState<string | null>(null);
+  // Real resolved path (operator feedback: a bare "assets/packs/..." reads
+  // as somewhere inside the app itself, not the folder actually bind-mounted
+  // into the Docker container -- show the real one instead of guessing at
+  // a generic placeholder that's wrong for most installs).
+  const [packsDir, setPacksDir] = useState<string | null>(null);
 
   useEffect(() => {
     getConfig()
@@ -42,7 +47,11 @@ export default function PacksPanel({ profileName }: Props) {
   }, []);
 
   async function refreshPacks(): Promise<void> {
-    try { setAvailPacks((await getPacks()).packs ?? []); } catch { /* keep last good */ }
+    try {
+      const r = await getPacks();
+      setAvailPacks(r.packs ?? []);
+      setPacksDir(r.packs_dir ?? null);
+    } catch { /* keep last good */ }
   }
   useEffect(() => { void refreshPacks(); }, []);
 
@@ -64,7 +73,7 @@ export default function PacksPanel({ profileName }: Props) {
     try {
       await scaffoldPack(name, categories);
       await refreshPacks();
-      setPacksMsg(`"${name}" created — drop images into assets/packs/${name}/images/<category>/`);
+      setPacksMsg(`"${name}" created — drop images into ${packsDir ?? 'assets/packs'}/${name}/images/<category>/`);
       setTimeout(() => setPacksMsg(null), 6000);
     } catch (e: any) {
       setPacksErr(e?.message ?? 'create failed');
@@ -173,8 +182,8 @@ export default function PacksPanel({ profileName }: Props) {
           </div>
         );
       })}
-      <NewPackForm onCreate={(name, cats) => void scaffoldNewPack(name, cats)} />
-      <PackNamingHelp />
+      <NewPackForm packsDir={packsDir} onCreate={(name, cats) => void scaffoldNewPack(name, cats)} />
+      <PackNamingHelp packsDir={packsDir} />
       {packsMsg && <span className="field-msg ok">{packsMsg}</span>}
       {packsErr && <span className="error">{packsErr}</span>}
     </fieldset>
@@ -243,10 +252,11 @@ const SCAFFOLD_CATEGORIES: { id: string; label: string; exampleKey: string }[] =
 // docs/BADGE_PACKS.md), the operator then drops images into the folders it
 // creates. Own small form, not a modal -- matches this fieldset's existing
 // inline-row style.
-function NewPackForm({ onCreate }: { onCreate: (name: string, categories: string[]) => void }) {
+function NewPackForm({ packsDir, onCreate }: { packsDir: string | null; onCreate: (name: string, categories: string[]) => void }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
   const [cats, setCats] = useState<string[]>(SCAFFOLD_CATEGORIES.map((c) => c.id));
+  const dir = packsDir ?? 'assets/packs';
 
   if (!open) {
     return (
@@ -256,7 +266,7 @@ function NewPackForm({ onCreate }: { onCreate: (name: string, categories: string
         </button>
         <p className="field-hint muted" style={{ margin: '4px 0 0' }}>
           Tip: for a resolution/HDR/audio-only pack you can skip this form entirely — create{' '}
-          <code>assets/packs/&lt;name&gt;/images/</code> yourself and drop correctly-named PNGs
+          <code>{dir}/&lt;name&gt;/images/</code> yourself and drop correctly-named PNGs
           straight into it, no pack.yml or subfolders needed. See docs/BADGE_PACKS.md.
         </p>
       </div>
@@ -296,7 +306,7 @@ function NewPackForm({ onCreate }: { onCreate: (name: string, categories: string
           <ul style={{ margin: 0, paddingLeft: '18px' }}>
             {SCAFFOLD_CATEGORIES.filter((c) => cats.includes(c.id)).map((c) => (
               <li key={c.id}>
-                <code>assets/packs/{name.trim() || '…'}/images/{c.id}/{c.exampleKey}.png</code>
+                <code>{dir}/{name.trim() || '…'}/images/{c.id}/{c.exampleKey}.png</code>
               </li>
             ))}
           </ul>
@@ -344,7 +354,8 @@ const KEY_REFERENCE: { category: string; label: string; rows: { key: string; mea
 // single image, not just the mechanism, surfaced in the app itself rather
 // than only in docs/BADGE_PACKS.md (which still has the advanced
 // matchers/full schema).
-function PackNamingHelp() {
+function PackNamingHelp({ packsDir }: { packsDir: string | null }) {
+  const dir = packsDir ?? 'assets/packs';
   return (
     <details className="pack-row" style={{ marginTop: '10px' }}>
       <summary style={{ cursor: 'pointer', fontWeight: 600 }}>
@@ -352,11 +363,15 @@ function PackNamingHelp() {
       </summary>
       <div style={{ marginTop: '10px' }}>
         <p className="field-hint muted" style={{ marginTop: 0 }}>
-          Create <code>assets/packs/&lt;your-pack-name&gt;/images/</code> and drop PNG files
+          Create <code>{dir}/&lt;your-pack-name&gt;/images/</code> and drop PNG files
           straight into it — one file per key below, named exactly as shown (no subfolders, no
           pack.yml). Finmeta reads each filename and works out on its own which badge it is;
           every key is unique across all three categories, so the name alone is enough. Add only
           the keys you want to override — anything you skip just has no badge for that case.
+          {packsDir && (
+            <> This is the folder you bind-mounted as your Finmeta config volume in Docker — not
+              a folder inside the app itself.</>
+          )}
         </p>
         <p className="field-hint muted">
           <strong>Format:</strong> PNG with a transparent background, tightly cropped to the
