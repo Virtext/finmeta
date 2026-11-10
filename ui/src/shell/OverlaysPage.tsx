@@ -212,6 +212,18 @@ export function OverlaysPage(): React.ReactElement {
     setSelected(name);
     setSelectedStyle(null);
     setEditorTab('studio');
+    // The preview item/library used to be totally decoupled from which
+    // profile is selected -- switching from an Anime profile to a Movies
+    // one kept the canvas pinned on the same Anime title with no visible
+    // change at all (operator-reported). Follow the newly selected
+    // profile to whichever library actually uses it, and drop the stale
+    // item so the canvas doesn't silently keep rendering a title the new
+    // profile was never meant for.
+    const usedLibs = usedBy(name);
+    if (usedLibs.length && !usedLibs.includes(previewLibrary)) {
+      setPreviewLibrary(usedLibs[0]);
+      setPreviewItem(null);
+    }
     const prof = profiles[name] ?? {};
     const style = (prof.style as any) ?? {};
     const flatElements: string[] = Array.isArray(prof.elements) ? prof.elements.map(String) : [];

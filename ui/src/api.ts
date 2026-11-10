@@ -225,6 +225,47 @@ export const fixFindings = (scanId: string, findingIds: number[]) =>
     body: JSON.stringify({ finding_ids: findingIds }),
   });
 
+// routes_scans.py's MAX_FIX_ITEMS -- the backend 422s a single request
+// whose DISTINCT items (not finding rows) exceed this. A library with a
+// few thousand items can easily produce >50 fixable findings in one go
+// (operator hit "153 > 50" on a real deployment), so any bulk "fix all"
+// must chunk instead of sending every id in one request.
+const MAX_FIX_ITEMS = 50;
+
+// Splits findings into request-sized batches by DISTINCT item_id (not
+// finding count -- one item can carry several findings, e.g. missing both
+// poster and backdrop, and those must land in the same batch so the
+// per-item fix isn't split across two requests), then submits each batch
+// in turn and merges the results as if it were one call.
+export async function fixFindingsBatched(
+  scanId: string, findings: { id: number; item_id: string | null }[],
+): Promise<FixResp> {
+  const batches: number[][] = [];
+  let current: number[] = [];
+  let currentItems = new Set<string>();
+  for (const f of findings) {
+    const itemId = f.item_id ?? `__none__${f.id}`;
+    const wouldGrow = !currentItems.has(itemId);
+    if (wouldGrow && currentItems.size >= MAX_FIX_ITEMS && current.length > 0) {
+      batches.push(current);
+      current = [];
+      currentItems = new Set();
+    }
+    current.push(f.id);
+    currentItems.add(itemId);
+  }
+  if (current.length > 0) batches.push(current);
+
+  const merged: FixResp = { submitted: [], not_fixable: [], unknown: [] };
+  for (const batch of batches) {
+    const r = await fixFindings(scanId, batch);
+    merged.submitted.push(...r.submitted);
+    merged.not_fixable.push(...r.not_fixable);
+    merged.unknown.push(...r.unknown);
+  }
+  return merged;
+}
+
 export const deleteScan = (scanId: string) =>
   j<{ deleted: string }>(`/api/scans/${enc(scanId)}`, { method: 'DELETE' });
 

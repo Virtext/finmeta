@@ -23,7 +23,13 @@ router = APIRouter(prefix="/api", tags=["scans"])
 
 # Fix kinds this API can act on; everything else is informational (the fix
 # lives in Jellyfin/Sonarr/config, or there is deliberately no fix at all).
-_ACTIONABLE = ("apply_item", "refresh_item")
+# `candidate_picker` (operator-requested 2026-11-10: "try to upgrade low
+# quality artwork") is best-effort, not guaranteed -- the scanner only
+# flags a kind as low-resolution when ranking already preferred it over
+# every other source, so there may genuinely be nothing better. Trying
+# costs nothing but a reshuffle + an apply, so it is still worth doing
+# automatically rather than requiring a manual pick every time.
+_ACTIONABLE = ("apply_item", "refresh_item", "candidate_picker")
 
 # An apply is one run per item. Fixing a whole library's worth of findings in
 # one click would queue thousands of runs, so a single request is capped and
@@ -100,6 +106,12 @@ def fix_findings(scan_id: str, body: FixRequest,
       because the flag is set would be worse than doing nothing.
     - ``refresh_item`` -> ask Jellyfin to re-read what is already on disk. No
       run, no media write, so this is allowed under ``dry_run``.
+    - ``candidate_picker`` -> same reshuffle+clear-lock the manual "Re-pick"
+      button does (``POST /items/{id}/reshuffle``), for the specific kind(s)
+      the finding flagged, then folded into the same apply run as any other
+      ``apply_item`` fix for that item. Best-effort: ranking already
+      preferred this candidate over every other source, so there may be
+      nothing better -- rescan to see whether it actually improved.
     - anything else    -> reported back in ``not_fixable``; the UI should not
       have offered a button for it.
 
@@ -121,8 +133,12 @@ def fix_findings(scan_id: str, body: FixRequest,
 
     apply_rows = [r for r in actionable if r["fix_kind"] == "apply_item"]
     refresh_rows = [r for r in actionable if r["fix_kind"] == "refresh_item"]
+    pick_rows = [r for r in actionable if r["fix_kind"] == "candidate_picker"]
 
-    apply_items = _distinct([r["item_id"] for r in apply_rows])
+    # A candidate_picker fix folds into the same apply run as any other
+    # apply_item fix on that item -- one item never gets two competing
+    # applies just because it has both kinds of finding.
+    apply_items = _distinct([r["item_id"] for r in apply_rows] + [r["item_id"] for r in pick_rows])
     refresh_items = _distinct([r["item_id"] for r in refresh_rows])
 
     if len(apply_items) + len(refresh_items) > MAX_FIX_ITEMS:
@@ -160,6 +176,23 @@ def fix_findings(scan_id: str, body: FixRequest,
         finally:
             jf.close()
 
+    if pick_rows:
+        # Same operation the manual "Re-pick" button performs (S9d4a/S9d5):
+        # bump the reshuffle counter and clear the artwork lock for each
+        # (item, kind) pair the findings named, so the apply below actually
+        # re-resolves the candidate instead of repeating the locked one.
+        kinds_by_item: dict = {}
+        for r in pick_rows:
+            kind = (r["detail"] or {}).get("kind")
+            if kind:
+                kinds_by_item.setdefault(r["item_id"], set()).add(kind)
+        for item_id, kinds in kinds_by_item.items():
+            for kind in kinds:
+                ctx.overrides.increment_reshuffle(item_id, kind)
+                ctx.overrides.clear_lock(item_id, kind)
+        if kinds_by_item:
+            ctx.invalidate_plans()
+
     for item_id in apply_items:
         run_id, err = submit_run(ctx, "apply", item_id=item_id)
         if run_id:
@@ -172,6 +205,7 @@ def fix_findings(scan_id: str, body: FixRequest,
             submitted.append({"item_id": item_id, "action": "apply_item",
                               "queued": True, "detail": err})
         fixed_ids.extend(r["id"] for r in apply_rows if r["item_id"] == item_id)
+        fixed_ids.extend(r["id"] for r in pick_rows if r["item_id"] == item_id)
 
     scan_store.mark_fixed(ctx.db_path, fixed_ids)
     return {"submitted": submitted, "not_fixable": not_fixable,

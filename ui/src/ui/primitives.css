@@ -201,6 +201,13 @@
   border-radius: var(--r-lg);
   padding: 15px 16px;
   min-width: 0;
+  /* .fm-card is a <div> almost everywhere, where this changes nothing (it
+     already inherits --text from the page). LibraryPage's LibraryPicker
+     applies it to a <button> instead -- browsers give <button> its own
+     UA-stylesheet `color` (often black) that does NOT inherit from the
+     page, so without this the library names rendered unreadable black
+     text on the dark theme (operator-reported). */
+  color: var(--text);
 }
 
 .fm-card__head { display: flex; align-items: center; gap: 9px; margin-bottom: 13px; }
