@@ -50,6 +50,49 @@ rendered poster before anything is written
 </tr>
 </table>
 
+### Modern UI (opt-in)
+
+A redesigned shell is available alongside the screens above — same
+backend, same safety guarantees, a reworked interface. It's opt-in so an
+existing install sees exactly what it saw before until you switch:
+append `?ui=modern` to the URL once, or flip it on from Settings (the
+choice is then remembered).
+
+<table>
+<tr>
+<td width="50%">
+
+**Overview** — libraries, latest scan, recent runs, service health and
+artwork coverage at a glance
+![Overview](docs/assets/screenshots/modern-overview.png)
+
+</td>
+<td width="50%">
+
+**Library** — browse a library's poster grid with live overlay badges,
+search, and bulk plan/apply
+![Library](docs/assets/screenshots/modern-library.png)
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+**Overlay editor** — base settings and per-element controls for a
+profile, with a live canvas preview against any real title
+![Overlay editor](docs/assets/screenshots/modern-overlay-editor.png)
+
+</td>
+<td width="50%">
+
+**Collections** — built-in seasonal and chart presets, kept in sync in
+Jellyfin with no `collection.nfo`
+![Collections](docs/assets/screenshots/modern-collections.png)
+
+</td>
+</tr>
+</table>
+
 ## Why not just use Kometa?
 
 Kometa is built around Plex first, with Jellyfin support layered on top.
