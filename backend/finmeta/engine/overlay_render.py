@@ -14,14 +14,13 @@ from __future__ import annotations
 
 import io
 import os
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 from PIL import Image, ImageDraw, ImageFont
 
-from finmeta.config.models import Config
-from finmeta.engine.style_presets import ELEMENT_KEYS, ElementStyle, OverlayStyleDoc
+from finmeta.engine.style_presets import ELEMENT_KEYS, OverlayStyleDoc
 
 # Anchor vocabulary. Note that "center" belongs to BOTH the row and column axis,
 _ROW_WORDS = ("top", "bottom")          # unambiguous row words
@@ -554,8 +553,6 @@ def _render_overlay_image(poster_bytes: bytes, style_doc_json: Mapping,
         total_w = sum(s.w for s in sized) + g_x
         total_h = sum(s.h + gap(s.placed.size) for s in sized) - (gap(sized[-1].placed.size) if sized else 0)
 
-        # Origin of the *first* badge's top-left corner.
-        first = sized[0]
         ox = x_origin(col, margin, pw, total_w)
         oy = y_origin(row, margin, ph, total_h)
         cursor_y = oy

@@ -20,20 +20,22 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from finmeta.config.models import Config, MovieLibrary, TvLibrary
-from finmeta.engine.jobs import DEFAULT_DB_PATH, finish_run, init_db, log, start_run
+from finmeta.engine.jobs import (
+    DEFAULT_DB_PATH, _utcnow, finish_run, init_db, log, log_many, start_run,
+)
 from finmeta.engine.nfo import (
     DEFAULT_MOVIE_FIELDS, DEFAULT_TV_FIELDS,
-    episode_nfo, movie_nfo, nfo_sha256, season_nfo, tvshow_nfo,
+    movie_nfo, tvshow_nfo,
 )
 from finmeta.engine import trash
 from finmeta.engine.net import fetch_bytes
 from finmeta.engine.overlay import OVERLAID_KINDS, prune_overlay_cache, read_overlay_cache
 from finmeta.engine.plan import ApiAction, FileWrite, ItemPlan, WritePlan
 from finmeta.engine.runs import (
-    DEFAULT_CONFIG_DIR, Manifest, RunFile, backup, record,
+    DEFAULT_CONFIG_DIR, Manifest, RunFile, backup, prune_runs_dir, record,
 )
 from finmeta.jellyfin_client.client import JellyfinClient
 from finmeta.sources.tmdb import TmdbClient
@@ -63,17 +65,38 @@ class ApplyResult:
 # -- content fetching -------------------------------------------------------
 
 def _nfo_bytes(item: ItemPlan, cfg: Config, tmdb: TmdbClient) -> bytes:
-    """Re-generate NFO bytes for a 'generated' FileWrite."""
+    """Re-generate NFO bytes for a 'generated' FileWrite.
+
+    Must use the SAME library ``plan_builder`` resolved this item against
+    (``item.library``), not just "the first configured library of the
+    right media type" (audit 2026-11-11 "B4"). In any install with two
+    movie libraries (or two TV libraries) configuring different
+    ``metadata.fields``, re-deriving by type picked whichever library
+    happened to be first in config for every item of that type -- so the
+    regenerated NFO bytes disagreed with what the plan hashed for every
+    item in the OTHER library, which then failed the apply's hash check
+    and silently skipped the write (``kind == "metadata"`` is not
+    http-sourced, so a mismatch there takes the "never write that"
+    branch, not the "source changed" one). The exact same class of bug
+    was already found and fixed once in
+    ``routes_candidates._default_candidates_provider``; this was the
+    second copy of the rule, missed.
+    """
     language = cfg.language
-    # Pick the right library config (first match on media type).
-    lib = None
-    for lc in cfg.libraries.values():
-        if item.media_type == "movie" and isinstance(lc, MovieLibrary):
-            lib = lc
-            break
-        if item.media_type == "tvshow" and isinstance(lc, TvLibrary):
-            lib = lc
-            break
+    lib = cfg.libraries.get(item.library) if item.library else None
+    if lib is None:
+        # No library recorded on the plan (an older cached plan.json from
+        # before this field existed, or a test's own hand-built ItemPlan)
+        # -- fall back to the previous best-effort guess rather than
+        # crashing, same degrade-gracefully pattern as every other
+        # optional/missing field in this codebase.
+        for lc in cfg.libraries.values():
+            if item.media_type == "movie" and isinstance(lc, MovieLibrary):
+                lib = lc
+                break
+            if item.media_type == "tvshow" and isinstance(lc, TvLibrary):
+                lib = lc
+                break
     _default = (DEFAULT_MOVIE_FIELDS if item.media_type == "movie"
                 else DEFAULT_TV_FIELDS)
     fields = (lib.metadata.fields if lib else None) or _default
@@ -113,6 +136,42 @@ def _fetch_content(
     if p.is_file():
         return p.read_bytes()
     raise FileNotFoundError(f"source_ref not found: {fw.source_ref}")
+
+
+# -- write containment (audit 2026-11-11 "B6") ------------------------------
+
+def _write_allowed(target: Path, cfg: Config) -> bool:
+    """True when ``target`` resolves inside one of ``cfg.path_mappings``'
+    local roots -- the only places Finmeta is ever supposed to write.
+
+    Defense in depth, not the primary mechanism: every ``FileWrite.
+    target_path`` is already built by ``engine.paths``/``PathMapper.
+    translate`` from a configured mapping, so this should always hold.
+    It is not a guarantee -- ``engine.paths.show_dir``'s ``.parent.parent``
+    heuristic once wrote posters and NFOs into the top of the whole media
+    share for a dotted show-folder name (reported live 2026-10-25, fixed
+    separately), and a stored candidate override used to reach a
+    ``FileWrite.target_path`` with no path validation at all (fixed
+    separately, "A1") -- so the plan's own contents are not an
+    unconditionally trustworthy source for what gets written where.
+    CLAUDE.md §5 and docs/ARCHITECTURE.md both promise this containment to
+    the operator; this is what actually enforces it.
+    """
+    try:
+        resolved = target.resolve()
+    except OSError:
+        return False
+    for m in cfg.path_mappings:
+        local = getattr(m, "local", None)
+        if not local:
+            continue
+        try:
+            base = Path(local).resolve()
+        except OSError:
+            continue
+        if resolved == base or base in resolved.parents:
+            return True
+    return False
 
 
 # -- atomic write -----------------------------------------------------------
@@ -249,7 +308,24 @@ def _poll_refresh(
     with a real image write burned the full ``timeout`` for no reason, even
     though the write had already succeeded. ``None`` (the default) falls
     back to capturing it here for any caller that genuinely polls before
-    triggering its own refresh elsewhere."""
+    triggering its own refresh elsewhere.
+
+    Bounded (audit 2026-11-11 "C2"): this used to re-check EVERY id on EVERY
+    round regardless of whether it had already settled, and never broke out
+    of a round's loop on the first still-unsettled id -- a library-wide
+    apply touching 1000 posters could issue up to ``timeout / poll_interval``
+    × 1000 ``get_item`` calls to confirm one boolean. Settled ids are now
+    dropped from the working set the moment they're confirmed, so a later
+    round only re-checks what's actually still pending, and a round's
+    sub-loop stops at the first id that isn't settled yet -- the round has
+    already failed at that point, so there is nothing to learn from checking
+    the rest. Returns exactly the same True/False this always did.
+
+    The working sets are ``dict``s used purely for their insertion-ordered,
+    O(1)-removal membership (there are no values) -- a plain ``set`` would
+    work just as well functionally, but its iteration order is unspecified,
+    which would make "stops at the first unsettled id" unverifiable from
+    the outside."""
     deadline = time.monotonic() + timeout
     if pre_tags is None:
         # Capture the set of items that already have image tags (should be
@@ -262,26 +338,31 @@ def _poll_refresh(
             except Exception:
                 pre_tags[iid] = {}
 
+    remaining_images: Dict[str, None] = dict.fromkeys(item_ids)
+    remaining_songs: Dict[str, None] = dict.fromkeys(theme_song_ids)
+
     while True:
-        ok_images = True
-        for iid in item_ids:
+        for iid in list(remaining_images):
             try:
                 it = jf.get_item(iid)
                 # Empty dict = Jellyfin has no image for the item yet (what
                 # ImageTags=None used to mean before it was typed as a dict).
-                if not it.image_tags or it.image_tags == pre_tags.get(iid):
-                    ok_images = False
+                if it.image_tags and it.image_tags != pre_tags.get(iid):
+                    del remaining_images[iid]
+                else:
+                    break  # round already failed -- rest can wait for next round
             except Exception:
-                ok_images = False
-        ok_songs = True
-        for iid in theme_song_ids:
-            try:
-                songs = jf.get_theme_songs(iid)
-                if not songs:
-                    ok_songs = False
-            except Exception:
-                ok_songs = False
-        if ok_images and ok_songs:
+                break
+        if not remaining_images:
+            for iid in list(remaining_songs):
+                try:
+                    if jf.get_theme_songs(iid):
+                        del remaining_songs[iid]
+                    else:
+                        break
+                except Exception:
+                    break
+        if not remaining_images and not remaining_songs:
             return True
         if time.monotonic() >= deadline:
             return False
@@ -317,10 +398,16 @@ def apply_plan(
 
     result = ApplyResult(run_id=run_id)
     manifest = Manifest(run_id=run_id)
-    item_by_id: Dict[str, ItemPlan] = {ip.item_id: ip for ip in plan.items}
 
     # -- 1+2: backups + atomic file writes ----------------------------------
     for item in plan.items:
+        # Audit 2026-11-11 "C4": the routine "wrote ..." line below used to
+        # be its own log() call (one INSERT+COMMIT) per file -- a 1000-file
+        # apply was 1000 of them just for this. Batched per item instead
+        # (log_many, one transaction) and flushed once the item's files are
+        # done; error/warning lines stay immediate (rare, and worth seeing
+        # live) via the usual log().
+        item_log_entries: List[Tuple[str, str, str]] = []
         for fw in item.files:
             if fw.status == "unchanged":
                 result.files_unchanged += 1
@@ -372,6 +459,13 @@ def apply_plan(
                 log(db_path, run_id, "warn", msg)
 
             target = Path(fw.target_path)
+            if not _write_allowed(target, cfg):
+                msg = (f"write refused for {fw.target_path}: outside every "
+                       "path_mappings local root")
+                logger.error(msg)
+                result.errors.append(msg)
+                log(db_path, run_id, "error", msg)
+                continue
             is_overwrite = target.is_file()
             rel = backup(run_id, target, config_dir=config_dir) if is_overwrite else None
             try:
@@ -386,10 +480,32 @@ def apply_plan(
             manifest.files.append(RunFile(
                 path=str(target), status=status,
                 backup_relpath=rel,
+                # audit 2026-11-11 "B3": what undo() compares the CURRENT
+                # on-disk content against before touching this path.
+                # actual_sha is the hash of the bytes just written (not
+                # necessarily fw.content_sha256 -- the "source changed
+                # since plan" branch above can write verified-but-
+                # different bytes than the plan originally hashed).
+                content_sha256=actual_sha,
             ))
+            # Audit 2026-11-11 "B2": persist the manifest after EVERY write,
+            # not only once at the very end (step 7). A manifest written
+            # once at the end means an interrupted run -- a container
+            # restart, an OOM kill, an operator stop mid-apply -- leaves
+            # config/backups/<run_id>/ full of correct originals with NO
+            # manifest naming them, so `finmeta undo` (load_manifest) raises
+            # FileNotFoundError and nothing can be restored, despite the
+            # backups being right there. A whole-manifest rewrite is cheap
+            # (one small JSON file); doing it once per file keeps the
+            # on-disk manifest always a true prefix of what has actually
+            # happened, so undo can recover everything completed so far no
+            # matter when the run stops.
+            record(manifest, config_dir=config_dir)
             result.files_written += 1
-            log(db_path, run_id, "info", f"wrote {status} {fw.kind} {target}")
+            item_log_entries.append(
+                (_utcnow(), "info", f"wrote {status} {fw.kind} {target}"))
             _maybe_lock_artwork(fw, item.item_id, config_dir)
+        log_many(db_path, run_id, item_log_entries)
 
     # -- 3: API actions -----------------------------------------------------
     for action in plan.api_actions:
@@ -397,6 +513,7 @@ def apply_plan(
             n = _apply_api_action(action, jf)
             result.api_calls += n
             manifest.api_actions.append(action.model_dump())
+            record(manifest, config_dir=config_dir)  # keep the manifest complete (B2)
             log(db_path, run_id, "info",
                 f"api {action.action} {action.kind} {action.name!r} calls={n}")
         except Exception as exc:
@@ -454,11 +571,12 @@ def apply_plan(
     # an otherwise-successful apply.
     try:
         swept = trash.sweep(config_dir, cfg.backup_retention_days)
+        pruned_runs = prune_runs_dir(config_dir, cfg.backup.keep_runs)
         pruned_cache = prune_overlay_cache(config_dir)
-        if swept["moved_to_trash"] or swept["purged"] or pruned_cache:
+        if swept["moved_to_trash"] or swept["purged"] or pruned_runs or pruned_cache:
             log(db_path, run_id, "info",
                 f"backup trash: moved={swept['moved_to_trash']} purged={swept['purged']}"
-                f" overlay_cache_pruned={pruned_cache}")
+                f" runs_pruned={pruned_runs} overlay_cache_pruned={pruned_cache}")
     except Exception as exc:
         logger.warning("backup trash sweep failed: %s", exc)
     status = "ok" if not result.errors else "partial"

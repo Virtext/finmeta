@@ -16,7 +16,23 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev]" uv
+      - name: Ruff
+        # Audit 2026-11-11 "D2/D3": guards against a regression of the
+        # import-hygiene and SQL-injection false positives this audit
+        # cleared. NOT the full backend/ ruleset -- that still has ~128
+        # untriaged B904/S110/etc. findings predating this audit, a
+        # separate not-yet-scoped cleanup, not a regression of anything
+        # fixed here.
+        run: ruff check --select F401,F811,F841,S608 backend/
+      - name: pip-audit
+        # Audit 2026-11-11 "D5": audits the SHIPPED runtime dependency
+        # set -- the same hash-pinned lockfile export the Dockerfile
+        # installs from (D4) -- not the CI venv's own dev tooling, whose
+        # pip version is not what gets published.
+        run: |
+          uv export --frozen --no-dev --no-emit-project --format requirements.txt -o requirements.lock.txt
+          pip-audit -r requirements.lock.txt
       - name: Generate the synthetic test library
         run: python fixture/generate.py
       - name: Fast suite (offline, no live Jellyfin/API calls)
@@ -36,6 +52,14 @@ jobs:
           cache: "npm"
           cache-dependency-path: ui/package-lock.json
       - run: npm ci
+      - name: npm audit
+        # Audit 2026-11-11 "D5"/"D6": D5 gated the shipped bundle only
+        # (--omit=dev) because the one dev-only esbuild/vite finding was
+        # still accepted pending D6's breaking vite@8 upgrade. D6 fixed
+        # it (0 vulnerabilities either way now), so this gates the full
+        # audit -- dev tooling vulnerabilities shouldn't silently
+        # reaccumulate either.
+        run: npm audit
       - run: npm run build
 
   docker:

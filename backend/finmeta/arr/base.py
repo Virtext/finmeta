@@ -58,10 +58,25 @@ class ArrClient:
 
     @staticmethod
     def _raise_for(resp: httpx.Response) -> None:
+        """Raise on a non-2xx, WITHOUT the response body.
+
+        Audit 2026-11-11 "A2": this client's URL is operator-supplied (from
+        ``POST /api/services/{sonarr|radarr}/test-config``, before an
+        instance is even saved), and SECURITY_REVIEW.md "M5" rated the
+        resulting request "a weak port-scan primitive at worst ... only
+        {ok, latency_ms, version} comes back, never a response body" -- that
+        was only true as long as this exception's message stayed out of the
+        HTTP response, and it previously embedded up to 300 bytes of
+        whatever the target returned (``resp.text[:300]``). Combined with
+        ``test_arr_config`` resolving ANY stored secret by name (fixed
+        separately, same audit item), that made the route capable of
+        sending a real credential to an attacker-chosen URL and reading
+        back part of what came back -- not blind at all. Status code only.
+        """
         if resp.status_code >= 400:
             raise ArrError(
                 f"{resp.request.method} {resp.request.url.path}: "
-                f"HTTP {resp.status_code}: {resp.text[:300]}")
+                f"HTTP {resp.status_code}")
 
     def _get(self, path: str, *, params: Optional[dict] = None) -> Any:
         """The ONLY request method. Refuses to be used for any write verb."""

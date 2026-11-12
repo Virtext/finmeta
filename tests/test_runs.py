@@ -5,6 +5,7 @@ dir, that creates are deleted on undo, and that undo is idempotent.
 """
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -149,3 +150,114 @@ class TestUndoRoundtrip:
         # Second undo restores the same (persistent) backup but deletes nothing.
         assert res2.restored == [str(poster)]
         assert res2.deleted == []
+
+
+class TestUndoContentCheck:
+    """Audit 2026-11-11 'B3': undo must not clobber a path whose current
+    content matches neither what this run wrote nor the backed-up
+    original -- something else changed it since."""
+
+    def test_overwrite_skipped_when_something_else_changed_it_since(
+        self, cfg_dir: Path, media: Path,
+    ):
+        poster = media / "poster.jpg"
+        original = b"ORIGINAL"
+        poster.write_bytes(original)
+        rel = backup("r1", poster, config_dir=cfg_dir)
+        this_run_wrote = b"THIS-RUN-OUTPUT"
+        record(Manifest(run_id="r1", files=[
+            RunFile(path=str(poster), status="overwrite", backup_relpath=rel,
+                   content_sha256=hashlib.sha256(this_run_wrote).hexdigest()),
+        ]), config_dir=cfg_dir)
+        poster.write_bytes(this_run_wrote)  # simulate the apply itself
+
+        # Something ELSE (a later run, Jellyfin, Radarr, the operator)
+        # replaces the file -- neither this run's own output nor the
+        # backed-up original.
+        poster.write_bytes(b"SOMETHING-ELSE-WROTE-THIS")
+
+        res = undo("r1", config_dir=cfg_dir)
+        assert res.restored == []
+        assert res.skipped == [str(poster)]
+        assert poster.read_bytes() == b"SOMETHING-ELSE-WROTE-THIS"  # untouched
+
+    def test_create_skipped_when_something_else_changed_it_since(
+        self, cfg_dir: Path, media: Path,
+    ):
+        nfo = media / "movie.nfo"
+        this_run_wrote = b"<movie/>"
+        record(Manifest(run_id="r1", files=[
+            RunFile(path=str(nfo), status="create",
+                   content_sha256=hashlib.sha256(this_run_wrote).hexdigest()),
+        ]), config_dir=cfg_dir)
+        nfo.write_bytes(this_run_wrote)  # simulate the apply itself
+
+        nfo.write_bytes(b"<movie>SOMETHING ELSE WROTE THIS</movie>")
+
+        res = undo("r1", config_dir=cfg_dir)
+        assert res.deleted == []
+        assert res.skipped == [str(nfo)]
+        assert nfo.is_file()  # untouched, not deleted
+
+    def test_idempotent_second_undo_still_restores_with_content_check_on(
+        self, cfg_dir: Path, media: Path,
+    ):
+        """The content check must not mistake a SUCCESSFUL prior undo (the
+        file now holds the backed-up ORIGINAL, not this run's own output)
+        for "something else changed it" -- that would break the documented
+        idempotency guarantee."""
+        poster = media / "poster.jpg"
+        original = b"ORIGINAL"
+        poster.write_bytes(original)
+        rel = backup("r1", poster, config_dir=cfg_dir)
+        this_run_wrote = b"THIS-RUN-OUTPUT"
+        record(Manifest(run_id="r1", files=[
+            RunFile(path=str(poster), status="overwrite", backup_relpath=rel,
+                   content_sha256=hashlib.sha256(this_run_wrote).hexdigest()),
+        ]), config_dir=cfg_dir)
+        poster.write_bytes(this_run_wrote)
+
+        res1 = undo("r1", config_dir=cfg_dir)
+        res2 = undo("r1", config_dir=cfg_dir)
+        assert res1.restored == [str(poster)]
+        assert res2.restored == [str(poster)]  # still proceeds, not skipped
+        assert res2.skipped == []
+        assert poster.read_bytes() == original
+
+    def test_force_overrides_the_content_check(self, cfg_dir: Path, media: Path):
+        poster = media / "poster.jpg"
+        original = b"ORIGINAL"
+        poster.write_bytes(original)
+        rel = backup("r1", poster, config_dir=cfg_dir)
+        this_run_wrote = b"THIS-RUN-OUTPUT"
+        record(Manifest(run_id="r1", files=[
+            RunFile(path=str(poster), status="overwrite", backup_relpath=rel,
+                   content_sha256=hashlib.sha256(this_run_wrote).hexdigest()),
+        ]), config_dir=cfg_dir)
+        poster.write_bytes(this_run_wrote)
+        poster.write_bytes(b"SOMETHING-ELSE-WROTE-THIS")
+
+        res = undo("r1", config_dir=cfg_dir, force=True)
+        assert res.restored == [str(poster)]
+        assert res.skipped == []
+        assert poster.read_bytes() == original
+
+    def test_no_recorded_hash_falls_back_to_old_unconditional_behaviour(
+        self, cfg_dir: Path, media: Path,
+    ):
+        """A manifest written before this field existed (content_sha256 is
+        None) must undo exactly as it always did -- no new refusal for old
+        data with nothing to check against."""
+        poster = media / "poster.jpg"
+        original = b"ORIGINAL"
+        poster.write_bytes(original)
+        rel = backup("r1", poster, config_dir=cfg_dir)
+        record(Manifest(run_id="r1", files=[
+            RunFile(path=str(poster), status="overwrite", backup_relpath=rel),
+        ]), config_dir=cfg_dir)
+        poster.write_bytes(b"ANYTHING AT ALL")
+
+        res = undo("r1", config_dir=cfg_dir)
+        assert res.restored == [str(poster)]
+        assert res.skipped == []
+        assert poster.read_bytes() == original

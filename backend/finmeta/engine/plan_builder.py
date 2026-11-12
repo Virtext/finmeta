@@ -12,24 +12,22 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 
 
 from finmeta.config.models import Config, MovieLibrary, TvLibrary
-from finmeta.engine.diff import annotate_status, diff_plan, diff_to_text
+from finmeta.engine import candidate_ref
+from finmeta.engine.diff import annotate_status
 from finmeta.engine.matching import MatchResult, match_item
-from finmeta.engine.net import fetch_bytes
 from finmeta.engine.nfo import (
     DEFAULT_MOVIE_FIELDS, DEFAULT_TV_FIELDS,
-    episode_nfo, movie_nfo, nfo_sha256, season_nfo, tvshow_nfo,
+    movie_nfo, nfo_sha256, tvshow_nfo,
 )
 from finmeta.engine.paths import (
-    episode_stem as _episode_stem,
     movie_dir as _movie_dir,
-    season_dir as _season_dir,
     show_dir as _show_dir,
 )
 from finmeta.engine.plan import (
     ApiAction, FileWrite, ItemPlan, UnmatchedItem, WritePlan,
 )
 from finmeta.engine.badges import overlay_values, format_rating_value
-from finmeta.engine.format_rules import OVERLAY_ELEMENT_TO_CATEGORY, detect_all, streams_to_dicts
+from finmeta.engine.format_rules import detect_all, streams_to_dicts
 from finmeta.engine.overlay import overlay_file_write
 from finmeta.engine.style_presets import ELEMENT_KEYS
 from finmeta.engine.resolution import collect_candidates
@@ -98,40 +96,44 @@ def _aggregate_format_counts(files: List[FileWrite]) -> Dict[str, str]:
                 out[cat] = val
     return out
 
-def _file_sha256(path: Path) -> str:
-    """SHA-256 of a local file."""
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+def _content_sha256(source_ref: str, *, allowed_roots: Sequence = ()) -> str:
+    """Compute the SHA-256 of the content a FileWrite will produce.
 
-
-def _http_sha256(url: str, timeout: float = 30.0) -> str:
-    """SHA-256 of a remote file (downloads it).
-
-    Goes through ``engine.net.fetch_bytes`` so a truncated response raises
-    instead of being hashed: the hash recorded here is what the executor
-    must reproduce at apply time, and a short read poisons it for the whole
-    run (see ``engine.net``'s module docstring).
+    ``allowed_roots`` (audit 2026-11-11, "A1"/"B5"): a stored manual override
+    (see ``_apply_candidate_overrides`` below) folds an operator-picked
+    ``ref`` straight into ``resolved`` with no validation of its own, and
+    this function used to trust it completely -- a remote ref was fetched
+    from ANY host (no SSRF allowlist) and a local ref was read from ANY path
+    (no containment check). ``engine.candidate_ref`` is the single policy
+    now shared with ``api/proxy.py`` and ``api/overrides.py``. A ref outside
+    policy raises here, same as any other resolution failure -- every call
+    site already wraps this in ``except Exception: ...; continue`` and
+    skips the write, the correct outcome for an out-of-policy ref (never
+    produce a usable FileWrite for it, rather than silently hashing it).
     """
-    return hashlib.sha256(fetch_bytes(url, timeout=timeout)).hexdigest()
-
-
-def _content_sha256(source_ref: str) -> str:
-    """Compute the SHA-256 of the content a FileWrite will produce."""
     if source_ref == "generated":
         # Should not be called for generated content; caller passes the hash directly
         raise ValueError("generated content must pass hash explicitly")
     if source_ref.startswith(("http://", "https://")):
-        return _http_sha256(source_ref)
-    p = Path(source_ref)
+        return hashlib.sha256(
+            candidate_ref.fetch(source_ref, allowed_roots=allowed_roots)
+        ).hexdigest()
+    p = candidate_ref.check_local(source_ref, allowed_roots)
     if p.is_file():
-        return _file_sha256(p)
+        return hashlib.sha256(p.read_bytes()).hexdigest()
     return hashlib.sha256(b"").hexdigest()
 
 
-def _candidate_bytes(source_ref: str, timeout: float = 30.0) -> bytes:
-    """Fetch the raw bytes of a candidate (local file or remote URL)."""
+def _candidate_bytes(source_ref: str, timeout: float = 30.0, *,
+                     allowed_roots: Sequence = ()) -> bytes:
+    """Fetch the raw bytes of a candidate (local file or remote URL).
+
+    Same ``allowed_roots`` policy as :func:`_content_sha256` -- see its
+    docstring.
+    """
     if source_ref.startswith(("http://", "https://")):
-        return fetch_bytes(source_ref, timeout=timeout)
-    p = Path(source_ref)
+        return candidate_ref.fetch(source_ref, timeout=timeout, allowed_roots=allowed_roots)
+    p = candidate_ref.check_local(source_ref, allowed_roots)
     if p.is_file():
         return p.read_bytes()
     return b""
@@ -176,6 +178,7 @@ def _overlay_poster(
     is_override: bool = False,
     rating_values: Optional[Dict[str, str]] = None,
     kind: str = "poster",
+    allowed_roots: Sequence = (),
 ) -> Optional[FileWrite]:
     """Build the overlaid-poster FileWrite for one item, or None on failure.
 
@@ -207,7 +210,7 @@ def _overlay_poster(
     too. ``None`` (the default) renders exactly as before: no rating badges.
     """
     try:
-        poster_bytes = _candidate_bytes(cand.ref)
+        poster_bytes = _candidate_bytes(cand.ref, allowed_roots=allowed_roots)
     except Exception as exc:
         logger.warning("overlay poster read failed for %s: %s", item.name, exc)
         return None
@@ -446,12 +449,14 @@ def _build_movie_plan(
     streams: Optional[List[Dict[str, Any]]] = None,
     warnings: Optional[List[Dict[str, object]]] = None,
     trending_index: Optional[Dict[int, int]] = None,
+    library_name: Optional[str] = None,
 ) -> ItemPlan:
     """Build an ItemPlan for a matched movie."""
     if match.tmdb_id is None:
         return ItemPlan(
             item_id=item.id, item_name=item.name,
             media_type="movie", tmdb_id=None, matched_by=None,
+            library=library_name,
         )
 
     files: List[FileWrite] = []
@@ -460,10 +465,16 @@ def _build_movie_plan(
         return ItemPlan(
             item_id=item.id, item_name=item.name,
             media_type="movie", tmdb_id=match.tmdb_id,
-            matched_by=match.matched_by,
+            matched_by=match.matched_by, library=library_name,
         )
 
     fields = lib.metadata.fields or DEFAULT_MOVIE_FIELDS
+    # Audit 2026-11-11 "A1"/"B5": the policy a candidate ref -- including a
+    # stored manual override, folded in below by
+    # _apply_candidate_overrides -- must stay inside. Computed once per
+    # item rather than per-kind; see candidate_ref.default_allowed_roots
+    # (handles config_dir=None on its own).
+    allowed_roots = candidate_ref.default_allowed_roots(cfg, config_dir)
 
     # TMDb details (needed for the NFO and for the "rating" overlay badge).
     details: Optional[Dict[str, Any]] = None
@@ -539,6 +550,7 @@ def _build_movie_plan(
                 trending_rank=trending_rank,
                 is_override=kind in overridden_kinds,
                 rating_values=rating_values,
+                allowed_roots=allowed_roots,
             )
             if fw is not None:
                 if kind in overridden_kinds:
@@ -546,7 +558,7 @@ def _build_movie_plan(
                 files.append(fw)
             continue
         try:
-            sha = _content_sha256(cand.ref)
+            sha = _content_sha256(cand.ref, allowed_roots=allowed_roots)
         except Exception as exc:
             logger.warning("content hash failed for %s (%s): %s", item.name, kind, exc)
             continue
@@ -568,7 +580,7 @@ def _build_movie_plan(
         media_type="movie", tmdb_id=match.tmdb_id,
         matched_by=match.matched_by, files=files, ratings=computed["values"],
         rating_sources=computed["sources"],
-        format_counts=format_counts,
+        format_counts=format_counts, library=library_name,
     )
 
 
@@ -581,12 +593,14 @@ def _build_tvshow_plan(
     warnings: Optional[List[Dict[str, object]]] = None,
     sonarr_index: Optional[Dict[str, Any]] = None,
     trending_index: Optional[Dict[int, int]] = None,
+    library_name: Optional[str] = None,
 ) -> ItemPlan:
     """Build an ItemPlan for a matched TV series (show-level only)."""
     if match.tmdb_id is None:
         return ItemPlan(
             item_id=item.id, item_name=item.name,
             media_type="tvshow", tmdb_id=None, matched_by=None,
+            library=library_name,
         )
 
     files: List[FileWrite] = []
@@ -595,10 +609,12 @@ def _build_tvshow_plan(
         return ItemPlan(
             item_id=item.id, item_name=item.name,
             media_type="tvshow", tmdb_id=match.tmdb_id,
-            matched_by=match.matched_by,
+            matched_by=match.matched_by, library=library_name,
         )
 
     fields = lib.metadata.fields or DEFAULT_TV_FIELDS
+    # Audit 2026-11-11 "A1"/"B5": see the identical line in _build_movie_plan.
+    allowed_roots = candidate_ref.default_allowed_roots(cfg, config_dir)
 
     # TMDb details (needed for the NFO, the "rating" overlay badge, and the
     # "network" badge -- TMDb's own `networks` field, TV shows only).
@@ -684,6 +700,7 @@ def _build_tvshow_plan(
                 trending_rank=trending_rank,
                 is_override=kind in overridden_kinds,
                 rating_values=rating_values,
+                allowed_roots=allowed_roots,
             )
             if fw is not None:
                 if kind in overridden_kinds:
@@ -691,7 +708,7 @@ def _build_tvshow_plan(
                 files.append(fw)
             continue
         try:
-            sha = _content_sha256(cand.ref)
+            sha = _content_sha256(cand.ref, allowed_roots=allowed_roots)
         except Exception as exc:
             logger.warning("content hash failed for %s (%s): %s", item.name, kind, exc)
             continue
@@ -720,6 +737,7 @@ def _build_tvshow_plan(
             status_key=tv_status_obj.status if tv_status_obj else None,
             trending_rank=trending_rank,
             rating_values=rating_values,
+            allowed_roots=allowed_roots,
         ))
 
     format_counts = _aggregate_format_counts(files)
@@ -728,7 +746,7 @@ def _build_tvshow_plan(
         media_type="tvshow", tmdb_id=match.tmdb_id,
         matched_by=match.matched_by, files=files, ratings=computed["values"],
         rating_sources=computed["sources"],
-        format_counts=format_counts,
+        format_counts=format_counts, library=library_name,
         tv_status=tv_status_obj.status if tv_status_obj else None,
     )
 
@@ -1700,8 +1718,14 @@ def build_plan(
                 item_lib = cfg.libraries[item_lib_name]
             else:
                 item_lib = lib_cfg
+            # Audit 2026-11-11 "B4": carried onto the resulting ItemPlan so
+            # the executor can look up THIS item's own library (e.g. for
+            # metadata.fields) instead of guessing "first configured
+            # library of the right type" -- see executor._nfo_bytes.
+            item_library_name = item_lib_name
         else:
             item_lib = lib_cfg
+            item_library_name = lib_name
 
         # S9d4c step 2a: items in a disabled library are skipped entirely.
         if not getattr(item_lib, "enabled", False):
@@ -1737,6 +1761,7 @@ def build_plan(
                 warnings=provider_warnings_raw,
                 sonarr_index=sonarr_index,
                 trending_index=trending_rank_by_tmdb,
+                library_name=item_library_name,
             )
         elif item.type == "Movie":
             match = match_item(item, tmdb, "movie", language)
@@ -1750,6 +1775,7 @@ def build_plan(
                 streams=streams_by_id.get(target_by_item.get(item.id, "")),
                 warnings=provider_warnings_raw,
                 trending_index=trending_rank_by_tmdb,
+                library_name=item_library_name,
             )
         else:
             # Season or Episode — skip for v1 (need parent series context)

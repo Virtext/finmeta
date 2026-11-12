@@ -19,30 +19,32 @@ Without this the route was a full arbitrary-file-read -- ``GET /api/proxy/``
 the redaction middleware never sees it because the response is not JSON --
 plus an SSRF primitive against anything the container can reach. Found and
 fixed 2026-10-22; see docs/SECURITY_REVIEW.md "H1".
+
+The policy itself (allowed hosts, allowed-root containment, the size cap)
+now lives in ``engine.candidate_ref`` and is re-exported below rather than
+redefined here -- ``api/overrides.py`` and ``engine/plan_builder.py`` need
+the exact same answer to "is this ref allowed" for a candidate a USER picks
+via ``PUT /api/items/{id}/candidates``, which had NO validation at all until
+``engine.candidate_ref`` was added (audit 2026-11-11, "A1"/"B5": an
+operator-reachable route let any local path become a ``FileWrite.source_ref``,
+written to the media tree by the executor and then servable back through
+this very proxy). This module keeps its own streaming fetch below -- capping
+mid-download suits the browser-facing route better than ``candidate_ref``'s
+fetch-then-check -- but the policy checks it calls are the shared ones.
 """
 from __future__ import annotations
 
 import base64
 from pathlib import Path
 from typing import Optional, Sequence, Tuple
-from urllib.parse import urlparse
 
 import httpx
 
-#: Hosts the proxy may fetch from: the image hosts of the two artwork
-#: providers whose candidate refs are URLs (``TmdbClient.image_base`` /
-#: ``FanartClient.image_base``). Both are constructor defaults that no config
-#: field can change, so this is the complete legitimate set.
-ALLOWED_REMOTE_HOSTS = (
-    "image.tmdb.org",
-    "fanart.tv",
-    "assets.fanart.tv",
-    "webservice.fanart.tv",
+from finmeta.engine.candidate_ref import (
+    ALLOWED_REMOTE_HOSTS, MAX_FETCH_BYTES, RefNotAllowed,
+    check_local as _check_local, check_remote as _check_remote,
+    host_allowed,
 )
-
-#: Hard cap on a proxied response so a hostile or compromised upstream cannot
-#: balloon the server's memory through an unbounded read.
-MAX_FETCH_BYTES = 64 * 1024 * 1024
 
 _KIND_GUESS = {
     "poster": "image/jpeg", "backdrop": "image/jpeg", "landscape": "image/jpeg",
@@ -54,10 +56,6 @@ _EXT_GUESS = {
     ".webp": "image/webp", ".gif": "image/gif", ".mp3": "audio/mpeg",
     ".nfo": "application/xml", ".xml": "application/xml", ".svg": "image/svg+xml",
 }
-
-
-class RefNotAllowed(ValueError):
-    """A ref failed policy validation (never echoed verbatim to the client)."""
 
 
 def encode_token(kind: str, ref: str) -> str:
@@ -83,44 +81,6 @@ def content_type(kind: Optional[str], ref: str) -> str:
     if ext in _EXT_GUESS:
         return _EXT_GUESS[ext]
     return _KIND_GUESS.get(kind or "", "application/octet-stream")
-
-
-def host_allowed(host: Optional[str]) -> bool:
-    """True when ``host`` is one of :data:`ALLOWED_REMOTE_HOSTS` (or a subdomain)."""
-    h = (host or "").lower()
-    return any(h == a or h.endswith("." + a) for a in ALLOWED_REMOTE_HOSTS)
-
-
-def _check_remote(url: str) -> None:
-    parts = urlparse(url)
-    if parts.scheme not in ("http", "https"):
-        raise RefNotAllowed(f"unsupported scheme: {parts.scheme!r}")
-    if not host_allowed(parts.hostname):
-        raise RefNotAllowed("remote host is not an allowed provider host")
-
-
-def _check_local(ref: str, allowed_roots: Sequence) -> Path:
-    """Resolve ``ref`` and require it inside one of ``allowed_roots``.
-
-    ``resolve()`` runs first so ``..`` segments and symlinks are collapsed
-    before the containment test -- comparing raw strings would be bypassable.
-    An empty ``allowed_roots`` denies every local ref (fail closed).
-    """
-    p = Path(ref)
-    if not p.is_absolute():
-        raise RefNotAllowed("local ref must be absolute")
-    try:
-        rp = p.resolve()
-    except OSError as exc:
-        raise RefNotAllowed(f"unresolvable local ref: {exc}") from exc
-    for root in allowed_roots:
-        try:
-            base = Path(root).resolve()
-        except OSError:
-            continue
-        if rp == base or base in rp.parents:
-            return rp
-    raise RefNotAllowed("local ref is outside the allowed roots")
 
 
 def fetch(kind: Optional[str], ref: str, timeout: float = 30.0,

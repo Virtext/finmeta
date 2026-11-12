@@ -26,7 +26,8 @@ from pathlib import Path
 from PIL import Image
 
 from finmeta.config.models import (
-    Config, Metadata, OverlaysConfig, OverlayStyle, ServerConfig, TvArtwork, TvLibrary,
+    Config, LocalSource, Metadata, OverlaysConfig, OverlayStyle, PathMapping, ServerConfig,
+    SourcesConfig, TvArtwork, TvLibrary,
 )
 from finmeta.engine.matching import MatchResult
 from finmeta.engine.plan_builder import _build_tvshow_plan
@@ -67,6 +68,16 @@ def _fixture(tmp_path: Path, *, season_posters=True, elements=("status",),
     cfg = Config(
         dry_run=True,
         server=ServerConfig(url="http://x:8096"),
+        # Matches the real `assets` dir LocalAssetSource(assets) reads from
+        # below -- audit 2026-11-11 "A1"/"B5": candidate_ref.default_allowed_roots
+        # now checks a local candidate ref against cfg.sources.local.path, so this
+        # must be the SAME directory the fixture's LocalAssetSource actually uses.
+        sources=SourcesConfig(local=LocalSource(enabled=True, path=str(assets))),
+        # Season-poster candidates are files already in the show's own media
+        # folder (globbed from `show_dir`, under `media_root`), not under
+        # `assets` -- also needs a matching entry in cfg.path_mappings for
+        # the SAME reason, mirroring the PathMapper built below.
+        path_mappings=[PathMapping(jellyfin=str(media_root), local=str(media_root))],
         libraries={"Shows": TvLibrary(
             type="tvshows",
             metadata=Metadata(enabled=False),

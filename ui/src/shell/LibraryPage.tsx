@@ -12,6 +12,10 @@ import { navigate } from './router';
 
 const PAGE_SIZE = 100;
 const TERMINAL = new Set(['ok', 'partial', 'error', 'refused']);
+// Audit 2026-11-11 "C6": ui/src/components/LibraryBrowser.tsx's own
+// debounce convention (the legacy shell), ported here -- this modern
+// PosterGrid had regressed to firing one request per keystroke.
+const SEARCH_DEBOUNCE_MS = 300;
 
 interface ParsedPath { library: string | null; itemId: string | null; }
 
@@ -72,15 +76,34 @@ function PosterGrid({ library, selectedId, narrow, selection }: GridProps): Reac
   const [items, setItems] = useState<ItemLightView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  // Audit 2026-11-11 "C6": a fast typer or a slow response used to leave
+  // the grid showing an earlier keystroke's results -- bumped before
+  // every load() call; a response is only applied if it's still the
+  // most recent one in flight (also covers a library switch landing
+  // while a previous library's search was still in flight).
+  const reqIdRef = useRef(0);
 
   const load = useCallback((q: string) => {
     setError(null);
+    const reqId = ++reqIdRef.current;
     getItemsLight(library, { limit: PAGE_SIZE, offset: 0, search: q || undefined })
-      .then((r) => setItems(r.items))
-      .catch((e) => setError(e.message));
+      .then((r) => { if (reqIdRef.current === reqId) setItems(r.items); })
+      .catch((e) => { if (reqIdRef.current === reqId) setError(e.message); });
   }, [library]);
 
-  useEffect(() => { setItems(null); load(search); }, [library]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setItems(null); setSearch(''); load(''); }, [library]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Debounced server-side search (ported from the legacy LibraryBrowser,
+  // see SEARCH_DEBOUNCE_MS above): typing updates the input immediately,
+  // but load() only fires after a pause, so a fast typer doesn't send one
+  // Jellyfin-backed request per character.
+  const debounceRef = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (debounceRef.current !== undefined) window.clearTimeout(debounceRef.current);
+    debounceRef.current = window.setTimeout(() => load(search), SEARCH_DEBOUNCE_MS);
+    return () => { if (debounceRef.current !== undefined) window.clearTimeout(debounceRef.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
 
   if (error) return <ErrorState title="Could not load this library" description={error} />;
 
@@ -93,7 +116,7 @@ function PosterGrid({ library, selectedId, narrow, selection }: GridProps): Reac
             placeholder={`Search ${library}…`}
             style={{ maxWidth: 320 }}
             value={search}
-            onChange={(e) => { setSearch(e.target.value); load(e.target.value); }}
+            onChange={(e) => setSearch(e.target.value)}
           />
         </div>
       )}

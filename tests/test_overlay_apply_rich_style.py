@@ -119,7 +119,7 @@ def test_apply_poster_changes_when_style_doc_changes():
 
     import finmeta.engine.plan_builder as pb
     orig = pb._candidate_bytes
-    pb._candidate_bytes = lambda ref, timeout=30.0: _poster()
+    pb._candidate_bytes = lambda ref, timeout=30.0, **kw: _poster()
     try:
         fw_a = _overlay_poster(
             item, cand, ["status"], Path("/tmp/finmeta-test-rich-style/poster.jpg"), jf,

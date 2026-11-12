@@ -1,11 +1,21 @@
-"""Proxy ref policy (2026-10-22 security fix, docs/SECURITY_REVIEW.md "H1").
+"""Candidate ref policy: the proxy's read side (2026-10-22, SECURITY_REVIEW
+"H1") and the override-write side (2026-11-11 audit, "A1"/"B5").
 
 ``GET /api/proxy/{token}`` takes a base64 token of ``"<kind>|<ref>"`` that the
 UI mints client-side -- it is encoding, not authentication, so the ref cannot
-be trusted. Before this fix ``fetch`` happily read any absolute path the
-caller named (``secrets.yml`` included -- and the redaction middleware never
-sees it, because the response is not JSON) and fetched any URL, giving an
-authenticated session an arbitrary-file-read plus an SSRF primitive.
+be trusted. Before the 2026-10-22 fix ``fetch`` happily read any absolute
+path the caller named (``secrets.yml`` included -- and the redaction
+middleware never sees it, because the response is not JSON) and fetched any
+URL, giving an authenticated session an arbitrary-file-read plus an SSRF
+primitive.
+
+``PUT /api/items/{id}/candidates`` -- the route that stores a manually
+picked candidate -- had NO equivalent validation at all until 2026-11-11:
+the ref it stores becomes a ``FileWrite.source_ref`` the executor writes to
+disk, so the proxy's read-side policy above was defeated by never being
+consulted on the way in. ``engine.candidate_ref`` is now the one module
+both sides (and ``engine/plan_builder.py``'s own candidate resolution)
+share.
 
 These tests pin the policy itself: what must be refused, what must keep
 working, and that the refusal is not an existence oracle.
@@ -289,3 +299,166 @@ class TestOverlayProxyRoute:
         assert r.status_code == 200
         assert r.content == b"OVERLAID-JPEG-BYTES"
         assert r.headers["content-type"] == "image/jpeg"
+
+
+# ---------------------------------------------------------------------------
+# audit 2026-11-11 "A1"/"B5": the SAME policy, enforced at the write side
+# ---------------------------------------------------------------------------
+#
+# Everything above pins the proxy's READ-side policy. Until engine.candidate_ref
+# existed, the WRITE side -- PUT /api/items/{id}/candidates, which stores a
+# manual override ref -- had no validation at all: an authenticated session
+# could store an arbitrary local path (config/secrets.yml included) as a
+# poster's source_ref, which the executor would then write into the media
+# tree and the proxy would then serve back byte-for-byte, defeating the read
+# side's own policy by never going through it on the way in. These tests
+# cover the write side plus the shared engine.candidate_ref module directly.
+
+class TestCandidateRefModule:
+    """Unit tests for engine.candidate_ref, the module both this proxy and
+    api/overrides.py + engine/plan_builder.py now share (one allowed-host
+    list, one allowed-root containment check, one size cap -- not three)."""
+
+    def test_check_remote_accepts_an_allowed_host(self):
+        from finmeta.engine.candidate_ref import check_remote
+        check_remote("https://image.tmdb.org/t/p/original/x.jpg")  # no raise
+
+    def test_check_remote_refuses_a_non_provider_host(self):
+        from finmeta.engine.candidate_ref import RefNotAllowed, check_remote
+        with pytest.raises(RefNotAllowed):
+            check_remote("https://evil.example/x.jpg")
+
+    def test_check_remote_refuses_suffix_confusable_host(self):
+        from finmeta.engine.candidate_ref import RefNotAllowed, check_remote
+        with pytest.raises(RefNotAllowed):
+            check_remote("https://image.tmdb.org.evil.com/x.jpg")
+
+    def test_check_local_refuses_outside_every_root(self, tmp_path):
+        from finmeta.engine.candidate_ref import RefNotAllowed, check_local
+        allowed = tmp_path / "assets"
+        allowed.mkdir()
+        victim = tmp_path / "secrets.yml"
+        victim.write_text("tmdb_key: CANARY\n")
+        with pytest.raises(RefNotAllowed):
+            check_local(str(victim), [allowed])
+
+    def test_check_local_accepts_inside_an_allowed_root(self, tmp_path):
+        from finmeta.engine.candidate_ref import check_local
+        allowed = tmp_path / "assets"
+        (allowed / "123").mkdir(parents=True)
+        p = check_local(str(allowed / "123" / "poster.jpg"), [allowed])
+        assert p == (allowed / "123" / "poster.jpg").resolve()
+
+    def test_default_allowed_roots_never_includes_config_dir_itself(self, tmp_path):
+        """The containing config_dir (where secrets.yml/auth.yml/config.yml
+        live) must never itself be an allowed root -- only its named
+        artwork-lifecycle subdirectories."""
+        from finmeta.config.models import Config, ServerConfig
+        from finmeta.engine.candidate_ref import default_allowed_roots
+        cfg = Config(dry_run=True, server=ServerConfig(url="http://x:8096"))
+        config_dir = tmp_path / "config"
+        roots = default_allowed_roots(cfg, config_dir)
+        resolved_config_dir = config_dir.resolve()
+        assert resolved_config_dir not in {r.resolve() for r in roots}
+
+    def test_default_allowed_roots_with_no_config_dir_still_grants_local_source(self, tmp_path):
+        """config_dir=None (engine.plan_builder.build_plan's own default)
+        must still grant cfg.sources.local.path and path_mappings roots --
+        only the four config_dir subdirectories are unavailable without one."""
+        from finmeta.config.models import Config, LocalSource, ServerConfig, SourcesConfig
+        from finmeta.engine.candidate_ref import check_local, default_allowed_roots
+        local_dir = tmp_path / "my-assets"
+        local_dir.mkdir()
+        cfg = Config(dry_run=True, server=ServerConfig(url="http://x:8096"),
+                    sources=SourcesConfig(local=LocalSource(enabled=True, path=str(local_dir))))
+        roots = default_allowed_roots(cfg, None)
+        check_local(str(local_dir / "poster.jpg"), roots)  # no raise
+
+
+class TestCandidateOverrideWritePolicy:
+    """PUT /api/items/{id}/candidates (the override-write route) now
+    validates ``ref`` through the exact same policy as the proxy's read
+    side -- fixed 2026-11-11 (audit "A1"). Before this fix there was no
+    validation on write at all: any absolute local path, including a config
+    secret, was accepted and stored verbatim."""
+
+    @pytest.fixture
+    def client_and_ctx(self, tmp_path, monkeypatch):
+        from fastapi.testclient import TestClient
+        from finmeta.api import AppContext, create_app
+        from finmeta.engine.plan import FileWrite, ItemPlan, WritePlan
+        monkeypatch.setenv("FINMETA_AUTH", "off")
+        monkeypatch.setenv("TMDB_KEY", "fake-tmdb-key")
+        cfg_dir = tmp_path / "config"
+        cfg_dir.mkdir()
+        assets = tmp_path / "assets"
+        assets.mkdir()
+        (cfg_dir / "config.yml").write_text(
+            "dry_run: true\n"
+            "server:\n  url: http://fake:8096\n"
+            f"sources:\n  local:\n    enabled: true\n    path: {assets}\n"
+            "libraries: {}\n"
+        )
+
+        def _fake_plan(cfg, jf, tmdb, sources, library=None, item_id=None,
+                      config_dir=None, **kwargs):
+            return WritePlan(items=[ItemPlan(
+                item_id="item-1", item_name="Item 1", media_type="movie",
+                tmdb_id=1, matched_by="provider_id", files=[],
+            )])
+
+        ctx = AppContext(str(cfg_dir / "config.yml"), config_dir=str(cfg_dir),
+                         db_path=str(cfg_dir / "jobs.db"),
+                         overrides_path=str(cfg_dir / "overrides.db"),
+                         plan_builder=_fake_plan)
+        client = TestClient(create_app(ctx))
+        return client, ctx, assets, cfg_dir
+
+    def test_arbitrary_local_path_is_refused_not_stored(self, client_and_ctx):
+        """The exact PoC this fix closes: a session user names config's own
+        secrets.yml as an override ref. Must be refused with 422, and --
+        this is the part that actually matters -- never written to
+        overrides.db at all."""
+        client, ctx, assets, cfg_dir = client_and_ctx
+        canary = cfg_dir / "pretend_secrets.yml"
+        canary.write_text("tmdb_key: AUDIT-CANARY-VALUE\n")
+        r = client.put("/api/items/item-1/candidates",
+                       json={"kind": "poster", "ref": str(canary)})
+        assert r.status_code == 422
+        assert ctx.overrides.get("item-1", "poster") is None
+
+    def test_disallowed_remote_host_is_refused_not_stored(self, client_and_ctx):
+        client, ctx, assets, cfg_dir = client_and_ctx
+        r = client.put("/api/items/item-1/candidates",
+                       json={"kind": "poster", "ref": "https://evil.example/x.jpg"})
+        assert r.status_code == 422
+        assert ctx.overrides.get("item-1", "poster") is None
+
+    def test_ref_inside_the_configured_local_source_is_accepted(self, client_and_ctx):
+        """The normal, legitimate case must keep working: a local candidate
+        inside cfg.sources.local.path is accepted and stored."""
+        client, ctx, assets, cfg_dir = client_and_ctx
+        legit = assets / "poster.jpg"
+        legit.write_bytes(b"JPEGBYTES")
+        r = client.put("/api/items/item-1/candidates",
+                       json={"kind": "poster", "ref": str(legit)})
+        assert r.status_code == 200
+        ovr = ctx.overrides.get("item-1", "poster")
+        assert ovr is not None
+        assert ovr["ref"] == str(legit)
+
+    def test_allowed_provider_host_is_accepted(self, client_and_ctx):
+        client, ctx, assets, cfg_dir = client_and_ctx
+        r = client.put("/api/items/item-1/candidates",
+                       json={"kind": "poster",
+                            "ref": "https://image.tmdb.org/t/p/original/x.jpg"})
+        assert r.status_code == 200
+        ovr = ctx.overrides.get("item-1", "poster")
+        assert ovr is not None
+
+    def test_clearing_a_candidate_bypasses_validation_entirely(self, client_and_ctx):
+        """ref=None (clear) never touches the ref-validation path at all."""
+        client, ctx, assets, cfg_dir = client_and_ctx
+        r = client.put("/api/items/item-1/candidates",
+                       json={"kind": "poster", "ref": None})
+        assert r.status_code == 200

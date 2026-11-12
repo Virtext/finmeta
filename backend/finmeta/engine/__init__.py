@@ -15,9 +15,3 @@ __all__ = [
     "DiffEntry", "diff_plan", "diff_to_text",
     "resolve_candidates", "build_plan",
 ]
-from finmeta.engine.format_rules import (
-    DEFAULT_FORMAT_RULES,
-detect_all,
-detect_category,
-default_format_rules,
-)

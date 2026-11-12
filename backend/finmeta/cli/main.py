@@ -175,22 +175,35 @@ def cmd_apply(args: argparse.Namespace) -> int:
 
 def cmd_undo(args: argparse.Namespace) -> int:
     """Execute the 'undo' subcommand."""
-    from finmeta.engine.runs import undo, load_manifest
+    from finmeta.engine.runs import undo
 
     config_dir = Path(args.config).parent
-    try:
-        manifest = load_manifest(args.run_id, config_dir=config_dir)
-    except FileNotFoundError:
-        print(f"no manifest found for run {args.run_id!r}", file=sys.stderr)
-        return 1
-
-    result = undo(args.run_id, config_dir=config_dir)
+    # Audit 2026-11-11 "B2": undo() itself now falls back to a best-effort
+    # reconstruction from config/backups/<run_id>/ when there is no
+    # manifest, instead of raising -- so this no longer pre-checks
+    # load_manifest and bails before even calling it (which used to skip
+    # that fallback entirely, the only real caller of undo() never
+    # exercising it). A genuinely empty/unknown run_id still reports
+    # nothing-to-undo via UndoResult.unrecoverable_note below.
+    result = undo(args.run_id, config_dir=config_dir, force=args.force)
+    if result.incomplete:
+        print(f"warning: {result.unrecoverable_note}", file=sys.stderr)
+        if not result.restored:
+            return 1
     print(f"restored: {len(result.restored)}")
     for p in result.restored:
         print(f"  + {p}")
     print(f"deleted:  {len(result.deleted)}")
     for p in result.deleted:
         print(f"  - {p}")
+    # audit 2026-11-11 "B3": paths whose current content matched neither
+    # what this run wrote nor the backed-up original -- something else
+    # changed them since, so they were left alone.
+    if result.skipped:
+        print("skipped (content changed since -- rerun with --force to override):",
+              file=sys.stderr)
+        for p in result.skipped:
+            print(f"  ! {p}", file=sys.stderr)
     return 0
 
 
@@ -242,6 +255,11 @@ def main(argv: Optional[list] = None) -> int:
     p_undo.add_argument("run_id", help="Run ID to undo")
     p_undo.add_argument("--config", required=True, help="Path to config.yml")
     p_undo.add_argument("-v", "--verbose", action="store_true")
+    p_undo.add_argument(
+        "--force", action="store_true",
+        help="Revert even paths whose current content no longer matches what "
+             "this run wrote or backed up (audit 2026-11-11 'B3'); without "
+             "this, such paths are left alone and reported instead.")
 
     # runs
     p_runs = sub.add_parser("runs", help="List recorded runs")

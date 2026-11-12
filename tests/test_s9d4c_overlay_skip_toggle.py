@@ -16,7 +16,8 @@ from PIL import Image
 
 from finmeta.api.overrides import OverrideStore
 from finmeta.config.models import (
-    Config, Metadata, MovieArtwork, MovieLibrary, OverlaysConfig, OverlayStyle, ServerConfig,
+    Config, LocalSource, Metadata, MovieArtwork, MovieLibrary, OverlaysConfig, OverlayStyle,
+    ServerConfig, SourcesConfig,
 )
 from finmeta.engine.matching import MatchResult
 from finmeta.engine.plan_builder import _build_movie_plan
@@ -51,6 +52,11 @@ def _fixture(tmp_path):
     cfg = Config(
         dry_run=True,
         server=ServerConfig(url="http://x:8096"),
+        # Matches the real `assets` dir LocalAssetSource(assets) reads from
+        # below -- audit 2026-11-11 "A1"/"B5": candidate_ref.default_allowed_roots
+        # now checks a local candidate ref against cfg.sources.local.path, so this
+        # must be the SAME directory the fixture's LocalAssetSource actually uses.
+        sources=SourcesConfig(local=LocalSource(enabled=True, path=str(assets))),
         libraries={"Movies": MovieLibrary(
             type="movies",
             metadata=Metadata(enabled=False),

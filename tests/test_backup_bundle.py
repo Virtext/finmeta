@@ -239,6 +239,42 @@ def test_inspect_writes_nothing_and_reports_the_diff(client, ctx):
     assert "Movies" in ctx.config.libraries
 
 
+def test_inspect_reports_overlay_profile_additions_and_removals(client, ctx):
+    """Audit 2026-11-11 "D7": overlays.profiles is a Dict[str, dict] keyed
+    by profile NAME, not a list of {"name": ...} objects -- the old diff
+    code iterated the dict's own KEYS (plain strings) through a
+    `isinstance(p, dict)` check that was therefore always False, so this
+    "what would restoring this change?" preview always reported zero
+    overlay-profile changes no matter what the bundle actually held."""
+    with_profile = CONFIG_YAML + (
+        "overlays:\n"
+        "  profiles:\n"
+        "    Movies-auto:\n"
+        "      elements: [resolution]\n"
+    )
+    ctx.put_config(with_profile)
+    assert "Movies-auto" in ctx.config.overlays.profiles
+
+    # The incoming bundle has a DIFFERENT profile name -- Movies-auto should
+    # show up as removed, Shows-auto as added.
+    incoming = CONFIG_YAML + (
+        "overlays:\n"
+        "  profiles:\n"
+        "    Shows-auto:\n"
+        "      elements: [audio]\n"
+    )
+    bundle = build_bundle(config_text=incoming, overrides={})
+    r = client.post("/api/backup/inspect", content=bundle,
+                    headers={"content-type": "application/zip"})
+    assert r.status_code == 200
+    assert r.json()["diff"]["overlay_profiles"] == {
+        "added": ["Shows-auto"], "removed": ["Movies-auto"],
+    }
+    # still just a preview -- nothing applied
+    assert "Movies-auto" in ctx.config.overlays.profiles
+    assert "Shows-auto" not in ctx.config.overlays.profiles
+
+
 def test_restore_requires_confirm(client, ctx):
     bundle = client.get("/api/backup/export").content
     r = client.post("/api/backup/restore", content=bundle,
@@ -315,3 +351,79 @@ def test_restore_rejects_junk_and_bad_modes(client, ctx):
                        params={"confirm": "true", "mode": "sideways"},
                        headers={"content-type": "application/zip"}).status_code == 422
     assert client.post("/api/backup/restore", json={"confirm": True}).status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# A4 (audit 2026-11-11): oversized uploads are refused WHILE streaming, not
+# only after being fully buffered into memory.
+# ---------------------------------------------------------------------------
+
+class _FakeOversizedRequest:
+    """A minimal stand-in for fastapi.Request: a declared content-length and
+    an async chunk generator that COUNTS how many chunks it actually hands
+    out, so a test can prove the reader stopped pulling chunks once the cap
+    was crossed instead of draining the whole thing first."""
+
+    def __init__(self, total_bytes: int, chunk_size: int = 1024,
+                declared_length: "int | None" = None):
+        self._total = total_bytes
+        self._chunk_size = chunk_size
+        self.chunks_yielded = 0
+        self.headers = ({"content-length": str(declared_length)}
+                        if declared_length is not None else {})
+
+    async def stream(self):
+        sent = 0
+        while sent < self._total:
+            n = min(self._chunk_size, self._total - sent)
+            self.chunks_yielded += 1
+            sent += n
+            yield b"x" * n
+
+
+def test_capped_body_reader_aborts_mid_stream_without_draining_it():
+    """A body far larger than the cap, sent with NO (or a lying)
+    Content-Length, must be refused as soon as the cap is crossed -- not
+    after the whole multi-megabyte body has been pulled into memory.
+
+    Driven with a plain ``asyncio.run`` rather than an async test plugin --
+    none is set up for this project (no pytest-asyncio/anyio marker exists
+    anywhere else in the suite) and ``_read_capped_body`` is a single
+    coroutine with no event-loop dependency worth pulling one in for.
+    """
+    import asyncio
+    from fastapi import HTTPException
+    from finmeta.api.routes_backup import _read_capped_body
+
+    limit = 4096
+    total = 50 * limit  # would be 200KB fully drained; must not get there
+    req = _FakeOversizedRequest(total, chunk_size=1024, declared_length=None)
+    with pytest.raises(HTTPException) as ei:
+        asyncio.run(_read_capped_body(req, limit))
+    assert ei.value.status_code == 413
+    # Stopped within a few chunks of crossing the cap, nowhere near the end.
+    assert req.chunks_yielded < (total // 1024) // 2
+
+
+def test_capped_body_reader_rejects_on_declared_length_before_reading_any_chunk():
+    import asyncio
+    from fastapi import HTTPException
+    from finmeta.api.routes_backup import _read_capped_body
+
+    limit = 4096
+    req = _FakeOversizedRequest(10 * limit, chunk_size=1024, declared_length=10 * limit)
+    with pytest.raises(HTTPException) as ei:
+        asyncio.run(_read_capped_body(req, limit))
+    assert ei.value.status_code == 413
+    assert req.chunks_yielded == 0  # refused before touching the stream at all
+
+
+def test_restore_oversized_body_is_rejected(client):
+    """End-to-end: the real route still answers 413 for a body over the cap
+    (this one small enough to actually send in a test)."""
+    from finmeta.api.routes_backup import MAX_UPLOAD_BYTES
+    oversized = b"x" * (MAX_UPLOAD_BYTES + 1)
+    r = client.post("/api/backup/restore", content=oversized,
+                    params={"confirm": "true"},
+                    headers={"content-type": "application/zip"})
+    assert r.status_code == 413

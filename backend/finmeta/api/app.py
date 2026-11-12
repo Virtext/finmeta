@@ -5,6 +5,7 @@ REST under ``/api``; OpenAPI at ``/api/docs``. Serves the built UI from
 """
 from __future__ import annotations
 
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
@@ -47,24 +48,37 @@ def _web_dir() -> Optional[Path]:
     return None
 
 
-def _is_public(path: str) -> bool:
-    """Routes reachable without a session (SPEC S9 §A).
+#: Routes reachable without a session, by exact path.
+_PUBLIC_EXACT_PATHS = frozenset({
+    "/api/health", "/api/auth/login", "/api/auth/setup", "/api/auth/status",
+})
 
-    ``/api/webhooks/jellyfin/<token>`` (Jellyfin's webhook plugin can't log
-    in) is the one exception beyond the fixed SPEC list -- its own token
-    (validated inside the route, constant-time, against a stored hash) is
-    the gate instead of a session cookie. The sibling management endpoints
-    (status/regenerate/disable) are plain Settings actions and stay
-    session-gated, so they're excluded by name even though they share the
-    "/api/webhooks/jellyfin/" prefix.
-    """
-    if path == "/api/health":
+#: ``/api/webhooks/jellyfin/<token>`` (Jellyfin's webhook plugin can't log
+#: in) is the one public route with a variable path -- its own token
+#: (validated inside the route, constant-time, against a stored hash) is
+#: the gate instead of a session cookie. Matched structurally (exactly one
+#: opaque path segment after the fixed prefix) rather than by excluding the
+#: sibling management routes' names: audit 2026-11-11 "A3" found the
+#: previous version excluded "status"/"regenerate" by name but not
+#: "disable" (harmless today only because that route happens to have no
+#: trailing segment at all, `DELETE /api/webhooks/jellyfin`) -- a default
+#: that fails OPEN for any name someone forgets to add to the exclusion
+#: list. This version fails closed: a path has to look like exactly one
+#: token segment to be public at all, and even then one of the three
+#: reserved words below (matching a sibling route's own path segment,
+#: should one ever be added at this depth) still refuses it.
+_WEBHOOK_TOKEN_RE = re.compile(r"^/api/webhooks/jellyfin/[^/]+$")
+_WEBHOOK_RESERVED_WORDS = frozenset({"status", "regenerate", "disable"})
+
+
+def _is_public(path: str) -> bool:
+    """Routes reachable without a session (SPEC S9 §A)."""
+    if path in _PUBLIC_EXACT_PATHS:
         return True
-    if path in ("/api/auth/login", "/api/auth/setup", "/api/auth/status"):
-        return True
-    prefix = "/api/webhooks/jellyfin/"
-    if path.startswith(prefix):
-        return path[len(prefix):] not in ("status", "regenerate")
+    m = _WEBHOOK_TOKEN_RE.match(path)
+    if m is not None:
+        token = path.rsplit("/", 1)[-1]
+        return token not in _WEBHOOK_RESERVED_WORDS
     return False
 
 
@@ -160,6 +174,13 @@ def create_app(context: AppContext) -> FastAPI:
     app = FastAPI(
         title="Finmeta API", version=__version__, lifespan=lifespan,
         docs_url="/api/docs", redoc_url=None, openapi_url="/api/openapi.json",
+        # Audit 2026-11-11 "D10": FastAPI's Swagger-UI OAuth2 redirect
+        # helper, registered by default at /docs/oauth2-redirect -- the
+        # only route this app ever had outside /api, so the auth
+        # middleware above (gated on path.startswith("/api")) never saw
+        # it. There is no OAuth2 flow configured here and the route
+        # serves no data; None disables it from being registered at all.
+        swagger_ui_oauth2_redirect_url=None,
     )
     app.state.context = context
     _install_middleware(app)

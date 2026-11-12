@@ -76,7 +76,7 @@ def _fake_candidates(item, cfg, jf, tmdb, sources, mapper):
                       ref="/tmp/fake-poster.jpg", lang="en",
                       width=1000, height=1500, score=0.9),
             Candidate(kind="poster", source="tmdb",
-                      ref="/tmp/fake-poster2.jpg", lang=None,
+                      ref="/tmp/fake-media/fake-poster2.jpg", lang=None,
                       width=500, height=750, score=0.7),
         ],
     }
@@ -191,6 +191,34 @@ def test_library_items(client):
 def test_library_items_unknown(client):
     r = client.get("/api/libraries/Nonexistent/items")
     assert r.status_code == 404
+
+
+def test_library_items_defaults_to_a_bounded_limit(tmp_config):
+    """Audit 2026-11-11 "C5": GET .../items with no `limit` query param
+    used to reach plan_builder.build_plan as limit=None, which fetches
+    the WHOLE library (jf.iter_items, no Jellyfin-side Limit) synchronously
+    inside the request thread -- ~7s/item cold. It must now reach
+    build_plan as a bounded int (matching /items/light's own default)
+    even when the caller omits the param entirely."""
+    seen_limit = {}
+
+    def _spy_plan(cfg, jf, tmdb, sources, library=None, item_id=None,
+                  config_dir=None, **kwargs):
+        seen_limit["limit"] = kwargs.get("limit")
+        return _fake_plan(cfg, jf, tmdb, sources, library=library,
+                          item_id=item_id, config_dir=config_dir, **kwargs)
+
+    ctx = AppContext(
+        str(tmp_config / "config.yml"), config_dir=str(tmp_config),
+        db_path=str(tmp_config / "jobs.db"),
+        overrides_path=str(tmp_config / "overrides.db"),
+        plan_builder=_spy_plan, candidates_provider=_fake_candidates,
+    )
+    with TestClient(create_app(ctx)) as c:
+        r = c.get("/api/libraries/Movies/items")
+    assert r.status_code == 200
+    assert seen_limit["limit"] == 100
+    assert seen_limit["limit"] is not None
 
 
 def test_item_plan(client):
@@ -456,15 +484,15 @@ def test_candidates(client, context):
 def test_select_candidate(client, context):
     # Select the second poster
     r = client.put("/api/items/item-1/candidates",
-                   json={"kind": "poster", "ref": "/tmp/fake-poster2.jpg", "source": "tmdb"})
+                   json={"kind": "poster", "ref": "/tmp/fake-media/fake-poster2.jpg", "source": "tmdb"})
     assert r.status_code == 200
     body = r.json()
     assert body["ok"] is True
-    assert body["selected"] == "/tmp/fake-poster2.jpg"
+    assert body["selected"] == "/tmp/fake-media/fake-poster2.jpg"
     # Verify override was stored
     ovr = context.overrides.get("item-1", "poster")
     assert ovr is not None
-    assert ovr["ref"] == "/tmp/fake-poster2.jpg"
+    assert ovr["ref"] == "/tmp/fake-media/fake-poster2.jpg"
 
 
 def test_select_candidate_invalidates_the_plan_cache(client, context):
@@ -487,19 +515,19 @@ def test_select_candidate_invalidates_the_plan_cache(client, context):
     assert not any(f["kind"] == "poster" for f in r.json()["files"])
 
     r = client.put("/api/items/item-1/candidates",
-                   json={"kind": "poster", "ref": "/tmp/fake-poster2.jpg", "source": "tmdb"})
+                   json={"kind": "poster", "ref": "/tmp/fake-media/fake-poster2.jpg", "source": "tmdb"})
     assert r.status_code == 200
 
     r = client.get("/api/items/item-1/plan")
     assert r.status_code == 200
     after = next(f for f in r.json()["files"] if f["kind"] == "poster")
-    assert after["source_ref"] == "/tmp/fake-poster2.jpg"
+    assert after["source_ref"] == "/tmp/fake-media/fake-poster2.jpg"
 
 
 def test_clear_candidate(client, context):
     # Set then clear
     client.put("/api/items/item-1/candidates",
-               json={"kind": "poster", "ref": "/tmp/fake-poster2.jpg"})
+               json={"kind": "poster", "ref": "/tmp/fake-media/fake-poster2.jpg"})
     assert context.overrides.get("item-1", "poster") is not None
     r = client.put("/api/items/item-1/candidates",
                    json={"kind": "poster", "ref": None})
@@ -637,6 +665,41 @@ def test_skip_kind_persists_across_replans(context):
     context.invalidate_plans()
     plan = context.get_plan(item_id="item-1")
     assert len(plan.items[0].files) == 1
+
+
+def test_plan_cache_is_bounded(context):
+    """Audit 2026-11-11 "C3": AppContext._cache used to grow forever --
+    one entry per item viewed, one per library page, nothing ever evicted.
+    Requesting more distinct scopes than the cap must never leave more than
+    the cap's worth of entries behind."""
+    from finmeta.api.state import _PLAN_CACHE_MAX_ENTRIES
+    for i in range(_PLAN_CACHE_MAX_ENTRIES + 20):
+        context.get_plan(item_id=f"item-{i}")
+    assert len(context._cache) == _PLAN_CACHE_MAX_ENTRIES
+
+
+def test_plan_cache_lru_protects_recently_touched_entries(context):
+    """A cache hit marks that entry as most-recently-used, so a scope that
+    gets re-viewed survives even though a chronologically-newer-but-never-
+    revisited scope does not."""
+    from finmeta.api.state import _PLAN_CACHE_MAX_ENTRIES
+    for i in range(_PLAN_CACHE_MAX_ENTRIES):
+        context.get_plan(item_id=f"item-{i}")
+    gen = context._gen
+    oldest_key = (gen, "item:item-0")
+    second_key = (gen, "item:item-1")
+    assert oldest_key in context._cache
+    assert second_key in context._cache
+
+    context.get_plan(item_id="item-0")  # a hit -- touches "item-0"
+    # One more NEW scope forces an eviction. The least-recently-used entry
+    # is now "item-1" (never touched again), not "item-0" (just touched),
+    # even though "item-0" is chronologically the older of the two.
+    context.get_plan(item_id=f"item-{_PLAN_CACHE_MAX_ENTRIES}")
+
+    assert oldest_key in context._cache
+    assert second_key not in context._cache
+    assert len(context._cache) == _PLAN_CACHE_MAX_ENTRIES
 
 
 # ---------------------------------------------------------------------------
@@ -816,7 +879,7 @@ class TestApplyOverridesStatus:
                              content_sha256="0" * 64, status="unchanged")],
         )])
         ovs = {"i1": [{"kind": "poster", "ref": str(src_new), "source": "local"}]}
-        apply_overrides(plan, ovs)
+        apply_overrides(plan, ovs, allowed_roots=(tmp_path,))
         fw = plan.items[0].files[0]
         assert fw.source_ref == str(src_new)
         # on-disk (OLD) != new content (NEW) -> update
@@ -838,7 +901,7 @@ class TestApplyOverridesStatus:
                              content_sha256="1" * 64, status="create")],
         )])
         ovs = {"i1": [{"kind": "poster", "ref": str(src), "source": "local"}]}
-        apply_overrides(plan, ovs)
+        apply_overrides(plan, ovs, allowed_roots=(tmp_path,))
         assert plan.items[0].files[0].status == "unchanged"
 
     def test_no_override_keeps_status(self, tmp_path):
@@ -1039,3 +1102,57 @@ def test_tmdb_and_sources_secret_store_only(context, monkeypatch):
     assert context.resolve_secret("fanart_key") == "store-fanart-9012"
     tmdb.close()
     sources["tmdb"].close()
+
+
+# ---------------------------------------------------------------------------
+# B7 (audit 2026-11-11): config.yml writes are atomic.
+# ---------------------------------------------------------------------------
+#
+# put_config used to write config.yml with a plain Path.write_text(), which
+# truncates the file before the new content lands -- a crash, a full disk or
+# a container kill mid-write left a truncated or empty config.yml, the file
+# whose loss stops the app from even starting. These confirm the write now
+# goes through api.atomic.write_text_atomic (temp file + fsync + os.replace),
+# the same guarantee secrets.yml/auth.yml already had.
+
+def test_put_config_write_is_atomic_and_leaves_no_temp_file(context):
+    before = context.config_text()
+    new_yaml = before.replace("dry_run: true", "dry_run: false")
+    context.put_config(new_yaml)
+    leftovers = [p.name for p in context.config_dir.iterdir()
+                if p.name.startswith(".finmeta_")]
+    assert leftovers == []
+
+
+def test_put_config_failed_write_leaves_the_old_config_on_disk(context, monkeypatch):
+    """A torn write (simulated: os.replace fails after the temp file is
+    fully written) must leave config.yml exactly as it was -- not
+    truncated, not half-written -- because write_text_atomic never
+    touches the real path until the replace, which here never happens."""
+    from finmeta.api import atomic
+
+    before_text = context.config_text()
+    before_dry_run = context.config.dry_run
+
+    def boom(*a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(atomic.os, "replace", boom)
+    new_yaml = before_text.replace("dry_run: true", "dry_run: false")
+    with pytest.raises(OSError):
+        context.put_config(new_yaml)
+    assert context.config_path.read_text() == before_text
+    monkeypatch.undo()  # restore real os.replace before reloading from disk
+    ok, _err = context.reload()
+    assert ok is True
+    assert context.config.dry_run == before_dry_run
+
+
+def test_load_config_wraps_oserror_in_configerror(tmp_path):
+    """A missing config file must raise ConfigError (naming the path),
+    not a bare FileNotFoundError with no context for the caller."""
+    from finmeta.config.loading import ConfigError, load_config
+
+    missing = tmp_path / "does-not-exist.yml"
+    with pytest.raises(ConfigError, match=str(missing)):
+        load_config(missing)

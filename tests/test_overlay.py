@@ -258,8 +258,8 @@ class TestPlanIntegration:
 
     def _fixture(self, tmp_path: Path):
         from finmeta.config.models import (
-            Config, ServerConfig, MovieLibrary, MovieArtwork, Metadata,
-            OverlaysConfig, OverlayStyle,
+            Config, LocalSource, ServerConfig, MovieLibrary, MovieArtwork, Metadata,
+            OverlaysConfig, OverlayStyle, SourcesConfig,
         )
         from finmeta.engine.matching import MatchResult
         from finmeta.jellyfin_client.mappings import PathMapper
@@ -288,6 +288,10 @@ class TestPlanIntegration:
         cfg = Config(
             dry_run=True,
             server=ServerConfig(url="http://x:8096"),
+            # Matches the real `assets` dir LocalAssetSource(assets) reads from
+            # above -- audit 2026-11-11 "A1"/"B5": candidate_ref.default_allowed_roots
+            # checks a local candidate ref against cfg.sources.local.path.
+            sources=SourcesConfig(local=LocalSource(enabled=True, path=str(assets))),
             libraries={"Movies": MovieLibrary(
                 type="movies",
                 metadata=Metadata(enabled=False),

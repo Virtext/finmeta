@@ -11,6 +11,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from finmeta.config.models import Config, TvArtwork
+from finmeta.engine.candidate_ref import RefNotAllowed
 from finmeta.engine.matching import match_item
 from finmeta.engine.plan_builder import _resolve_item_library
 from finmeta.engine.resolution import collect_candidates
@@ -119,7 +120,15 @@ class CandidateSelection(BaseModel):
 @router.put("/items/{item_id}/candidates")
 def select_candidate(item_id: str, body: CandidateSelection,
                      ctx: AppContext = Depends(get_ctx)) -> dict:
-    ctx.set_candidate(item_id, body.kind, body.ref, body.source)
+    try:
+        ctx.set_candidate(item_id, body.kind, body.ref, body.source)
+    except RefNotAllowed as exc:
+        # The ref violates engine.candidate_ref's policy (audit 2026-11-11
+        # "A1") -- never stored. 422, not 403/404: this is a malformed
+        # request, not a resource-existence question, and the UI only ever
+        # builds this ref from refs it got out of the plan/candidates API
+        # itself, so a legitimate client should never hit this.
+        raise HTTPException(status_code=422, detail=f"candidate ref not allowed: {exc}") from exc
     # Without this, ctx.get_plan() right below returns whatever this item's
     # plan was cached as BEFORE the override above was set (AppContext.get_plan
     # keys its cache on (generation, scope) and a bare override write never

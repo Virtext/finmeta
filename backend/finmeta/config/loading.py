@@ -26,10 +26,24 @@ def resolve_env(name: str) -> str:
 
 
 def load_config(path) -> Config:
-    """Read and validate a YAML config file into a Config model."""
+    """Read and validate a YAML config file into a Config model.
+
+    Audit 2026-11-11 "B7": a missing, deleted or otherwise unreadable
+    config.yml (the far end of a torn write, or any other filesystem
+    surprise) used to raise a bare ``OSError``/``FileNotFoundError`` --
+    correct in the sense that nothing papers over a real problem, but a
+    raw traceback where the caller (``AppContext.__init__``, which has no
+    handling for this at all) gets no actionable message naming the path.
+    Wrapped in the same ``ConfigError`` every other config problem here
+    already raises.
+    """
     p = Path(path)
     try:
-        data: Any = yaml.safe_load(p.read_text())
+        raw_text = p.read_text()
+    except OSError as exc:
+        raise ConfigError(f"could not read config file {p}: {exc}") from exc
+    try:
+        data: Any = yaml.safe_load(raw_text)
     except yaml.YAMLError as exc:
         raise ConfigError(f"invalid YAML in {p}: {exc}") from exc
     if data is None:

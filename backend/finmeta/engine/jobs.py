@@ -12,7 +12,9 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+from finmeta.sqlite_conn import shared_connection
 
 DEFAULT_DB_PATH = Path("config") / "jobs.db"
 
@@ -22,11 +24,13 @@ def _utcnow() -> str:
 
 
 def _conn(db_path: Path) -> sqlite3.Connection:
-    db_path = Path(db_path)
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(db_path))
-    conn.row_factory = sqlite3.Row
-    return conn
+    """The shared WAL connection for ``db_path`` (audit 2026-11-11 "C4").
+
+    Every call site below uses this as ``with _conn(db_path) as conn:`` --
+    sqlite3's context manager only commits-or-rolls-back on exit, it never
+    closes, so switching this from "open a fresh connection every call" to
+    "reuse one shared connection" needed no changes at any call site."""
+    return shared_connection(db_path)
 
 
 #: Columns added to ``runs`` after the table first shipped. Applied by
@@ -133,6 +137,25 @@ def log(db_path: Path, run_id: str, level: str, message: str) -> None:
         )
 
 
+def log_many(db_path: Path, run_id: str, entries: Sequence[Tuple[str, str, str]]) -> None:
+    """Append several log entries in one transaction (audit 2026-11-11
+    "C4"): the executor used to call :func:`log` once per file written --
+    one INSERT+COMMIT each -- so a 1000-file apply was 1000 of them just
+    for the routine "wrote ..." line. ``entries`` is ``(ts, level,
+    message)`` tuples, timestamped by the CALLER at the moment each line
+    was generated (not here), so batching the commit never shifts what a
+    line's own ``ts`` says actually happened. A no-op for an empty
+    sequence (the common case: most items write without needing any of
+    this)."""
+    if not entries:
+        return
+    with _conn(db_path) as conn:
+        conn.executemany(
+            "INSERT INTO job_log (run_id, ts, level, message) VALUES (?, ?, ?, ?)",
+            [(run_id, ts, level, message) for ts, level, message in entries],
+        )
+
+
 def list_runs(db_path: Path) -> List[Dict[str, Any]]:
     """Return all runs, newest first."""
     try:
@@ -165,10 +188,12 @@ def list_runs_page(
         args.append(action)
     clause = f"WHERE {' AND '.join(where)}" if where else ""
     with _conn(db_path) as conn:
+        # clause is built from hardcoded "status = ?"/"action = ?" strings; the
+        # actual values are bound params in args, never interpolated.
         total = conn.execute(
-            f"SELECT COUNT(*) n FROM runs {clause}", args).fetchone()["n"]
+            f"SELECT COUNT(*) n FROM runs {clause}", args).fetchone()["n"]  # noqa: S608
         rows = conn.execute(
-            f"SELECT * FROM runs {clause} ORDER BY started_at DESC, rowid DESC"
+            f"SELECT * FROM runs {clause} ORDER BY started_at DESC, rowid DESC"  # noqa: S608
             " LIMIT ? OFFSET ?",
             [*args, int(limit), int(offset)],
         ).fetchall()
@@ -190,8 +215,10 @@ def run_log_summary(db_path: Path, run_ids: Sequence[str]) -> Dict[str, Dict[str
     init_db(db_path)
     marks = ",".join("?" for _ in ids)
     with _conn(db_path) as conn:
+        # marks is a generated "?" placeholder list sized by len(ids); ids are
+        # bound params, never interpolated.
         for row in conn.execute(
-            f"SELECT run_id, level, COUNT(*) n FROM job_log"
+            f"SELECT run_id, level, COUNT(*) n FROM job_log"  # noqa: S608
             f" WHERE run_id IN ({marks}) GROUP BY run_id, level", ids,
         ):
             entry = out.get(row["run_id"])
@@ -201,8 +228,9 @@ def run_log_summary(db_path: Path, run_ids: Sequence[str]) -> Dict[str, Dict[str
                 entry["errors"] = row["n"]
             elif row["level"] == "warn":
                 entry["warnings"] = row["n"]
+        # same marks as above, same reason.
         for row in conn.execute(
-            f"SELECT run_id, message, MAX(id) FROM job_log"
+            f"SELECT run_id, message, MAX(id) FROM job_log"  # noqa: S608
             f" WHERE run_id IN ({marks}) AND level = 'error' GROUP BY run_id", ids,
         ):
             entry = out.get(row["run_id"])
@@ -235,5 +263,5 @@ def get_job_log(db_path: Path, run_id: str) -> List[Dict[str, Any]]:
 __all__ = [
     "DEFAULT_DB_PATH", "init_db", "start_run", "finish_run",
     "list_runs_page", "run_log_summary",
-    "log", "list_runs", "get_run", "get_job_log",
+    "log", "log_many", "list_runs", "get_run", "get_job_log",
 ]

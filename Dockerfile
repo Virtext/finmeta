@@ -31,7 +31,23 @@ RUN groupadd --gid 1000 finmeta \
 
 WORKDIR /app
 
-COPY pyproject.toml ./
+# Audit 2026-11-11 "D4": `pip install -e .` alone resolves every `>=` in
+# pyproject.toml fresh at build time, with no ceiling on any transitive
+# dependency -- a bad or malicious release of anything downstream lands in
+# the published image automatically, and the audited dependency set is not
+# the shipped one. uv.lock (committed, kept in sync via `uv lock`) pins
+# every dependency, direct and transitive, to an exact hash-verified
+# version; `uv export --frozen` turns that into a hash-pinned requirements
+# file WITHOUT re-resolving anything (it fails outright if uv.lock
+# disagrees with pyproject.toml, rather than silently updating it), which
+# pip then installs in --require-hashes mode -- same system `python`,
+# same USER/CMD below, just a reproducible dependency set instead of an
+# unbounded one.
+COPY --from=ghcr.io/astral-sh/uv:0.11.8 /uv /usr/local/bin/uv
+COPY pyproject.toml uv.lock ./
+RUN uv export --frozen --no-dev --no-emit-project \
+      --format requirements.txt -o requirements.lock.txt
+
 COPY backend ./backend
 # Editable install (-e), not a regular one: api/app.py resolves the built UI's
 # location via `Path(__file__)...` relative to the package itself (D1: resolved,
@@ -42,8 +58,11 @@ COPY backend ./backend
 # silently 404ing every UI route while /api/* keeps working (the bug this
 # fixes: caught by actually building and running this Dockerfile end-to-end
 # against a fresh clone of the public repo, not just checking /api/health).
+# --no-deps on the project install itself: every dependency it needs was
+# already installed, hash-verified, by the line above.
 RUN pip install --no-cache-dir --upgrade pip \
- && pip install --no-cache-dir -e .
+ && pip install --no-cache-dir --require-hashes -r requirements.lock.txt \
+ && pip install --no-cache-dir --no-deps -e .
 
 COPY --from=ui-builder /src/backend/finmeta/web ./backend/finmeta/web
 COPY config/config.template.yml ./config.template.yml

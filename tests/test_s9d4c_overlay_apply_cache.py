@@ -25,7 +25,8 @@ from unittest.mock import MagicMock
 from PIL import Image
 
 from finmeta.config.models import (
-    Config, Metadata, MovieArtwork, MovieLibrary, OverlaysConfig, OverlayStyle, ServerConfig,
+    Config, LocalSource, Metadata, MovieArtwork, MovieLibrary, OverlaysConfig, OverlayStyle,
+    PathMapping, ServerConfig, SourcesConfig,
 )
 from finmeta.engine.executor import apply_plan
 from finmeta.engine.matching import MatchResult
@@ -96,6 +97,15 @@ def test_overlay_apply_writes_the_exact_overlaid_bytes_plan_hashed(tmp_path):
     cfg = Config(
         dry_run=False,
         server=ServerConfig(url="http://x:8096"),
+        # Matches the real `assets` dir LocalAssetSource(assets) reads from
+        # below -- audit 2026-11-11 "A1"/"B5": candidate_ref.default_allowed_roots
+        # now checks a local candidate ref against cfg.sources.local.path, so this
+        # must be the SAME directory the fixture's LocalAssetSource actually uses.
+        sources=SourcesConfig(local=LocalSource(enabled=True, path=str(assets))),
+        # Matches the `mapper` built below -- audit 2026-11-11 "B6":
+        # apply_plan now refuses to write outside a configured
+        # path_mappings local root.
+        path_mappings=[PathMapping(jellyfin=str(media_root), local=str(media_root))],
         libraries={"Movies": MovieLibrary(
             type="movies",
             metadata=Metadata(enabled=False),

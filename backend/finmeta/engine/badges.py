@@ -13,7 +13,7 @@ Missing data yields ``None`` so the caller omits the badge (SPEC \u00a78:
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, Optional, Sequence
 
 from finmeta.jellyfin_client.types import MediaStream
 
