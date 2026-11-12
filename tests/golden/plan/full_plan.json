@@ -6,6 +6,7 @@
       "media_type": "movie",
       "tmdb_id": 603,
       "matched_by": "provider_id",
+      "library": null,
       "files": [
         {
           "target_path": "/work/fixture/library/Movies/The Matrix (1999)/movie.nfo",
@@ -46,6 +47,7 @@
       "media_type": "movie",
       "tmdb_id": 680,
       "matched_by": "title_year",
+      "library": null,
       "files": [
         {
           "target_path": "/work/fixture/library/Movies/Pulp Fiction (1994)/movie.nfo",
@@ -77,6 +79,7 @@
       "media_type": "tvshow",
       "tmdb_id": 1396,
       "matched_by": "provider_id",
+      "library": null,
       "files": [
         {
           "target_path": "/work/fixture/library/Shows/Breaking Bad/tvshow.nfo",

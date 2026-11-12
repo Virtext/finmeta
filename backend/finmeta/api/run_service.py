@@ -78,10 +78,27 @@ def scope_parts(scope: Optional[str]) -> tuple:
     return None, None
 
 
-def _write_plan_json(context: AppContext, plan: WritePlan) -> Path:
+def _write_plan_json(context: AppContext, plan: WritePlan, run_id: str) -> Path:
+    """Write ``plan`` to ``config/runs/plan-<epoch>-<hex>.json``.
+
+    Audit 2026-11-11 "D12": this used to name the file
+    ``plan-<int(time.time())>.json`` -- two runs starting in the same
+    second collided, one plan silently overwriting the other on disk
+    (and ``_do_apply`` duplicated this exact logic inline instead of
+    calling this function, so the bug existed in two places). Reuses
+    ``run_id``'s own ``<epoch>-<hex>`` suffix (``run_id`` is
+    ``run-<epoch>-<hex>``, see ``_new_run_id`` -- the hex half is what
+    actually makes it collision-free) rather than inventing a new one, so
+    the plan file is also directly correlatable to the run it belongs to.
+    The epoch stays the leading, fixed-width component so this still
+    sorts chronologically wherever something orders these filenames as
+    plain strings (``cli/main.py``'s "find the most recent plan" does
+    exactly that, not by mtime) -- only what follows the epoch changed.
+    """
     runs_dir = context.config_dir / "runs"
     runs_dir.mkdir(parents=True, exist_ok=True)
-    p = runs_dir / f"plan-{int(time.time())}.json"
+    suffix = run_id.split("-", 1)[1] if run_id.startswith("run-") else run_id
+    p = runs_dir / f"plan-{suffix}.json"
     p.write_text(context.redact(plan.to_json()) + "\n")
     return p
 
@@ -120,7 +137,6 @@ def _format_counts_summary(plan) -> str:
     from collections import Counter
     cats = ("dynamic_range", "resolution", "audio")
     tallies = {c: Counter() for c in cats}
-    saw_any_cat = False
     cat_present = set()
     for ip in plan.items:
         fc = getattr(ip, "format_counts", None) or {}
@@ -130,7 +146,6 @@ def _format_counts_summary(plan) -> str:
             key = fc.get(cat)
             if key is None:
                 continue
-            saw_any_cat = True
             cat_present.add(cat)
             tallies[cat][key if key else "none"] += 1
     parts = []
@@ -164,7 +179,7 @@ def _do_plan(context: AppContext, run_id: str, cfg: Config,
     n_files = sum(len(ip.files) for ip in plan.items)
     fmt_part = _format_counts_summary(plan)
     suffix = (" format=" + fmt_part) if fmt_part else ""
-    plan_path = _write_plan_json(context, plan)
+    plan_path = _write_plan_json(context, plan, run_id)
     # S9d2-fix2 step 6b: provider errors must be visible in the run log.
     for w in getattr(plan, "provider_warnings", []):
         log(db, run_id, "warn",
@@ -189,10 +204,7 @@ def _do_apply(context: AppContext, run_id: str, cfg: Config,
     try:
         plan = context.get_plan(library=library, item_id=item_id,
                                 progress_cb=_progress_logger(db, run_id, "apply"))
-        runs_dir = context.config_dir / "runs"
-        runs_dir.mkdir(parents=True, exist_ok=True)
-        plan_path = runs_dir / f"plan-{int(time.time())}.json"
-        plan_path.write_text(context.redact(plan.to_json()) + "\n")
+        plan_path = _write_plan_json(context, plan, run_id)
         # Reuse the runs row inserted at the top of this function (start_run is
         # INSERT-only); apply_plan would double-insert, so record the sha here.
         _set_plan_sha(context, run_id,

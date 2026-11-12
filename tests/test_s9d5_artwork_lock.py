@@ -25,7 +25,8 @@ from unittest.mock import MagicMock
 
 from finmeta.api.overrides import OverrideStore
 from finmeta.config.models import (
-    Config, Metadata, MovieArtwork, MovieLibrary, ServerConfig,
+    Config, LocalSource, Metadata, MovieArtwork, MovieLibrary, PathMapping, ServerConfig,
+    SourcesConfig,
 )
 from finmeta.engine.executor import apply_plan
 from finmeta.engine.matching import MatchResult
@@ -147,6 +148,11 @@ def _fixture(tmp_path):
     cfg = Config(
         dry_run=True,
         server=ServerConfig(url="http://x:8096"),
+        # Matches the real `assets` dir LocalAssetSource(assets) reads from
+        # below -- audit 2026-11-11 "A1"/"B5": candidate_ref.default_allowed_roots
+        # now checks a local candidate ref against cfg.sources.local.path, so this
+        # must be the SAME directory the fixture's LocalAssetSource actually uses.
+        sources=SourcesConfig(local=LocalSource(enabled=True, path=str(assets))),
         libraries={"Movies": MovieLibrary(
             type="movies",
             metadata=Metadata(enabled=False),
@@ -196,8 +202,13 @@ class TestPlanBuilderSkipsResolutionWhenLocked:
 # engine.executor: locking on first successful apply
 # ---------------------------------------------------------------------------
 
-def _make_config(dry_run=False):
-    return Config(dry_run=dry_run, server=ServerConfig(url="http://x:8096"))
+def _make_config(dry_run=False, media_root: str = "/tmp/media"):
+    # media_root (audit 2026-11-11 "B6"): apply_plan now refuses to write
+    # outside a configured path_mappings local root.
+    return Config(
+        dry_run=dry_run, server=ServerConfig(url="http://x:8096"),
+        path_mappings=[PathMapping(jellyfin="/media", local=media_root)],
+    )
 
 
 class TestExecutorLocksOnFirstApply:
@@ -217,7 +228,7 @@ class TestExecutorLocksOnFirstApply:
             ),
         ])
         (tmp_path / "src.jpg").write_bytes(content)
-        cfg = _make_config(dry_run=False)
+        cfg = _make_config(dry_run=False, media_root=str(tmp_path / "media"))
         jf, tmdb = MagicMock(), MagicMock()
         db = tmp_path / "jobs.db"
         cfg_dir = tmp_path / "config"
@@ -252,7 +263,7 @@ class TestExecutorLocksOnFirstApply:
             ),
         ])
         (tmp_path / "src.jpg").write_bytes(content)
-        cfg = _make_config(dry_run=False)
+        cfg = _make_config(dry_run=False, media_root=str(tmp_path / "media"))
         jf, tmdb = MagicMock(), MagicMock()
         db = tmp_path / "jobs.db"
 
@@ -286,7 +297,7 @@ class TestExecutorLocksOnFirstApply:
                 )],
             ),
         ])
-        cfg = _make_config(dry_run=False)
+        cfg = _make_config(dry_run=False, media_root=str(tmp_path / "media"))
         jf, tmdb = MagicMock(), MagicMock()
         db = tmp_path / "jobs.db"
         cfg_dir = tmp_path / "config"
@@ -316,7 +327,7 @@ class TestExecutorLocksOnFirstApply:
                 )],
             ),
         ])
-        cfg = _make_config(dry_run=False)
+        cfg = _make_config(dry_run=False, media_root=str(tmp_path / "media"))
         jf, tmdb = MagicMock(), MagicMock()
         tmdb.movie_details = MagicMock()
         db = tmp_path / "jobs.db"

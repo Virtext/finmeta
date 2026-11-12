@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from finmeta.config.models import Config, ServerConfig
+from finmeta.config.models import Config, PathMapping, ServerConfig
 from finmeta.engine import overlay
 from finmeta.engine.executor import apply_plan
 from finmeta.engine.overlay import prune_overlay_cache
@@ -129,7 +129,12 @@ class TestExecutorIntegration:
         ])
         jf, tmdb = MagicMock(), MagicMock()
         db = tmp_path / "jobs.db"
-        cfg = Config(dry_run=False, server=ServerConfig(url="http://x:8096"))
+        cfg = Config(
+            dry_run=False, server=ServerConfig(url="http://x:8096"),
+            # Audit 2026-11-11 "B6": apply_plan now refuses to write outside
+            # a configured path_mappings local root.
+            path_mappings=[PathMapping(jellyfin="/media", local=str(tmp_path / "media"))],
+        )
 
         result = apply_plan(plan, "run1", cfg, jf, tmdb,
                             config_dir=config_dir, db_path=db, poll_timeout=0.1)

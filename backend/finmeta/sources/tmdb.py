@@ -12,7 +12,7 @@ from typing import Any, Dict, Iterable, List, Optional
 import httpx
 
 from finmeta.sources.cache import SqliteCache, cache_key
-from finmeta.sources.candidate import Candidate, Kind, SourceName
+from finmeta.sources.candidate import Candidate
 from finmeta.sources.ranking import rank_candidates
 
 DETAIL_TTL = 7 * 86400      # 7 days

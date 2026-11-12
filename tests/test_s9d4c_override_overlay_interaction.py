@@ -29,7 +29,8 @@ from PIL import Image
 
 from finmeta.api.overrides import OverrideStore, apply_overrides
 from finmeta.config.models import (
-    Config, Metadata, MovieArtwork, MovieLibrary, OverlaysConfig, OverlayStyle, ServerConfig,
+    Config, LocalSource, Metadata, MovieArtwork, MovieLibrary, OverlaysConfig,
+    OverlayStyle, ServerConfig, SourcesConfig,
 )
 from finmeta.engine.matching import MatchResult
 from finmeta.engine.plan import FileWrite, ItemPlan, WritePlan
@@ -62,13 +63,24 @@ def _fixture(tmp_path, assets_dir_name="assets"):
     auto_candidate = _poster_bytes((10, 20, 30))
     (ad / "poster.jpg").write_bytes(auto_candidate)
 
-    override_path = tmp_path / "override_poster.jpg"
+    # Under config_dir/assets (tmp_path/"config"/"assets" -- every caller here
+    # uses that exact config_dir), one of the default allowed roots
+    # engine.candidate_ref.default_allowed_roots grants a candidate ref --
+    # audit 2026-11-11 "A1"/"B5" means a ref outside the allowed roots is
+    # now refused rather than silently composited.
+    override_path = tmp_path / "config" / "assets" / "override_poster.jpg"
+    override_path.parent.mkdir(parents=True, exist_ok=True)
     override_bytes = _poster_bytes((200, 100, 50))
     override_path.write_bytes(override_bytes)
 
     cfg = Config(
         dry_run=True,
         server=ServerConfig(url="http://x:8096"),
+        # Matches the real `assets` dir LocalAssetSource(assets) reads from
+        # below -- without this, cfg.sources.local.path defaults to "/assets"
+        # and candidate_ref.default_allowed_roots (audit 2026-11-11 "A1"/
+        # "B5") would refuse BOTH the auto-picked AND the override candidate.
+        sources=SourcesConfig(local=LocalSource(enabled=True, path=str(assets))),
         libraries={"Movies": MovieLibrary(
             type="movies",
             metadata=Metadata(enabled=False),
@@ -145,7 +157,15 @@ def test_apply_overrides_still_swaps_when_not_pre_folded():
     """Regression guard: items plan_builder did NOT already fold the override
     into (meta["overridden"] absent -- e.g. a FileWrite built by a fake
     plan_builder in other tests) must still get the override applied by
-    apply_overrides(), unchanged from before this fix."""
+    apply_overrides(), unchanged from before this fix.
+
+    Uses an ``image.tmdb.org`` URL (audit 2026-11-11 "A1"/"B5": remote
+    override refs now go through ``engine.candidate_ref``'s provider-host
+    allowlist, same as the proxy) -- a non-allowlisted host like the
+    original ``https://example/new.jpg`` is correctly refused now, which is
+    exactly what the new ``test_apply_overrides_refuses_a_disallowed_host``
+    below covers.
+    """
     import respx
     import httpx
     from finmeta.engine.plan import FileWrite, ItemPlan, WritePlan
@@ -156,10 +176,56 @@ def test_apply_overrides_still_swaps_when_not_pre_folded():
                          source_ref="/old/candidate.jpg",
                          content_sha256="b" * 64, status="update")],
     )])
+    url = "https://image.tmdb.org/t/p/original/new.jpg"
     with respx.mock:
-        respx.get("https://example/new.jpg").mock(
-            return_value=httpx.Response(200, content=b"NEWBYTES"))
-        out = apply_overrides(plan, {"mov1": [{"kind": "poster", "ref": "https://example/new.jpg"}]})
+        respx.get(url).mock(return_value=httpx.Response(200, content=b"NEWBYTES"))
+        out = apply_overrides(plan, {"mov1": [{"kind": "poster", "ref": url}]})
     fw = out.items[0].files[0]
-    assert fw.source_ref == "https://example/new.jpg"
+    assert fw.source_ref == url
     assert fw.content_sha256 == hashlib.sha256(b"NEWBYTES").hexdigest()
+
+
+def test_apply_overrides_refuses_a_disallowed_host():
+    """A remote override ref to a non-provider host must never be fetched or
+    folded into the plan -- it is silently skipped (same outcome as any
+    other unreachable candidate), not an exception that aborts the run.
+    Regression for audit 2026-11-11 "A1"/"B5": before ``engine.candidate_ref``
+    existed, ``api.overrides._content_sha256`` fetched ANY http(s) URL with
+    no host restriction at all."""
+    from finmeta.engine.plan import FileWrite, ItemPlan, WritePlan
+
+    plan = WritePlan(items=[ItemPlan(
+        item_id="mov1", item_name="Movie 1", media_type="movie",
+        files=[FileWrite(target_path="/x/poster.jpg", kind="poster",
+                         source_ref="/old/candidate.jpg",
+                         content_sha256="b" * 64, status="update")],
+    )])
+    out = apply_overrides(
+        plan, {"mov1": [{"kind": "poster", "ref": "https://evil.example/new.jpg"}]})
+    fw = out.items[0].files[0]
+    assert fw.source_ref == "/old/candidate.jpg"
+    assert fw.content_sha256 == "b" * 64
+
+
+def test_apply_overrides_refuses_a_local_ref_outside_allowed_roots(tmp_path):
+    """Local-path twin of the host-allowlist test above: an override ref
+    pointing at a file outside every allowed root (e.g. a config secret)
+    must never be hashed into the plan. Regression for the exact PoC that
+    motivated this fix -- see ``engine/candidate_ref.py``'s module
+    docstring."""
+    from finmeta.engine.plan import FileWrite, ItemPlan, WritePlan
+
+    canary = tmp_path / "pretend_secrets.yml"
+    canary.write_text("tmdb_key: SENSITIVE-CANARY-VALUE\n")
+    plan = WritePlan(items=[ItemPlan(
+        item_id="mov1", item_name="Movie 1", media_type="movie",
+        files=[FileWrite(target_path="/x/poster.jpg", kind="poster",
+                         source_ref="/old/candidate.jpg",
+                         content_sha256="b" * 64, status="update")],
+    )])
+    out = apply_overrides(
+        plan, {"mov1": [{"kind": "poster", "ref": str(canary)}]},
+        allowed_roots=(tmp_path / "media",))  # canary is a SIBLING, not inside
+    fw = out.items[0].files[0]
+    assert fw.source_ref == "/old/candidate.jpg"
+    assert fw.content_sha256 == "b" * 64

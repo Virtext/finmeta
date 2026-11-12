@@ -95,7 +95,7 @@ def _apply_badges(item_id: str, names=("resolution", "hdr", "audio")) -> dict:
     # Patch the bytes reader once so _candidate_bytes finds our fixture poster.
     import finmeta.engine.plan_builder as pb
     orig = pb._candidate_bytes
-    pb._candidate_bytes = lambda ref, timeout=30.0: _poster_bytes()
+    pb._candidate_bytes = lambda ref, timeout=30.0, **kw: _poster_bytes()
     style_doc = dict(STYLE_DOC, elements={n: {"enabled": True} for n in names})
     try:
         fw = _overlay_poster(jf.get_item(item_id), cand, list(names), target, jf,

@@ -107,9 +107,9 @@ def test_api_libraries(live_client):
 @pytest.mark.live
 def test_api_single_item_plan(live_client, live_context):
     """Build a plan for ONE item from the real server."""
-    from finmeta.jellyfin_client import JellyfinClient
+    from finmeta.jellyfin_client.bootstrap import BootstrapJellyfinClient
     creds = _creds()
-    jf = JellyfinClient(creds["url"], token=creds["api_key"])
+    jf = BootstrapJellyfinClient(creds["url"], token=creds["api_key"])
     # Get one movie item
     items = jf.get_items_by_type("Movie")[:1]
     jf.close()
@@ -127,9 +127,9 @@ def test_api_single_item_plan(live_client, live_context):
 @pytest.mark.live
 def test_api_single_item_candidates(live_client, live_context):
     """List candidates for ONE item from the real server."""
-    from finmeta.jellyfin_client import JellyfinClient
+    from finmeta.jellyfin_client.bootstrap import BootstrapJellyfinClient
     creds = _creds()
-    jf = JellyfinClient(creds["url"], token=creds["api_key"])
+    jf = BootstrapJellyfinClient(creds["url"], token=creds["api_key"])
     items = jf.get_items_by_type("Movie")[:1]
     jf.close()
     assert items, "no movie items found on test server"

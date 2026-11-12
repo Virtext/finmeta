@@ -208,8 +208,9 @@ def latest_scan(db_path: Path, *, finished_only: bool = False) -> Optional[Dict[
     init_scan_db(db_path)
     where = "WHERE finished_at IS NOT NULL" if finished_only else ""
     with _conn(db_path) as conn:
+        # where is one of two hardcoded literal strings, never interpolated user input.
         row = conn.execute(
-            f"SELECT * FROM scans {where} ORDER BY started_at DESC, rowid DESC LIMIT 1"
+            f"SELECT * FROM scans {where} ORDER BY started_at DESC, rowid DESC LIMIT 1"  # noqa: S608
         ).fetchone()
     return dict(row) if row else None
 
@@ -263,11 +264,14 @@ def list_findings(
         args.extend([check, f"{check}.%"])
     clause = " AND ".join(where)
     with _conn(db_path) as conn:
+        # clause is built from hardcoded "<col> = ?"/"LIKE ?" fragments; the
+        # actual values are bound params in args, never interpolated.
+        # _SEVERITY_RANK below is a module constant, not user input.
         total = conn.execute(
-            f"SELECT COUNT(*) n FROM scan_findings WHERE {clause}", args
+            f"SELECT COUNT(*) n FROM scan_findings WHERE {clause}", args  # noqa: S608
         ).fetchone()["n"]
         rows = conn.execute(
-            f"SELECT * FROM scan_findings WHERE {clause}"
+            f"SELECT * FROM scan_findings WHERE {clause}"  # noqa: S608
             f" ORDER BY {_SEVERITY_RANK}, check_code, item_name, id"
             " LIMIT ? OFFSET ?",
             [*args, int(limit), int(offset)],
@@ -283,8 +287,10 @@ def findings_by_ids(db_path: Path, scan_id: str,
     init_scan_db(db_path)
     marks = ",".join("?" for _ in ids)
     with _conn(db_path) as conn:
+        # marks is a generated "?" placeholder list sized by len(ids); all
+        # values are bound params, never interpolated.
         rows = conn.execute(
-            f"SELECT * FROM scan_findings WHERE scan_id = ? AND id IN ({marks})",
+            f"SELECT * FROM scan_findings WHERE scan_id = ? AND id IN ({marks})",  # noqa: S608
             [scan_id, *[int(i) for i in ids]],
         ).fetchall()
     by_id = {r["id"]: _finding_row(r) for r in rows}
@@ -334,8 +340,11 @@ def prune_scans(db_path: Path, keep: int = DEFAULT_KEEP_SCANS) -> int:
         if not doomed:
             return 0
         marks = ",".join("?" for _ in doomed)
-        conn.execute(f"DELETE FROM scan_findings WHERE scan_id IN ({marks})", doomed)
-        conn.execute(f"DELETE FROM scans WHERE scan_id IN ({marks})", doomed)
+        # noqa reason (both lines): marks is a generated "?" placeholder list
+        # sized by len(doomed); doomed's scan_ids came FROM this same DB
+        # (the SELECT above), never from user input, and are bound params here.
+        conn.execute(f"DELETE FROM scan_findings WHERE scan_id IN ({marks})", doomed)  # noqa: S608
+        conn.execute(f"DELETE FROM scans WHERE scan_id IN ({marks})", doomed)  # noqa: S608
     return len(doomed)
 
 

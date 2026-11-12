@@ -65,6 +65,12 @@ class ItemPlan(BaseModel):
     media_type: Literal["movie", "tvshow"]
     tmdb_id: Optional[int] = None
     matched_by: Optional[MatchMethod] = None
+    #: The config library this item was actually resolved against while the
+    #: plan was built (audit 2026-11-11 "B4") -- e.g. "Movies", "Anime".
+    #: ``None`` for a plan built before this field existed, or a test's own
+    #: hand-built ItemPlan; consumers fall back to their previous behaviour
+    #: in that case.
+    library: Optional[str] = None
     files: List[FileWrite] = Field(default_factory=list)
     ratings: Dict[str, Optional[float]] = Field(
         default_factory=dict,

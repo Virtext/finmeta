@@ -48,6 +48,15 @@
           "minimum": 0,
           "title": "Keep Bundles",
           "type": "integer"
+        },
+        "keep_runs": {
+          "default": 50,
+          "description": "How many plan files and apply run records to keep (0 = keep every one).",
+          "help": "Audit 2026-11-11 'C1': every `finmeta plan` writes `<config>/runs/plan-<ts>.json`, and every apply writes `<config>/runs/run-<id>/manifest.json` (needed for undo) -- neither was ever pruned, so this directory only grows, and the overlay render cache can only shrink as fast as these plan files age out of it. After each apply, Finmeta keeps the newest this-many of each kind and deletes the rest. Pruning a run's manifest only affects `undo` for THAT run (it falls back to restoring from backups, which have their own independent retention under `backup_retention_days`) -- it does not touch any backup copy. `0` disables this and keeps every plan file and run record forever.",
+          "minimum": 0,
+          "tier": "advanced",
+          "title": "Keep Runs",
+          "type": "integer"
         }
       },
       "title": "BackupConfig",

@@ -26,10 +26,25 @@ _CATCH_UP_WINDOW = timedelta(hours=6)
 
 def _job(context: AppContext, action: str, library: Optional[str],
          tier: int = 1) -> None:
+    """One cron occurrence for a schedule with NO explicit library subset
+    (``library=None``, "all configured libraries" -- the only scope that
+    also builds preset/seasonal collections, see ``_build_jobs``).
+
+    Audit 2026-11-11 "B9": when the run slot was busy, this used to log
+    "schedule skipped" and drop the occurrence with no retry at all --
+    the exact bug ``_libraries_job`` below was already fixed for
+    (2026-11-06) on the explicit-subset path, but this sibling scope was
+    missed. ``library=None`` is a perfectly representable
+    ``queue_library_run`` key (``pop_library_run``'s drain in
+    ``run_service._worker`` already forwards it to ``submit_run`` as
+    ``library=None`` without special-casing it -- it only needed this
+    caller to actually queue instead of giving up).
+    """
     run_id, err = submit_run(context, action, library=library, tier=tier)
     label = library or "all-libraries"
     if err:
-        logger.warning("schedule skipped (%s/%s): %s", action, label, err)
+        context.queue_library_run(action, library, tier)
+        logger.warning("schedule queued (%s/%s): %s", action, label, err)
     else:
         logger.info("schedule started run %s (%s %s)", run_id, action, label)
 
@@ -202,13 +217,35 @@ def _run_catch_up(scheduler: BackgroundScheduler) -> None:
             scheduler.modify_job(job.id, next_run_time=now)
 
 
+#: Job-id prefixes _build_jobs itself creates from config (schedules +
+#: per-library poster rotation) -- these are what reschedule() removes and
+#: rebuilds. Anything else on the scheduler is a one-shot job some OTHER
+#: part of the app queued directly (e.g. routes_webhooks' debounced
+#: "webhook-apply-<item_id>"), not derived from config at all.
+_CONFIG_DERIVED_JOB_PREFIXES = ("sched-", "poster-rotation-")
+
+
 def reschedule(context: AppContext) -> None:
-    """Remove all jobs and rebuild them from the current config."""
+    """Remove config-derived jobs and rebuild them from the current config.
+
+    Audit 2026-11-11 "B8": this used to remove and rebuild EVERY job on the
+    scheduler, including one-shot jobs nothing here created --
+    routes_webhooks.webhook_receive debounces an auto-apply by scheduling
+    a one-shot "webhook-apply-<item_id>" job up to 90s in the future.
+    reschedule() runs on every config save (PUT /api/config and the
+    config-undo route both call it, via AppContext._apply_config), so
+    saving ANY setting while a webhook apply was pending silently
+    cancelled it -- the newly imported title then got no overlays until
+    the next scheduled run, with nothing in the log naming what happened.
+    Only jobs whose id matches a prefix config itself produces are
+    touched now; a pending one-shot job survives a config save untouched.
+    """
     scheduler: Optional[BackgroundScheduler] = context.scheduler
     if scheduler is None:
         return
     for job in list(scheduler.get_jobs()):
-        scheduler.remove_job(job.id)
+        if job.id.startswith(_CONFIG_DERIVED_JOB_PREFIXES):
+            scheduler.remove_job(job.id)
     _build_jobs(context, scheduler)
 
 

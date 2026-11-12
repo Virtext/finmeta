@@ -512,7 +512,6 @@ def detect_category(category: str, streams: Sequence[Mapping],
         raise ValueError(f"unknown format-rule category {category!r}")
     if rules is None:
         rules = DEFAULT_FORMAT_RULES[category]
-    facts_kwargs = {"streams": streams}
     if category == "dynamic_range":
         facts = video_facts(streams)
     elif category == "resolution":

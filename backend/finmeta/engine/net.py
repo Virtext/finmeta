@@ -23,7 +23,7 @@ succeeds on the next attempt) before raising.
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Callable, Optional
 
 import httpx
 
@@ -40,6 +40,20 @@ _PNG_IEND = b"IEND"
 
 class IncompleteDownload(RuntimeError):
     """A response body was shorter than it should be (truncated transfer)."""
+
+
+class FetchRefused(Exception):
+    """Raise from an ``on_response`` hook to refuse a response outright.
+
+    Unlike a transport/HTTP error -- a genuinely transient condition worth
+    retrying -- a refusal from the hook (e.g. ``engine.candidate_ref``'s
+    host/path policy, audit 2026-11-11 "A1"/"B5") is a decision, not a
+    failure: retrying the SAME URL would reach the SAME decision every
+    time, so :func:`fetch_bytes` lets this propagate immediately instead of
+    burning its retry budget on a doomed request. Subclass this (rather
+    than raising it directly) to keep a caller's own exception type for
+    everyone who already catches it.
+    """
 
 
 def _length_mismatch(resp: httpx.Response, data: bytes) -> Optional[str]:
@@ -90,8 +104,23 @@ def verify_body(resp: httpx.Response, data: bytes) -> Optional[str]:
 def fetch_bytes(
     url: str, *, timeout: float = DEFAULT_TIMEOUT,
     attempts: int = DEFAULT_ATTEMPTS,
+    on_response: Optional[Callable[[httpx.Response], None]] = None,
 ) -> bytes:
     """GET ``url`` and return a verified-complete body.
+
+    ``on_response`` (2026-11-11, audit A1/B5): called with the raw response
+    immediately after the GET, before ``raise_for_status`` or the body is
+    read -- the hook a caller uses to re-validate the URL it actually landed
+    on (``resp.url``, after redirects) against an SSRF allowlist. Raising
+    :class:`FetchRefused` (or a subclass) propagates immediately without
+    being retried -- a policy rejection is not a transient failure, and
+    retrying the same URL would reach the same refusal every time. Any
+    OTHER exception from the hook is treated exactly like a transport/HTTP
+    error below (caught, retried). ``None`` (the default) means no extra
+    check, unchanged from before this parameter existed. Only
+    ``engine.candidate_ref`` passes one; this module stays provider-policy
+    agnostic -- it only needs to recognise :class:`FetchRefused`, not any
+    particular policy's exception type.
 
     Raises the underlying ``httpx`` error on a transport/HTTP failure, or
     ``IncompleteDownload`` when every attempt came back short.
@@ -100,6 +129,8 @@ def fetch_bytes(
     for attempt in range(1, max(1, attempts) + 1):
         try:
             resp = httpx.get(url, timeout=timeout, follow_redirects=True)
+            if on_response is not None:
+                on_response(resp)
             resp.raise_for_status()
             data = resp.content
             reason = verify_body(resp, data)
@@ -107,6 +138,8 @@ def fetch_bytes(
                 return data
             last_error = IncompleteDownload(f"{reason} ({url})")
         except IncompleteDownload:
+            raise
+        except FetchRefused:
             raise
         except Exception as exc:  # transport error, HTTP error
             last_error = exc
@@ -117,5 +150,5 @@ def fetch_bytes(
     raise last_error
 
 
-__all__ = ["fetch_bytes", "verify_body", "IncompleteDownload",
+__all__ = ["fetch_bytes", "verify_body", "IncompleteDownload", "FetchRefused",
            "DEFAULT_TIMEOUT", "DEFAULT_ATTEMPTS"]

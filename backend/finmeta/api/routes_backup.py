@@ -158,6 +158,37 @@ def delete_bundle(name: str, ctx: AppContext = Depends(get_ctx)) -> dict:
     return {"deleted": name}
 
 
+async def _read_capped_body(request: Request, limit: int) -> bytes:
+    """Read the request body, refusing (413) as soon as ``limit`` is
+    exceeded rather than after buffering the whole thing first.
+
+    Audit 2026-11-11 "A4": the previous version called ``await
+    request.body()`` -- which buffers the ENTIRE body into memory -- and
+    only compared its length to ``MAX_UPLOAD_BYTES`` afterward. A client
+    sending a multi-gigabyte body (honest ``Content-Length`` or not) was
+    fully read into memory before being rejected. This streams via
+    ``request.stream()`` and aborts the moment the cap is crossed, so the
+    most this ever holds in memory is ``limit`` bytes.
+    """
+    declared = request.headers.get("content-length")
+    if declared is not None:
+        try:
+            if int(declared) > limit:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"bundle is larger than {limit} bytes")
+        except ValueError:
+            pass  # malformed header: fall through to the real, streamed check
+    buf = bytearray()
+    async for chunk in request.stream():
+        buf += chunk
+        if len(buf) > limit:
+            raise HTTPException(
+                status_code=413,
+                detail=f"bundle is larger than {limit} bytes")
+    return bytes(buf)
+
+
 async def _bundle_from_request(request: Request, ctx: AppContext) -> tuple:
     """``(bundle_bytes, options)`` from either request shape.
 
@@ -165,11 +196,7 @@ async def _bundle_from_request(request: Request, ctx: AppContext) -> tuple:
     a stored snapshot and carries them as fields.
     """
     content_type = (request.headers.get("content-type") or "").split(";")[0].strip()
-    body = await request.body()
-    if len(body) > MAX_UPLOAD_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail=f"bundle is larger than {MAX_UPLOAD_BYTES} bytes")
+    body = await _read_capped_body(request, MAX_UPLOAD_BYTES)
     if content_type in _ZIP_TYPES and body:
         params = request.query_params
         return body, {"mode": params.get("mode", "merge"),
@@ -217,16 +244,24 @@ def _diff_summary(ctx: AppContext, config_text: Optional[str]) -> Dict[str, Any]
     current = ctx.config.model_dump(mode="json")
     cur_libs = set((current.get("libraries") or {}).keys())
     new_libs = set((incoming.get("libraries") or {}).keys())
-    cur_profiles = {p.get("name") for p in (current.get("overlays") or {}).get("profiles", [])
-                    if isinstance(p, dict)}
-    new_profiles = {p.get("name") for p in (incoming.get("overlays") or {}).get("profiles", [])
-                    if isinstance(p, dict)}
+    # Audit 2026-11-11 "D7": overlays.profiles is a Dict[str, dict] keyed by
+    # profile NAME (config/models.py OverlaysConfig.profiles), not a list of
+    # {"name": ...} objects -- the old `.get("profiles", [])` + `p.get("name")
+    # for p in ... if isinstance(p, dict)` iterated the DICT'S KEYS (plain
+    # strings), so `isinstance(p, dict)` was always False and both sets were
+    # always empty. This "what would restoring this change?" safety preview
+    # therefore always reported zero overlay-profile changes, regardless of
+    # what the bundle actually contained -- routes_image_packs.delete_pack
+    # handles this exact same structure correctly elsewhere in the codebase,
+    # which is how the divergence is visible.
+    cur_profiles = set((current.get("overlays") or {}).get("profiles") or {})
+    new_profiles = set((incoming.get("overlays") or {}).get("profiles") or {})
     return {
         "libraries": {"added": sorted(new_libs - cur_libs),
                       "removed": sorted(cur_libs - new_libs),
                       "kept": sorted(cur_libs & new_libs)},
-        "overlay_profiles": {"added": sorted(n for n in new_profiles - cur_profiles if n),
-                             "removed": sorted(n for n in cur_profiles - new_profiles if n)},
+        "overlay_profiles": {"added": sorted(new_profiles - cur_profiles),
+                             "removed": sorted(cur_profiles - new_profiles)},
         "schedules": {"current": len(current.get("schedules") or []),
                       "incoming": len(incoming.get("schedules") or [])},
         "dry_run": {"current": current.get("dry_run"),

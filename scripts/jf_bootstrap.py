@@ -24,7 +24,7 @@ BACKEND = ROOT / "backend"
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
-from finmeta.jellyfin_client import JellyfinClient  # noqa: E402
+from finmeta.jellyfin_client.bootstrap import BootstrapJellyfinClient  # noqa: E402
 
 DEFAULT_URL = os.environ.get("JF_TEST_URL", "http://192.168.1.10:8097")
 CREDS_PATH = ROOT / ".jf-test" / "creds.json"
@@ -63,7 +63,7 @@ def main(argv=None) -> int:
         return 2
 
     # -- connect & verify wizard ------------------------------------------
-    with JellyfinClient(url, token=api_key) as c:
+    with BootstrapJellyfinClient(url, token=api_key) as c:
         info = c.system_info()
         print(f"server={info.server_name} v{info.version} "
               f"wizard_done={info.startup_wizard_completed}")

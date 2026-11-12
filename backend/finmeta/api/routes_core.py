@@ -8,7 +8,6 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from finmeta import __version__
-from finmeta.config.models import Config
 from finmeta.engine.diff import diff_file
 from finmeta.engine.plan import ItemPlan, WritePlan
 from finmeta.engine.plan_builder import _profile_overlay_names
@@ -242,7 +241,16 @@ def library_items_light(
 @router.get("/libraries/{name}/items")
 def library_items(
     name: str, ctx: AppContext = Depends(get_ctx),
-    limit: Optional[int] = Query(default=None, ge=1, le=500),
+    # Audit 2026-11-11 "C5": this used to default to None, which
+    # plan_builder.build_plan treats as "fetch the WHOLE library" --
+    # ~7s/item (cold TMDb/fanart/etc. lookups) synchronously inside this
+    # request thread, with no cap at all on how many items that could be.
+    # No live caller actually wants that through this endpoint any more
+    # (the UI moved to /items/light for browsing -- see OverlaysEditor.tsx's
+    # own comment on why); a default matching /items/light's own (100, same
+    # 1-500 bound) closes the unbounded path without changing behaviour for
+    # any caller that already passed an explicit limit.
+    limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> dict:
     if name not in ctx.config.libraries:
@@ -276,8 +284,9 @@ def library_items(
             for kind in ("sonarr", "radarr")
         },
         "items": items,
-        # None when this request wasn't paginated (limit omitted) -- the UI
-        # treats a present total_items as "there may be more pages".
+        # Audit 2026-11-11 "C5": always an int now that `limit` always has
+        # a value -- the UI treats a present total_items as "there may be
+        # more pages" (it no longer sees this endpoint go unpaginated).
         "total_items": plan.total_items,
         "unmatched": [{"item_id": u.item_id, "name": u.name, "reason": u.reason}
                       for u in plan.unmatched],

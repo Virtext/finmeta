@@ -137,6 +137,20 @@ def test_openapi_and_docs_require_a_session(cfg_dir, monkeypatch):
         assert c.get("/api/docs").status_code == 401
 
 
+def test_swagger_oauth2_redirect_route_is_not_registered(cfg_dir, monkeypatch):
+    """Audit 2026-11-11 "D10": FastAPI registers a Swagger-UI OAuth2
+    redirect helper at /docs/oauth2-redirect by default -- the only route
+    this app ever had outside /api, so the auth middleware above (gated
+    on path.startswith("/api"), see _api_routes' own docstring on why the
+    walker only looks there) never saw it. There is no OAuth2 flow
+    configured and the route served no data; it must now be entirely
+    absent (404, not 401 -- the route itself is gone, not merely gated)."""
+    with _client(cfg_dir, monkeypatch) as c:
+        assert c.get("/docs/oauth2-redirect").status_code == 404
+        assert not any(
+            getattr(r, "path", "") == "/docs/oauth2-redirect" for r in c.app.routes)
+
+
 # ---------------------------------------------------------------------------
 # H2: unreadable auth.yml must fail closed, not re-arm first-run setup
 # ---------------------------------------------------------------------------
@@ -404,3 +418,133 @@ def test_arr_client_accepts_http_and_https(url):
     from finmeta.arr.sonarr import SonarrClient
     with SonarrClient(url, api_key="k") as c:
         assert c.url.startswith(("http://", "https://"))
+
+
+# ---------------------------------------------------------------------------
+# A2 (audit 2026-11-11): test-config must never resolve an unrelated secret,
+# and the upstream response body must never reach the client.
+# ---------------------------------------------------------------------------
+#
+# POST /api/services/{sonarr|radarr}/test-config resolves its `api_key` field
+# through ctx.resolve_secret() when it looks like a secret NAME, so an
+# existing instance's stored key can be tested without re-entering it. Until
+# this fix, resolve_secret() accepted ANY known secret name -- including
+# jellyfin_api_key, tmdb_key, etc. -- not just this app's own instance keys.
+# Combined with the fully operator-supplied `url`, a session user could name
+# jellyfin_api_key here and an attacker-controlled url, and the real
+# Jellyfin key went out as X-Api-Key to that URL. Separately, ArrClient
+# embedded up to 300 bytes of the upstream response body in its exception,
+# so the route was not the "blind" probe SECURITY_REVIEW.md "M5" described.
+
+class TestTestConfigSecretResolution:
+    def test_unrelated_secret_name_is_sent_as_a_literal_not_resolved(self, cfg_dir, monkeypatch):
+        """api_key="jellyfin_api_key" must NOT resolve to the real Jellyfin
+        key -- it is sent to the target verbatim (as the literal string),
+        which is the correct "this isn't a real key" outcome."""
+        import httpx
+        import respx
+        with _client(cfg_dir, monkeypatch, auth=False) as c:
+            ctx = c.app.state.context
+            ctx.secrets.set("jellyfin_api_key", "REAL-JELLYFIN-KEY-NEVER-SEND-THIS")
+            sink_url = "http://127.0.0.1:9/sonarr"  # respx intercepts, nothing is really sent
+            with respx.mock:
+                route = respx.get(f"{sink_url}/api/v3/system/status").mock(
+                    return_value=httpx.Response(200, json={"version": "x"}))
+                r = c.post("/api/services/sonarr/test-config", json={
+                    "name": "evil", "url": sink_url,
+                    "api_key": "jellyfin_api_key", "timeout": 5,
+                })
+            assert r.status_code == 200
+            sent_key = route.calls.last.request.headers.get("x-api-key")
+            assert sent_key == "jellyfin_api_key"
+            assert sent_key != "REAL-JELLYFIN-KEY-NEVER-SEND-THIS"
+
+    def test_a_real_arr_instance_secret_name_still_resolves(self, cfg_dir, monkeypatch):
+        """The legitimate case must keep working: testing an EXISTING
+        instance's saved key by name (the UI's own "test without
+        re-entering the key" flow) still resolves to the real value."""
+        import httpx
+        import respx
+        with _client(cfg_dir, monkeypatch, auth=False) as c:
+            ctx = c.app.state.context
+            ctx.secrets.set("sonarr_myinstance_api_key", "REAL-SONARR-KEY")
+            sink_url = "http://127.0.0.1:9/sonarr"
+            with respx.mock:
+                route = respx.get(f"{sink_url}/api/v3/system/status").mock(
+                    return_value=httpx.Response(200, json={"version": "x"}))
+                r = c.post("/api/services/sonarr/test-config", json={
+                    "name": "myinstance", "url": sink_url,
+                    "api_key": "sonarr_myinstance_api_key", "timeout": 5,
+                })
+            assert r.status_code == 200
+            assert route.calls.last.request.headers.get("x-api-key") == "REAL-SONARR-KEY"
+
+
+class TestArrErrorNeverEchoesUpstreamBody:
+    """The response from POST .../test-config / .../test must never contain
+    bytes from the probed server's own response body -- only the status
+    code. Otherwise the route is not blind (SECURITY_REVIEW.md "M5"'s own
+    description of it), and a session user who can reach this route can use
+    it to read fragments of whatever a reachable internal service returns."""
+
+    def test_error_message_has_no_response_body(self):
+        from finmeta.arr.base import ArrError, ArrClient
+        import httpx
+        import respx
+        url = "http://127.0.0.1:9/svc"
+        with respx.mock:
+            respx.get(f"{url}/x").mock(
+                return_value=httpx.Response(
+                    403, text="INTERNAL SERVICE BANNER: admin panel v1.2.3"))
+            c = ArrClient(url, api_key="k")
+            try:
+                with pytest.raises(ArrError) as ei:
+                    c._get("/x")
+            finally:
+                c.close()
+        assert "403" in str(ei.value)
+        assert "INTERNAL SERVICE BANNER" not in str(ei.value)
+
+
+# ---------------------------------------------------------------------------
+# A3 (audit 2026-11-11): api.app._is_public must fail CLOSED, not open.
+# ---------------------------------------------------------------------------
+#
+# The previous version excluded the webhook management routes' sub-paths by
+# NAME ("status", "regenerate") after the "/api/webhooks/jellyfin/" prefix,
+# with everything else under that prefix defaulting to public. It was
+# missing "disable" from that exclusion list -- harmless only by accident,
+# because that route (DELETE /api/webhooks/jellyfin) has no trailing
+# segment at all, so it never matched the prefix check in the first place.
+# A hypothetical sibling route added one path segment deeper (e.g.
+# "/api/webhooks/jellyfin/disable") would have shipped unauthenticated with
+# no test catching it. This version matches the public shape structurally
+# (exactly one opaque token segment) instead of excluding known words.
+
+class TestIsPublicFailsClosed:
+    @pytest.mark.parametrize("path,expected", [
+        ("/api/health", True),
+        ("/api/auth/login", True),
+        ("/api/auth/setup", True),
+        ("/api/auth/status", True),
+        ("/api/webhooks/jellyfin/abc123tokenlikestring", True),
+        # Case/path-normalization variants must NOT be public.
+        ("/API/health", False),
+        ("/api//health", False),
+        ("/api/./health", False),
+        # The sibling management routes, including the one the old
+        # exclusion-by-name list actually missed.
+        ("/api/webhooks/jellyfin/status", False),
+        ("/api/webhooks/jellyfin/regenerate", False),
+        ("/api/webhooks/jellyfin/disable", False),
+        ("/api/webhooks/jellyfin", False),
+        # A traversal segment collapses to a reserved word structurally too.
+        ("/api/webhooks/jellyfin/abc/../regenerate", False),
+        # Nothing else is ever public.
+        ("/api/docs", False),
+        ("/api/openapi.json", False),
+        ("/api/config", False),
+    ])
+    def test_is_public(self, path, expected):
+        from finmeta.api.app import _is_public
+        assert _is_public(path) is expected

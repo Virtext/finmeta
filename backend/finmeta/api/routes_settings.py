@@ -17,11 +17,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from finmeta.config.loading import ConfigError
 
-import base64
-from typing import List
-
 from pydantic import BaseModel, Field
-from typing import List
 
 import re as _re
 
@@ -133,14 +129,28 @@ def test_arr_config(app: str, body: ArrTestConfigIn,
     """POST /api/services/{sonarr|radarr}/test-config — test the TYPED form
     values (name/url/api_key/timeout/verify_ssl) before saving.
 
-    ``api_key`` is either a literal key (one-shot test) or the NAME of a secret;
-    in the latter case it is resolved through :func:`resolve_secret` so an
-    existing instance's stored key can be tested without re-entering it.
-    Nothing here is logged or stored."""
+    ``api_key`` is either a literal key (one-shot test) or the NAME of a
+    secret; in the latter case it is resolved through :func:`resolve_secret`
+    so an existing instance's stored key can be tested without re-entering
+    it. Nothing here is logged or stored.
+
+    Audit 2026-11-11 "A2": ``url`` is whatever the caller typed into this
+    form, not yet validated against any saved instance -- and until this
+    fix, ``api_key`` resolved as ANY secret name known to this config,
+    including ``jellyfin_api_key``/``tmdb_key``/etc. Combined, a session
+    user could name ``jellyfin_api_key`` here and an attacker-controlled
+    ``url``, and the real Jellyfin key would be sent to that URL as
+    ``X-Api-Key`` -- not a test of THIS form's own key at all. Only a name
+    matching the Sonarr/Radarr instance-key convention
+    (``is_arr_secret_name``, e.g. ``sonarr_myinstance_api_key``) is ever
+    resolved here now; anything else is sent as a literal string (almost
+    certainly failing the test harmlessly, which is the correct outcome for
+    a typo or a name that isn't one of this app's own secrets).
+    """
     if app not in ("sonarr", "radarr"):
         raise HTTPException(status_code=404, detail=f"unknown service {app!r}")
     key = body.api_key
-    resolved = ctx.resolve_secret(key) if key else None
+    resolved = ctx.resolve_secret(key) if (key and is_arr_secret_name(key)) else None
     if resolved:
         key = resolved
     return _run_arr_test(app, body.url, key, body.timeout,

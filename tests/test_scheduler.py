@@ -135,6 +135,31 @@ class TestLibrariesJob:
         scheduler.add_job.assert_not_called()
 
 
+class TestJobAllLibraries:
+    """``_job`` -- the sibling "all libraries" (library=None) scope. Audit
+    2026-11-11 "B9": this used to just log "schedule skipped" and drop the
+    occurrence when the slot was busy -- the exact bug ``_libraries_job``
+    above was already fixed for on the explicit-subset path, but this one
+    was missed."""
+
+    def test_a_busy_slot_queues_instead_of_dropping(self, monkeypatch):
+        monkeypatch.setattr(
+            scheduler_module, "submit_run",
+            lambda *a, **k: (None, "a run is already in progress"))
+        ctx = MagicMock()
+        scheduler_module._job(ctx, "apply", None, 1)
+
+        ctx.queue_library_run.assert_called_once_with("apply", None, 1)
+
+    def test_a_free_slot_starts_the_run_and_never_queues(self, monkeypatch):
+        monkeypatch.setattr(scheduler_module, "submit_run",
+                            lambda *a, **k: ("run-1", None))
+        ctx = MagicMock()
+        scheduler_module._job(ctx, "apply", None, 1)
+
+        ctx.queue_library_run.assert_not_called()
+
+
 class _FixedNow(datetime):
     """A ``datetime`` subclass whose ``.now()`` always returns a fixed
     instant -- real ``datetime`` otherwise, so comparisons/arithmetic with
@@ -244,3 +269,68 @@ class TestScheduledScan:
         _build_jobs(_fake_context(cfg), scheduler)
         assert scheduler.add_job.call_args_list[0].kwargs["args"][1:] == [
             "apply", None, 1]
+
+
+# ---------------------------------------------------------------------------
+# B8 (audit 2026-11-11): reschedule() must not drop one-shot jobs it did
+# not create (e.g. a webhook's debounced auto-apply).
+# ---------------------------------------------------------------------------
+#
+# reschedule() runs on EVERY config save (PUT /api/config and the
+# config-undo route both call it). It used to remove and rebuild every job
+# on the scheduler, including one-shot jobs routes_webhooks schedules
+# directly ("webhook-apply-<item_id>", debounced up to 90s). Saving ANY
+# setting while such a job was pending silently cancelled the apply.
+
+class TestReschedulePreservesOneShotJobs:
+    def _real_scheduler(self):
+        from apscheduler.schedulers.background import BackgroundScheduler
+        sched = BackgroundScheduler()
+        sched.start()
+        return sched
+
+    def test_webhook_apply_job_survives_a_config_reschedule(self):
+        from datetime import timedelta
+        from apscheduler.triggers.date import DateTrigger
+        from finmeta.api.scheduler import reschedule
+
+        cfg = _cfg(schedules=[])
+        ctx = _fake_context(cfg)
+        scheduler = self._real_scheduler()
+        ctx.scheduler = scheduler
+        try:
+            far_future = datetime.now(scheduler.timezone) + timedelta(hours=1)
+            scheduler.add_job(
+                lambda: None, trigger=DateTrigger(run_date=far_future),
+                id="webhook-apply-item123", misfire_grace_time=300)
+
+            reschedule(ctx)  # simulates what a config save triggers
+
+            assert scheduler.get_job("webhook-apply-item123") is not None
+        finally:
+            scheduler.shutdown(wait=False)
+
+    def test_poster_rotation_job_survives_a_config_reschedule_if_unchanged(self):
+        """Config-derived recurring jobs (sched-*, poster-rotation-*) ARE
+        meant to be rebuilt on every config save -- that's how a changed
+        cron/enabled setting takes effect. This is the control: the job
+        still exists afterward (rebuilt, not just left stale), proving the
+        fix above only widened what SURVIVES untouched, it didn't also
+        stop rebuilding what should be."""
+        from finmeta.config.models import PosterRotation
+        from finmeta.api.scheduler import reschedule
+
+        lib = MovieLibrary(
+            type="movies", enabled=True, metadata=Metadata(enabled=False),
+            artwork=MovieArtwork(),
+            poster_rotation=PosterRotation(enabled=True, cron="0 3 * * *"),
+        )
+        cfg = _cfg(schedules=[], libraries={"Movies": lib})
+        ctx = _fake_context(cfg)
+        scheduler = self._real_scheduler()
+        ctx.scheduler = scheduler
+        try:
+            reschedule(ctx)
+            assert scheduler.get_job("poster-rotation-Movies") is not None
+        finally:
+            scheduler.shutdown(wait=False)

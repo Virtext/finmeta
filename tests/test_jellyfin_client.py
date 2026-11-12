@@ -6,10 +6,11 @@ import respx
 import httpx
 
 from finmeta.jellyfin_client import (
-    JellyfinClient, JellyfinError, ServerResetRequired,
+    JellyfinClient, JellyfinError,
     PathMapper, translate_path,
     Item, Library, ItemPage,
 )
+from finmeta.jellyfin_client.bootstrap import BootstrapJellyfinClient, ServerResetRequired
 
 BASE = "http://testserver"
 
@@ -74,7 +75,7 @@ class TestAuthenticate:
     @respx.mock
     def test_success(self):
         _auth_ok()
-        with JellyfinClient(BASE) as c:
+        with BootstrapJellyfinClient(BASE) as c:
             auth = c.authenticate("finmeta", "pass")
         assert auth.access_token == "tok123"
         assert auth.user_id == "uid-1"
@@ -87,7 +88,7 @@ class TestAuthenticate:
         respx.post(f"{BASE}/Users/AuthenticateByName").mock(
             return_value=httpx.Response(400, text="Error processing request.")
         )
-        with JellyfinClient(BASE) as c:
+        with BootstrapJellyfinClient(BASE) as c:
             with pytest.raises(JellyfinError, match="400"):
                 c.authenticate("finmeta", "bad")
 
@@ -127,7 +128,7 @@ class TestCompleteWizard:
         # Step 5: auth
         _auth_ok()
 
-        with JellyfinClient(BASE) as c:
+        with BootstrapJellyfinClient(BASE) as c:
             auth = c.complete_wizard("finmeta", "testpass")
         assert auth.access_token == "tok123"
 
@@ -152,7 +153,7 @@ class TestCompleteWizard:
             return_value=httpx.Response(204)
         )
 
-        with JellyfinClient(BASE) as c:
+        with BootstrapJellyfinClient(BASE) as c:
             with pytest.raises(ServerResetRequired, match="test server needs reset"):
                 c.complete_wizard("finmeta", "testpass")
 
@@ -166,7 +167,7 @@ class TestCompleteWizard:
         respx.post(f"{BASE}/Users/AuthenticateByName").mock(
             return_value=httpx.Response(400, text="Error processing request.")
         )
-        with JellyfinClient(BASE) as c:
+        with BootstrapJellyfinClient(BASE) as c:
             with pytest.raises(ServerResetRequired, match="test server needs reset"):
                 c.complete_wizard("finmeta", "badpass")
 
@@ -175,9 +176,57 @@ class TestCompleteWizard:
         """Wizard already completed and auth works -> returns AuthResult."""
         _wizard_done()
         _auth_ok()
-        with JellyfinClient(BASE) as c:
+        with BootstrapJellyfinClient(BASE) as c:
             auth = c.complete_wizard("finmeta", "pass")
         assert auth.access_token == "tok123"
+
+
+# ---------------------------------------------------------------------------
+# least-privilege split (audit 2026-11-11 "D8")
+# ---------------------------------------------------------------------------
+
+class TestLeastPrivilegeSplit:
+    """The production JellyfinClient must not carry library create/delete,
+    the startup wizard, or authenticate -- none of them ever had a
+    production caller, and a DELETE /Library/VirtualFolders wrapper plus
+    an admin-user-creating wizard shipped in the base client is capability
+    nobody needs. BootstrapJellyfinClient (scripts/jf_bootstrap.py + the
+    test suite only) carries all of it, on top of everything the base
+    client already does."""
+
+    _BOOTSTRAP_ONLY = (
+        "authenticate", "wizard_configuration", "wizard_get_user",
+        "wizard_create_user", "wizard_remote_access", "wizard_complete",
+        "complete_wizard", "library_scan_options", "create_library",
+        "delete_library", "refresh_library", "wait_for_scan",
+        "count_items", "get_items_by_type",
+    )
+
+    def test_base_client_has_none_of_the_bootstrap_methods(self):
+        for name in self._BOOTSTRAP_ONLY:
+            assert not hasattr(JellyfinClient, name), (
+                f"JellyfinClient.{name} should not exist -- it belongs on "
+                "BootstrapJellyfinClient only")
+
+    def test_bootstrap_client_has_every_bootstrap_method(self):
+        for name in self._BOOTSTRAP_ONLY:
+            assert hasattr(BootstrapJellyfinClient, name)
+
+    def test_bootstrap_client_is_a_jellyfin_client(self):
+        """It's an addition, not a fork -- base behaviour (get_library,
+        get_items, etc.) still works unchanged."""
+        assert issubclass(BootstrapJellyfinClient, JellyfinClient)
+
+    @respx.mock
+    def test_bootstrap_client_still_has_base_functionality(self):
+        respx.get(f"{BASE}/Library/VirtualFolders").mock(
+            return_value=httpx.Response(200, json=[
+                {"Name": "Movies", "ItemId": "lib-1"},
+            ])
+        )
+        with BootstrapJellyfinClient(BASE) as c:
+            lib = c.get_library("Movies")
+        assert lib is not None and lib.item_id == "lib-1"
 
 
 # ---------------------------------------------------------------------------
@@ -329,7 +378,7 @@ class TestGetItems:
                 "TotalRecordCount": 10,
             })
         )
-        with JellyfinClient(BASE, token="tok", user_id="uid") as c:
+        with BootstrapJellyfinClient(BASE, token="tok", user_id="uid") as c:
             count = c.count_items("lib1")
         assert count == 10
 
@@ -550,7 +599,7 @@ class TestBasePathPrefixing:
         route = respx.post("http://testserver/jellyfin/Users/AuthenticateByName").mock(
             return_value=httpx.Response(200, json={
                 "AccessToken": "tok", "User": {"Id": "uid", "Name": "u"}}))
-        with JellyfinClient(BASE, base_path="/jellyfin") as c:
+        with BootstrapJellyfinClient(BASE, base_path="/jellyfin") as c:
             auth = c.authenticate("u", "p")
         assert auth.access_token == "tok"
         assert route.called

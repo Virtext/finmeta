@@ -9,21 +9,19 @@ from __future__ import annotations
 import re as _re
 
 import os
-import shutil
 import threading
-from dataclasses import dataclass, field
+from collections import OrderedDict
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
-import yaml
-
-from finmeta.config.loading import ConfigError, load_config, resolve_env
+from finmeta.config.loading import ConfigError, load_config
 from finmeta.config.models import Config
 from finmeta.engine.plan import WritePlan
 from finmeta.jellyfin_client import JellyfinClient, PathMapper
 from finmeta.sources.factory import build_sources
 from finmeta.sources.tmdb import TmdbClient
 
+from finmeta.api.atomic import write_text_atomic
 from finmeta.api.overrides import OverrideStore
 from finmeta.api.secrets import SecretsStore, secret_specs
 from finmeta.config.secretspec import resolve_secret as _resolve_secret
@@ -32,10 +30,12 @@ from finmeta.api.auth import AuthStore, SessionManager, LoginRateLimiter
 DEFAULT_CONFIG_PATH = "config/config.yml"
 
 
-@dataclass
-class _PlanCache:
-    plan: WritePlan
-    generated_at: str = ""
+#: Cap on AppContext._cache (audit 2026-11-11 "C3"): browsing a library adds
+#: one entry per item viewed plus one per page, and nothing ever evicted
+#: them -- a steady memory climb on a long-lived instance with a large
+#: library. An LRU of this size comfortably covers one operator's working
+#: set (a library's worth of browsing) while bounding worst case.
+_PLAN_CACHE_MAX_ENTRIES = 64
 
 
 class AppContext:
@@ -83,7 +83,7 @@ class AppContext:
         # the same FIFO treatment as the webhook items above instead.
         self._library_queue: List[tuple] = []
         self._library_queued_set: set = set()
-        self._cache: Dict[tuple, _PlanCache] = {}
+        self._cache: "OrderedDict[tuple, WritePlan]" = OrderedDict()
         self._cache_lock = threading.Lock()
         self.overrides = OverrideStore(self._overrides_path)
         secrets_path = self._config_dir / "secrets.yml"
@@ -126,18 +126,15 @@ class AppContext:
         and the media roots from ``path_mappings`` -- and NOT ``config_dir``
         itself, which also holds ``secrets.yml`` / ``auth.yml`` /
         ``config.yml``. See ``api.proxy`` for why the ref cannot be trusted.
+
+        Delegates to ``engine.candidate_ref.default_allowed_roots`` (audit
+        2026-11-11): ``engine/plan_builder.py`` needs this exact same policy
+        for a stored manual override and cannot import this api-layer class,
+        so the computation itself now lives in the engine package with this
+        method as its one caller here.
         """
-        cfg = cfg or self.config
-        roots: List[Path] = []
-        local = getattr(getattr(cfg, "sources", None), "local", None)
-        if local is not None and getattr(local, "path", None):
-            roots.append(Path(local.path))
-        for sub in ("assets", "backups", "trash", "cache"):
-            roots.append(self._config_dir / sub)
-        for m in getattr(cfg, "path_mappings", []) or []:
-            if getattr(m, "local", None):
-                roots.append(Path(m.local))
-        return roots
+        from finmeta.engine.candidate_ref import default_allowed_roots
+        return default_allowed_roots(cfg or self.config, self._config_dir)
 
     @property
     def gen(self) -> int:
@@ -221,12 +218,25 @@ class AppContext:
         except Exception as exc:
             raise ConfigError(f"invalid config: {exc}") from exc
         # Save the current (previous) config as last-good before overwriting.
-        self.last_good_path().write_text(self._config_path.read_text())
+        write_text_atomic(self.last_good_path(), self._config_path.read_text())
         with self._cfg_lock:
             self._apply_config(cfg)
-        # Write AFTER applying so a failed write can never leave memory and disk
-        # out of sync (and the marker is never persisted).
-        self._config_path.write_text(yaml_text if yaml_text.endswith("\n") else yaml_text + "\n")
+        # Audit 2026-11-11 "B7": config.yml -- the file whose loss stops the
+        # app from starting at all -- used to be written with a plain
+        # Path.write_text(), which truncates the file before writing the
+        # new content. A crash, a full disk or a container kill mid-write
+        # left a truncated or empty config.yml, discovered only on the next
+        # restart. write_text_atomic (temp file in the same directory +
+        # fsync + os.replace) means a reader always sees either the whole
+        # old file or the whole new one, the same guarantee secrets.yml/
+        # auth.yml already had (api.atomic, "H3"). (The in-memory config
+        # was already applied above regardless -- a failed write here
+        # would leave memory NEW and disk OLD, which the previous
+        # docstring here described backwards; this does not change that
+        # ordering, only makes the write itself safe.)
+        write_text_atomic(
+            self._config_path,
+            yaml_text if yaml_text.endswith("\n") else yaml_text + "\n")
         self.reschedule()
 
     @staticmethod
@@ -307,7 +317,7 @@ class AppContext:
         lg = self.last_good_path()
         if not lg.is_file():
             return False
-        self._config_path.write_text(lg.read_text())
+        write_text_atomic(self._config_path, lg.read_text())  # audit "B7"
         ok, _err = self.reload()
         return ok
 
@@ -380,7 +390,8 @@ class AppContext:
         with self._cache_lock:
             hit = self._cache.get(cache_key)
             if hit is not None:
-                return hit.plan
+                self._cache.move_to_end(cache_key)  # LRU: mark as recently used
+                return hit
         jf = self.make_jellyfin(cfg)
         tmdb = self.make_tmdb(cfg)
         sources = self.make_sources(cfg)
@@ -399,7 +410,10 @@ class AppContext:
                 pass
         plan = self._apply_overrides(plan)
         with self._cache_lock:
-            self._cache[cache_key] = _PlanCache(plan=plan)
+            self._cache[cache_key] = plan
+            self._cache.move_to_end(cache_key)
+            while len(self._cache) > _PLAN_CACHE_MAX_ENTRIES:
+                self._cache.popitem(last=False)  # evict least-recently-used
         return plan
 
     def _apply_overrides(self, plan: WritePlan) -> WritePlan:
@@ -408,7 +422,9 @@ class AppContext:
             return plan
         item_ids = [ip.item_id for ip in plan.items]
         ovs = self.overrides.all_by_item(item_ids)
-        plan = apply_overrides(plan, ovs)
+        # Audit 2026-11-11 "A1"/"B5": a stored override ref is hashed/fetched
+        # through the same allowed-roots policy as the proxy and plan_builder.
+        plan = apply_overrides(plan, ovs, allowed_roots=self.proxy_roots())
         skips = self.overrides.skipped_by_item(item_ids)  # S9d4b per-row skip
         return apply_skips(plan, skips)
 
@@ -419,7 +435,22 @@ class AppContext:
     # -- candidate selection ------------------------------------------------
     def set_candidate(self, item_id: str, kind: str, ref: Optional[str],
                       source: Optional[str] = None) -> None:
+        """Store (or clear) a manual candidate pick for ``item_id``/``kind``.
+
+        Audit 2026-11-11 "A1": ``ref`` is validated against
+        ``engine.candidate_ref`` policy BEFORE it is ever written to
+        ``overrides.db`` -- this route used to store any string verbatim,
+        which let a session user turn an arbitrary local path (e.g.
+        ``config/secrets.yml``) into a poster ``FileWrite.source_ref`` that
+        the executor would then write into the media tree and the proxy
+        would then serve back byte-for-byte. Raises
+        ``engine.candidate_ref.RefNotAllowed`` for the caller (the route) to
+        turn into a 422 -- never silently accepted and never silently
+        dropped.
+        """
         if ref:
+            from finmeta.engine.candidate_ref import validate as _validate_ref
+            ref = _validate_ref(ref, allowed_roots=self.proxy_roots())
             self.overrides.set(item_id, kind, ref, source)
         else:
             self.overrides.clear(item_id, kind)
@@ -473,8 +504,12 @@ class AppContext:
             self._webhook_queued_set.discard(item_id)
             return item_id
 
-    def queue_library_run(self, action: str, library: str, tier: int = 1) -> None:
+    def queue_library_run(self, action: str, library: Optional[str], tier: int = 1) -> None:
         """Remember a scheduled library-scoped run that could not start yet.
+
+        ``library=None`` (audit 2026-11-11 "B9") represents the "all
+        configured libraries" scope -- a perfectly valid queue key, just
+        like any named library.
 
         Drained one at a time by ``run_service._worker`` as each run releases
         the slot, exactly like ``queue_webhook_item``. Deduped: a schedule
@@ -524,7 +559,7 @@ class AppContext:
             self._webhook_queue = [i for i in self._webhook_queue if i != item_id]
             return True
 
-    def drop_library_run(self, action: str, library: str,
+    def drop_library_run(self, action: str, library: Optional[str],
                          tier: int = 1) -> bool:
         """Remove a pending library run that has not started yet."""
         key = (action, library, int(tier))

@@ -954,6 +954,18 @@ class BackupConfig(_Strict):
         json_schema_extra={"help": "Off by default: findings are a snapshot of a moment, they can "
         "be thousands of rows, and a new scan regenerates them in minutes. Turn on if you want a "
         "bundle to carry the last scan's results as a record."})
+    keep_runs: int = Field(
+        default=50, ge=0,
+        description="How many plan files and apply run records to keep (0 = keep every one).",
+        json_schema_extra={"tier": "advanced", "help": "Audit 2026-11-11 'C1': every `finmeta plan` "
+        "writes `<config>/runs/plan-<ts>.json`, and every apply writes "
+        "`<config>/runs/run-<id>/manifest.json` (needed for undo) -- neither was ever pruned, so "
+        "this directory only grows, and the overlay render cache can only shrink as fast as these "
+        "plan files age out of it. After each apply, Finmeta keeps the newest this-many of each "
+        "kind and deletes the rest. Pruning a run's manifest only affects `undo` for THAT run (it "
+        "falls back to restoring from backups, which have their own independent retention under "
+        "`backup_retention_days`) -- it does not touch any backup copy. `0` disables this and keeps "
+        "every plan file and run record forever."})
 
 
 class ScanChecks(_Strict):

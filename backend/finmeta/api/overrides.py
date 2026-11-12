@@ -9,9 +9,11 @@ from __future__ import annotations
 import hashlib
 import sqlite3
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
+from finmeta.engine import candidate_ref
 from finmeta.engine.plan import FileWrite, ItemPlan, WritePlan
+from finmeta.sqlite_conn import shared_connection
 
 #: Every table this store owns, with its primary-key columns. The backup
 #: bundle (SPEC_S11 §D1) walks this, so a new table cannot be silently left
@@ -30,17 +32,32 @@ _FILENAME_FOR_KIND = {
 }
 
 
-def _content_sha256(source_ref: str, timeout: float = 30.0) -> str:
-    """SHA-256 of a candidate ref (local file or remote URL)."""
-    if source_ref.startswith(("http://", "https://")):
-        import httpx
-        resp = httpx.get(source_ref, timeout=timeout, follow_redirects=True)
-        resp.raise_for_status()
-        return hashlib.sha256(resp.content).hexdigest()
-    p = Path(source_ref)
-    if p.is_file():
-        return hashlib.sha256(p.read_bytes()).hexdigest()
-    return hashlib.sha256(b"").hexdigest()
+def _content_sha256(source_ref: str, timeout: float = 30.0, *,
+                    allowed_roots: Sequence = ()) -> str:
+    """SHA-256 of a candidate ref (local file or remote URL).
+
+    Routed through ``engine.candidate_ref`` (audit 2026-11-11, "A1"/"B5"):
+    this used to be a bare ``httpx.get`` with no host allowlist and a bare
+    ``Path(source_ref)`` with no containment check -- the exact same
+    override ``ref`` ``PUT /api/items/{id}/candidates`` stores with no
+    validation of its own. A PoC against a canary file standing in for
+    ``config/secrets.yml`` confirmed the ref was accepted, hashed, and (once
+    the resulting FileWrite was applied and the file existed inside a
+    ``path_mappings`` root) served back byte-for-byte through
+    ``api/proxy.py``. A ref outside ``allowed_roots`` (or an unapproved
+    remote host) raises ``RefNotAllowed``, which the caller already treats
+    as "do not touch this item's plan" -- see :func:`apply_overrides`. A
+    local ref that IS contained but no longer exists still hashes to empty,
+    same as before this fix -- that is a stale candidate, not a policy
+    violation.
+    """
+    if not source_ref.startswith(("http://", "https://")):
+        p = candidate_ref.check_local(source_ref, allowed_roots)
+        if not p.is_file():
+            return hashlib.sha256(b"").hexdigest()
+    return hashlib.sha256(
+        candidate_ref.fetch(source_ref, timeout=timeout, allowed_roots=allowed_roots)
+    ).hexdigest()
 
 
 class OverrideStore:
@@ -52,9 +69,12 @@ class OverrideStore:
         self._init()
 
     def _conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.db_path))
-        conn.row_factory = sqlite3.Row
-        return conn
+        """The shared WAL connection for ``self.db_path`` (audit 2026-11-11
+        "C4"). Every call site below uses this as ``with self._conn() as
+        conn:`` -- sqlite3's context manager only commits-or-rolls-back on
+        exit, it never closes, so reusing one shared connection here needed
+        no changes at any call site."""
+        return shared_connection(self.db_path)
 
     def _init(self) -> None:
         with self._conn() as conn:
@@ -222,7 +242,7 @@ class OverrideStore:
         out: Dict[str, List[Dict[str, Any]]] = {}
         with self._conn() as conn:
             for table in _EXPORT_TABLES:
-                rows = conn.execute(f"SELECT * FROM {table}").fetchall()
+                rows = conn.execute(f"SELECT * FROM {table}").fetchall()  # noqa: S608 -- table is a hardcoded _EXPORT_TABLES key, never user input
                 out[table] = [dict(r) for r in rows]
         return out
 
@@ -246,7 +266,7 @@ class OverrideStore:
                 rows = data.get(table) or []
                 cols = [r["name"] for r in conn.execute(f"PRAGMA table_info({table})")]
                 if mode == "replace":
-                    conn.execute(f"DELETE FROM {table}")
+                    conn.execute(f"DELETE FROM {table}")  # noqa: S608 -- table is a hardcoded _EXPORT_TABLES key, never user input
                 count = 0
                 for row in rows:
                     if not isinstance(row, dict):
@@ -256,15 +276,19 @@ class OverrideStore:
                         continue
                     names = ", ".join(keep)
                     marks = ", ".join("?" for _ in keep)
+                    # table is a hardcoded _EXPORT_TABLES key; names is column names
+                    # filtered against cols (PRAGMA table_info of that same table),
+                    # never raw input; values are bound params.
                     conn.execute(
-                        f"INSERT OR REPLACE INTO {table} ({names}) VALUES ({marks})",
+                        f"INSERT OR REPLACE INTO {table} ({names}) VALUES ({marks})",  # noqa: S608
                         list(keep.values()))
                     count += 1
                 written[table] = count
         return written
 
 
-def apply_overrides(plan: WritePlan, overrides_by_item: Dict[str, List[Dict[str, str]]]) -> WritePlan:
+def apply_overrides(plan: WritePlan, overrides_by_item: Dict[str, List[Dict[str, str]]],
+                    *, allowed_roots: Sequence = ()) -> WritePlan:
     """Replace/append FileWrites in ``plan`` per stored override (mutates items).
 
     Each override carries a ``ref``; the FileWrite for that kind is pointed at
@@ -274,6 +298,12 @@ def apply_overrides(plan: WritePlan, overrides_by_item: Dict[str, List[Dict[str,
     Because an override swaps ``source_ref`` + ``content_sha256``, the affected
     FileWrites no longer match their on-disk bytes; the changed items are
     re-annotated so their ``status`` reflects the new content (SPEC §10).
+
+    ``allowed_roots`` (audit 2026-11-11, "A1"/"B5"): forwarded to
+    :func:`_content_sha256`. A ref outside policy raises ``RefNotAllowed``,
+    caught by the existing ``except Exception: continue`` below -- the
+    override is silently skipped for this run rather than hashed and
+    written, same outcome as any other unreachable candidate.
     """
     from finmeta.engine.diff import annotate_items
 
@@ -304,7 +334,7 @@ def apply_overrides(plan: WritePlan, overrides_by_item: Dict[str, List[Dict[str,
                 # stop matching after the very first apply.
                 continue
             try:
-                sha = _content_sha256(ref)
+                sha = _content_sha256(ref, allowed_roots=allowed_roots)
             except Exception:
                 continue
             if existing is not None:
