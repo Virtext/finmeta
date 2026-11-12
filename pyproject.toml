@@ -31,6 +31,19 @@ dev = [
     "pytest>=7", "respx>=0.21", "jsonschema>=4.0",
     # Static analysis + dependency audit (CLAUDE.md §5 asks for both).
     "ruff>=0.5", "pip-audit>=2.7",
+    # Audit 2026-11-11 "D1" removed these from `dependencies` as having
+    # "zero importers anywhere in backend/, tests/ or scripts/" -- true,
+    # but incomplete: fixture/generate.py (the synthetic test-library
+    # builder CI runs before the fast suite) imports both at module level
+    # -- imageio_ffmpeg.get_ffmpeg_exe() to encode the fixture's video/
+    # audio files without requiring a system ffmpeg, requests for the
+    # one-time TMDb id verification (tmdb_cache.json is committed, so this
+    # path is rarely actually hit, but the bare `import` still has to
+    # resolve regardless). Confirmed broken in CI 2026-11-12
+    # (ModuleNotFoundError) before being caught here -- real production
+    # code still doesn't need either, so `dev` rather than the main
+    # dependency list is the correct fix, not a revert of D1.
+    "imageio-ffmpeg>=0.4.9", "requests>=2.31",
 ]
 
 
