@@ -165,6 +165,20 @@ function nudgeStyle(position: string | null | undefined, xOff: number, yOff: num
   return out;
 }
 
+// The renderer's offsets are in 1000px-reference units, multiplied by the
+// poster's own width / 1000 (engine/overlay_render.py `_poster_scale`, same
+// clamp), and the style model rejects |offset| > 500 (style_presets
+// ElementStyle). Operator-reported 2026-11-15: dragging changed nothing on
+// the rendered poster -- the canvas wrote NATURAL-pixel offsets (2x too big
+// on a 2000px poster), so a short drag passed 500, the preview 422'd, and
+// that error was swallowed, leaving the old image up.
+const REFERENCE_WIDTH = 1000;
+const OFFSET_LIMIT = 500;
+function posterScale(naturalWidth: number): number {
+  return Math.max(0.1, Math.min(naturalWidth / REFERENCE_WIDTH, 10));
+}
+const clampOffset = (v: number) => Math.max(-OFFSET_LIMIT, Math.min(OFFSET_LIMIT, Math.round(v)));
+
 interface DragState { key: string; mode: 'move' | 'resize'; startX: number; startY: number; startOffX: number; startOffY: number; startSize: number; band: boolean }
 
 export function OverlaysPage(): React.ReactElement {
@@ -210,6 +224,7 @@ export function OverlaysPage(): React.ReactElement {
   const [previewBusy, setPreviewBusy] = useState(false);
   const [naturalSize, setNaturalSize] = useState({ w: 1000, h: 1500 });
   const dragRef = useRef<DragState | null>(null);
+  const previewSeq = useRef(0);
   const canvasRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { getLibraries().then((d) => setLibraryNames(d.libraries.map((l) => l.name))).catch(() => {}); }, []);
@@ -462,10 +477,18 @@ export function OverlaysPage(): React.ReactElement {
       // `profile` must be an overlays.profiles name (the backend 400s on an
       // unknown one) -- a named user_style has no such entry, so omit it;
       // the posted `style` already carries everything that matters.
+      // Responses can arrive out of order while dragging (each render takes
+      // seconds); only the newest request may update the image.
+      const seq = ++previewSeq.current;
       previewOverlay(style, [previewItem.item_id], false, selected || null)
-        .then((r) => setLivePreview(r.previews?.[0] ?? null))
-        .catch(() => {})
-        .finally(() => setPreviewBusy(false));
+        .then((r) => { if (seq === previewSeq.current) setLivePreview(r.previews?.[0] ?? null); })
+        .catch((e: any) => {
+          if (seq !== previewSeq.current) return;
+          // Keep the last good image (and base) but say why it didn't update.
+          setLivePreview((prev) => ({ ...(prev ?? { item_id: previewItem.item_id }), image: undefined,
+                                      error: e?.message ?? 'Preview failed' }));
+        })
+        .finally(() => { if (seq === previewSeq.current) setPreviewBusy(false); });
     }, 300);
     return () => window.clearTimeout(t);
   }, [selected, selectedStyle, previewItem, draftBase, draftStyle]);
@@ -512,7 +535,8 @@ export function OverlaysPage(): React.ReactElement {
     const d = dragRef.current;
     if (!d) return;
     const rect = canvasRef.current?.getBoundingClientRect();
-    const scale = rect && rect.width > 0 ? naturalSize.w / rect.width : 1;
+    // screen px -> natural px -> reference units (what the renderer reads)
+    const scale = rect && rect.width > 0 ? naturalSize.w / rect.width / posterScale(naturalSize.w) : 1;
     // A band ignores x_offset entirely server-side (always full width) --
     // dragging it sideways moved the chip with no effect on the real
     // poster, so horizontal movement is locked here instead of offering
@@ -520,7 +544,7 @@ export function OverlaysPage(): React.ReactElement {
     const dx = d.band ? 0 : (e.clientX - d.startX) * scale;
     const dy = (e.clientY - d.startY) * scale;
     if (d.mode === 'move') {
-      updateElement(d.key, { x_offset: Math.round(d.startOffX + dx), y_offset: Math.round(d.startOffY + dy) });
+      updateElement(d.key, { x_offset: clampOffset(d.startOffX + dx), y_offset: clampOffset(d.startOffY + dy) });
     } else {
       const next = Math.min(2.5, Math.max(0.4, d.startSize + dy / 150));
       updateElement(d.key, { size: Math.round(next * 100) / 100 });
@@ -867,7 +891,8 @@ function OverlayCanvas({
           )}
           {enabledKeys.map((key) => {
             const e = draftStyle[key] ?? {};
-            const scale = displayWidth / naturalSize.w;
+            // reference-unit offset -> on-canvas px (inverse of the drag conversion)
+            const scale = (displayWidth / naturalSize.w) * posterScale(naturalSize.w);
             const size = e.size ?? 1;
             const resizeHandle = (
               <span
