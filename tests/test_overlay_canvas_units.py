@@ -55,7 +55,7 @@ def test_offset_beyond_old_500_bound_is_accepted_and_moves_the_badge():
     assert render(800) != render(500)
 
 
-def test_render_reports_real_badge_layout_including_off_poster_badges():
+def test_render_reports_real_badge_layout_clamped_inside_and_not_overlapping():
     # The Studio canvas places its drag handles from this; the operator's
     # profile (8 badges stacked bottom_left, y_offset +500) drew most of them
     # below the poster while the old approximate chips looked fine.
@@ -73,7 +73,14 @@ def test_render_reports_real_badge_layout_including_off_poster_badges():
     overlay_render.render_overlay_png(poster.getvalue(), doc, values=vals, layout=layout)
     assert sorted(entry["key"] for entry in layout) == sorted(keys)
     assert all({"x", "y", "w", "h"} <= set(entry) for entry in layout)
-    assert any(entry["y"] >= 1080 for entry in layout)  # pushed past the bottom edge
+    # 2026-11-15 operator decision: +500 used to push these past the bottom
+    # edge; now every badge is clamped fully inside and none overlap.
+    for e in layout:
+        assert 0 <= e["x"] and e["x"] + e["w"] <= 720 and 0 <= e["y"] and e["y"] + e["h"] <= 1080, e
+    for i, a in enumerate(layout):
+        for b in layout[i + 1:]:
+            assert not (a["x"] < b["x"] + b["w"] and b["x"] < a["x"] + a["w"]
+                        and a["y"] < b["y"] + b["h"] and b["y"] < a["y"] + a["h"]), (a, b)
 
 
 def test_render_without_layout_arg_is_unchanged():
@@ -96,3 +103,27 @@ def test_resize_writes_integer_px_within_style_bounds():
     lo, hi = meta["Ge"].ge, meta["Le"].le
     assert f"size: Math.min({hi}, Math.max({lo}, Math.round(" in TSX
     assert "Math.min(2.5" not in TSX
+
+
+def test_badge_positions_do_not_depend_on_which_other_badges_have_data():
+    # Operator-reported 2026-11-15: toggling "Simulate all badges" (or an item
+    # lacking a rating) moved every badge, since each was a slot in a stack.
+    import io
+
+    from PIL import Image
+
+    poster = io.BytesIO()
+    Image.new("RGB", (1000, 1500), "black").save(poster, format="JPEG")
+    doc = {"base_position": "bottom_left", "elements": {
+        "imdb": {"enabled": True, "x_offset": 300, "y_offset": -400},
+        "tmdb": {"enabled": True, "x_offset": 0, "y_offset": -900},
+        "metacritic": {"enabled": True}, "resolution": {"enabled": True}}}
+
+    def where(vals):
+        lay: list = []
+        overlay_render.render_overlay_png(poster.getvalue(), doc, values=vals, layout=lay)
+        return {e["key"]: (e["x"], e["y"]) for e in lay}
+
+    few = where({"rating_imdb": "8.1", "rating_tmdb": "7.0"})
+    many = where({"rating_imdb": "8.1", "rating_tmdb": "7.0", "rating_metacritic": "80", "resolution": "4K"})
+    assert few["imdb"] == many["imdb"] and few["tmdb"] == many["tmdb"]
