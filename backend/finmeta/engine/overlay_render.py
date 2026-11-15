@@ -471,14 +471,6 @@ def _apply_opacity(c: tuple[int, int, int, int], opacity: float):
     return (r, g, b, round(a * max(0.0, min(opacity, 1.0))))
 
 
-@dataclass(frozen=True)
-class _SizedBadge:
-    placed: _Placed
-    w: int
-    h: int
-    font: ImageFont.ImageFont
-
-
 def _render_overlay_image(poster_bytes: bytes, style_doc_json: Mapping,
                           values: Optional[Mapping[str, Optional[str]]] = None,
                           config_dir: Optional[Path] = None,
@@ -538,37 +530,43 @@ def _render_overlay_image(poster_bytes: bytes, style_doc_json: Mapping,
     band_placed = [p for p in placed if p.kind == "band"]
     placed = [p for p in placed if p.kind != "band"]
 
-    groups: "Dict[Tuple[str, str], List[_Placed]]" = {}
-    for p in sorted(placed, key=lambda q: (q.anchor, ELEMENT_KEYS.index(q.el_key), q.weight)):
+    # Each badge sits at its OWN spot: anchor corner + its offset, never a
+    # slot in a stack built from whichever other badges happen to have data
+    # (operator decision 2026-11-15: toggling "Simulate all badges", or an
+    # item missing a rating, used to move every other badge). Overlaps are
+    # then resolved by pushing a badge just past the one it hits (down, or up
+    # on bottom rows), so untouched badges sharing a corner still stack, and
+    # everything is clamped fully inside the poster. Badges the user moved
+    # (non-zero offset) are placed first, so a newly shown badge never
+    # displaces them.
+    margin = max(round(doc.margin * poster_scale), 0)
+    gap = lambda size: max(size // 6, 4)
+
+    entries = []
+    for p in placed:
         # NOTE: _normalize_anchor returns (row, col); keep that order everywhere below.
         row, col = _normalize_anchor(p.anchor)
         if col is None or row is None:
             continue      # unparseable anchor from a hand-edited style -> skip this element only
-        groups.setdefault((col, row), []).append(p)
+        entries.append((row, col, p))
+    # bottom rows stack upward, so place them last-first to keep reading order
+    entries.sort(key=lambda e: (
+        e[2].x_off == 0 and e[2].y_off == 0,
+        e[2].anchor,
+        (-1 if e[0] == "bottom" else 1) * ELEMENT_KEYS.index(e[2].el_key),
+        e[2].weight))
 
-    margin = max(round(doc.margin * poster_scale), 0)
-    gap = lambda size: max(size // 6, 4)
-
-    for (col, row), items in groups.items():
-        sized: List[_SizedBadge] = []
-        for it in items:
-            fnt = font(it.size)
-            w, h = _badge_size(it, fnt)
-            sized.append(_SizedBadge(placed=it, w=w, h=h, font=fnt))
-        g_x = sum(gap(s.placed.size) for s in sized[:-1]) if len(sized) > 1 else 0
-        total_w = sum(s.w for s in sized) + g_x
-        total_h = sum(s.h + gap(s.placed.size) for s in sized) - (gap(sized[-1].placed.size) if sized else 0)
-
-        ox = x_origin(col, margin, pw, total_w)
-        oy = y_origin(row, margin, ph, total_h)
-        cursor_y = oy
-        for sb in sized:
-            x = int(round(ox + sb.placed.x_off))
-            y = int(round(cursor_y + sb.placed.y_off))
-            _draw_badge(work, sb.placed, sb.font, sb.w, sb.h, x, y)
-            if layout is not None:
-                layout.append({"key": sb.placed.el_key, "x": x, "y": y, "w": sb.w, "h": sb.h})
-            cursor_y += sb.h + gap(sb.placed.size)
+    taken: List[Tuple[int, int, int, int]] = []
+    for row, col, p in entries:
+        fnt = font(p.size)
+        w, h = _badge_size(p, fnt)
+        x = int(round(x_origin(col, margin, pw, w) + p.x_off))
+        y = int(round(y_origin(row, margin, ph, h) + p.y_off))
+        x, y = _free_spot(x, y, w, h, pw, ph, taken, gap(p.size), up=(row == "bottom"))
+        taken.append((x, y, w, h))
+        _draw_badge(work, p, fnt, w, h, x, y)
+        if layout is not None:
+            layout.append({"key": p.el_key, "x": x, "y": y, "w": w, "h": h})
 
     if band_placed:
         band_placed = sorted(band_placed, key=lambda q: ELEMENT_KEYS.index(q.el_key))
@@ -596,9 +594,10 @@ def _render_overlay_image(poster_bytes: bytes, style_doc_json: Mapping,
             # (down-positive, same convention as the normal badge stack
             # above) -- the stacking cursor itself (y) is unaffected, so
             # multiple bands keep their relative order regardless of offset.
-            _draw_band(work, p.text or "", fnt, y + p.y_off, h, pw, p.bg, p.fg)
+            by = int(min(max(y + p.y_off, 0), max(ph - h, 0)))  # never past an edge
+            _draw_band(work, p.text or "", fnt, by, h, pw, p.bg, p.fg)
             if layout is not None:
-                layout.append({"key": p.el_key, "x": 0, "y": y + p.y_off, "w": pw, "h": h})
+                layout.append({"key": p.el_key, "x": 0, "y": by, "w": pw, "h": h})
             y += (h + band_gap) if top else -band_gap
 
     return work
@@ -663,6 +662,32 @@ def render_overlay_jpeg(poster_bytes: bytes, style_doc_json: Mapping,
     buf = io.BytesIO()
     work.convert("RGB").save(buf, format="JPEG", quality=quality)
     return buf.getvalue()
+
+
+def _free_spot(x: int, y: int, w: int, h: int, pw: int, ph: int,
+               taken: Sequence[Tuple[int, int, int, int]], gap: int, up: bool) -> Tuple[int, int]:
+    """Nearest spot for a ``w``x``h`` badge at (x, y), clamped fully inside the
+    poster, that overlaps nothing in ``taken`` -- found by sliding vertically
+    (up for bottom-row anchors, else down) past each badge it hits, then the
+    other way if that runs out of poster. Gives back the clamped spot if the
+    poster is simply too full."""
+    x = min(max(x, 0), max(pw - w, 0))
+    y0 = min(max(y, 0), max(ph - h, 0))
+
+    def hit(cy: int):
+        return next((t for t in taken
+                     if x < t[0] + t[2] and t[0] < x + w and cy < t[1] + t[3] and t[1] < cy + h), None)
+
+    for go_up in (up, not up):
+        cy = y0
+        for _ in range(len(taken) + 1):
+            t = hit(cy)
+            if t is None:
+                return x, cy
+            cy = t[1] - h - gap if go_up else t[1] + t[3] + gap
+            if cy < 0 or cy > ph - h:
+                break
+    return x, y0
 
 
 def x_origin(col: str, margin: int, width: int, block_width: int) -> float:
