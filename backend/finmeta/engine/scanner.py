@@ -924,26 +924,37 @@ def _path_prefix(path: Optional[str]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _media_findings(
-    jf: Any, items: Sequence[Item], *, library: str, min_video_height: int,
-) -> List[Finding]:
-    """SC3 for one page: ONE batched stream request, movies only.
+def _page_streams(jf: Any, items: Sequence[Item], *, library: str
+                  ) -> Optional[Dict[str, List[Dict[str, Any]]]]:
+    """ONE batched stream request per page, movies only (shared by SC3 and
+    the S12d statistics). ``None`` when the request itself fails.
 
     A series carries no streams of its own -- standing in its first episode
     costs one request per series, which is a tier-2 price, so TV items are
     left to a future episode-level pass rather than reported as "no stream".
-
-    If the batch request itself fails, the page contributes no media findings
-    at all: reporting "no video stream" for every item because Jellyfin
-    hiccuped would be a false alarm of the worst kind.
     """
     movies = [it for it in items if it.type == "Movie"]
     if not movies:
-        return []
+        return {}
     try:
-        by_id = jf.get_items_media_streams_raw([it.id for it in movies])
+        return jf.get_items_media_streams_raw([it.id for it in movies])
     except Exception as exc:
         logger.warning("media-stream fetch failed for %s: %s", library, exc)
+        return None
+
+
+def _media_findings(
+    items: Sequence[Item], by_id: Optional[Mapping[str, Any]], *, library: str,
+    min_video_height: int,
+) -> List[Finding]:
+    """SC3 for one page over the page's batched streams.
+
+    If the batch request itself failed (``by_id`` None), the page contributes
+    no media findings at all: reporting "no video stream" for every item
+    because Jellyfin hiccuped would be a false alarm of the worst kind.
+    """
+    movies = [it for it in items if it.type == "Movie"]
+    if not movies or by_id is None:
         return []
     return check_media(
         [(it, by_id.get(it.id) or []) for it in movies],
@@ -958,6 +969,39 @@ class ScanLibraryResult:
     items_scanned: int = 0
     findings: int = 0
     skipped_reason: Optional[str] = None
+    #: S12d: {breakdown: {label: count}} -- see accumulate_stats.
+    stats: Dict[str, Dict[str, int]] = field(default_factory=dict)
+
+
+def accumulate_stats(stats: Dict[str, Dict[str, int]], item: Item,
+                     streams: Optional[Sequence[Mapping[str, Any]]]) -> None:
+    """S12d: add one item to the per-library breakdowns.
+
+    resolution / dynamic_range / audio use the SAME default K9 format rules
+    the overlay badges use, so a chart and a badge can never disagree. They
+    are movie-only (``streams`` None = series, or the page's stream fetch
+    failed), like SC3. genre / decade / official_rating cover every item.
+    """
+    from finmeta.engine.format_rules import detect_all
+
+    def bump(key: str, label: str) -> None:
+        bucket = stats.setdefault(key, {})
+        bucket[label] = bucket.get(label, 0) + 1
+
+    bump("type", "Movie" if item.type == "Movie" else "Show")
+    if streams is not None:
+        if not streams:
+            bump("resolution", "No stream data")
+        else:
+            facts = detect_all(list(streams))
+            bump("resolution", (facts["resolution"] or {}).get("label") or "Other")
+            bump("dynamic_range", (facts["dynamic_range"] or {}).get("label") or "SDR")
+            bump("audio", (facts["audio"] or {}).get("label") or "Other")
+    for g in item.genres or ["(none)"]:
+        bump("genre", g)
+    y = item.production_year
+    bump("decade", f"{(y // 10) * 10}s" if y else "Unknown")
+    bump("official_rating", item.official_rating or "Unrated")
 
 
 def scan_library(
@@ -1034,9 +1078,15 @@ def scan_library(
             page_findings.extend(check_artwork_quality(
                 mapped, library=library, kinds=kinds,
                 min_width=cfg.min_artwork_width, min_bytes=cfg.min_artwork_bytes))
+        # media off = no stream work at all (test_media_check_can_be_switched_off);
+        # the stream-based stats charts are then simply empty.
+        by_id = _page_streams(jf, items, library=library) if cfg.enabled("media") else None
+        for item in items:
+            streams = None if item.type != "Movie" or by_id is None else (by_id.get(item.id) or [])
+            accumulate_stats(result.stats, item, streams)
         if cfg.enabled("media"):
             page_findings.extend(_media_findings(
-                jf, items, library=library, min_video_height=cfg.min_video_height))
+                items, by_id, library=library, min_video_height=cfg.min_video_height))
         if cfg.enabled("metadata"):
             page_findings.extend(check_metadata_fields(
                 items, library=library, writes_nfo=writes_nfo))

@@ -5,6 +5,7 @@ REST under ``/api``; OpenAPI at ``/api/docs``. Serves the built UI from
 """
 from __future__ import annotations
 
+import logging
 import re
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -165,6 +166,11 @@ def _install_middleware(app: FastAPI) -> None:
 def create_app(context: AppContext) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        from finmeta.api.auth import auth_enabled
+        if not auth_enabled():
+            logging.getLogger(__name__).warning(
+                "FINMETA_AUTH=off: authentication is DISABLED -- anyone who can reach this "
+                "port has full admin access. Never use this outside local development.")
         context.start()
         try:
             yield

@@ -34,6 +34,9 @@ export interface ItemLightView {
   item_id: string;
   item_name: string;
   media_type: 'movie' | 'tvshow';
+  // Jellyfin's own Primary ImageTag -- pass to itemImageUrl() so the poster
+  // grid's cached image URL changes whenever the image actually does.
+  poster_tag?: string | null;
 }
 
 export interface UnmatchedView {

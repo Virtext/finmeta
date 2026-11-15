@@ -90,7 +90,7 @@ def candidates(item_id: str, ctx: AppContext = Depends(get_ctx)) -> dict:
         jf.close()
         try:
             tmdb.close()
-        except Exception:
+        except Exception:  # noqa: S110 -- best-effort connection close, nothing to act on
             pass
 
     out = []
@@ -142,7 +142,7 @@ def select_candidate(item_id: str, body: CandidateSelection,
     try:
         plan = ctx.get_plan(item_id=item_id)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"plan recompute failed: {exc}")
+        raise HTTPException(status_code=502, detail=f"plan recompute failed: {exc}") from exc
     item = next((ip for ip in plan.items if ip.item_id == item_id), None)
     return {
         "ok": True, "item_id": item_id, "kind": body.kind,
@@ -217,11 +217,11 @@ def proxy(token: str, ctx: AppContext = Depends(get_ctx)) -> Response:
         # is logged; the client is told only that it was refused, so the route
         # is not a path/host existence oracle.
         logger.warning("proxy refused ref %r: %s", ref, exc)
-        raise HTTPException(status_code=403, detail="candidate ref not allowed")
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="candidate not found")
+        raise HTTPException(status_code=403, detail="candidate ref not allowed") from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="candidate not found") from exc
     except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"upstream fetch failed: {exc}")
+        raise HTTPException(status_code=502, detail=f"upstream fetch failed: {exc}") from exc
     # A token is a deterministic encoding of (kind, ref) -- the same token
     # always resolves to the same bytes, so it's safe (and was previously
     # missing entirely) to let the browser cache it instead of re-fetching

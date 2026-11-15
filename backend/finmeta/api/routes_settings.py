@@ -6,9 +6,12 @@ Secrets are never returned to the client — only ``{configured, source, hint}``
 """
 from __future__ import annotations
 
+import logging
 import os
 import time
 from typing import Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 import base64
 import json
@@ -398,14 +401,14 @@ def _overlay_preview_source(
                             if networks:
                                 network_name = networks[0].get("name")
                         except Exception:
-                            pass
+                            logger.debug("preview: TMDb network lookup failed for %s", _tmdb_id, exc_info=True)
             except Exception:
                 streams = []
     finally:
         jf.close()
         try:
             tmdb.close()
-        except Exception:
+        except Exception:  # noqa: S110 -- best-effort connection close, nothing to act on
             pass
 
     posters = [c for c in by_kind.get("poster", []) if getattr(c, "ref", None)]
@@ -548,11 +551,12 @@ def overlays_preview(body: OverlayPreviewIn, ctx: AppContext = Depends(get_ctx))
                         target_k = "base_position" if k == "position" else k
                         doc_json[target_k] = v
             except Exception:
-                pass
+                logger.debug("preview: profile style merge failed for profile %r",
+                             body.profile, exc_info=True)
         doc_json.update(body.style or {})
         OverlayStyleDoc(**doc_json)  # validate early → clean 422
     except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"invalid overlay style: {exc}")
+        raise HTTPException(status_code=422, detail=f"invalid overlay style: {exc}") from exc
 
     # 2026-10-23: one Sonarr fetch for the whole request (~4s), not one per
     # preview item -- up to MAX_PREVIEW_ITEMS calls into _overlay_preview_source
@@ -670,7 +674,7 @@ def overlays_save(name: str, body: OverlayStylePut, ctx: AppContext = Depends(ge
         doc_json = _clone_before_edit(body.style)
         OverlayStyleDoc(**doc_json)  # validate → clean error if malformed
     except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"invalid overlay style: {exc}")
+        raise HTTPException(status_code=422, detail=f"invalid overlay style: {exc}") from exc
 
     cfg_text = _yaml.safe_load(ctx.config_text()) or {}
     ov = cfg_text.setdefault("overlays", {})
@@ -683,7 +687,7 @@ def overlays_save(name: str, body: OverlayStylePut, ctx: AppContext = Depends(ge
     try:
         ctx.put_config(new_yaml_text)
     except ConfigError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"ok": True, "name": name, "gen": ctx.gen}
 
 

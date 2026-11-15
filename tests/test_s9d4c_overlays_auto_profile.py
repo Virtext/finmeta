@@ -129,6 +129,19 @@ def test_two_libraries_each_get_their_own_auto_profile():
     assert cfg.overlays.profiles["Shows-auto"]["elements"] == ["hdr"]
 
 
+def test_clearing_profile_and_overlays_list_together_is_not_resurrected():
+    """Regression guard for ProfilesPanel's "Remove overlays" action: clearing
+    overlay_profile alone is not enough while the deprecated `overlays` list
+    is still non-empty -- the migration above would re-create <library>-auto
+    and re-point overlay_profile at it on this very load (same resurrection
+    bug deleteProfile() already works around). Clearing both must stick."""
+    cfg = _cfg({"Movies": MovieLibrary(type="movies", overlays=[], overlay_profile=None)})
+    lib = cfg.libraries["Movies"]
+    assert lib.overlay_profile is None
+    assert "Movies-auto" not in cfg.overlays.profiles
+    assert _profile_overlay_names(lib, cfg) == []
+
+
 # ---------------------------------------------------------------------------
 # schema: overlays is marked deprecated, schema.json on disk matches
 # ---------------------------------------------------------------------------

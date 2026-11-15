@@ -71,6 +71,16 @@ def get_scan(scan_id: str, ctx: AppContext = Depends(get_ctx)) -> dict:
             "counts": scan_store.scan_counts(ctx.db_path, scan_id)}
 
 
+@router.get("/scans/{scan_id}/stats")
+def scan_stats(scan_id: str, ctx: AppContext = Depends(get_ctx)) -> dict:
+    """S12d: per-library breakdowns gathered by this scan (resolution, HDR,
+    audio, genre, decade, official rating, type). Empty for scans run
+    before statistics existed."""
+    if scan_store.get_scan(ctx.db_path, scan_id) is None:
+        raise HTTPException(status_code=404, detail=f"unknown scan {scan_id!r}")
+    return {"libraries": scan_store.get_scan_stats(ctx.db_path, scan_id)}
+
+
 @router.get("/scans/{scan_id}/findings")
 def scan_findings(
     scan_id: str, ctx: AppContext = Depends(get_ctx),

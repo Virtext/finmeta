@@ -81,3 +81,6 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S105", "S106", "S107"]   # hardcoded test credentials are the point
+# Triage 2026-11-15: each `secret=` here is the *name* of a config/env field
+# (e.g. "tmdb_key") that holds a provider's API key -- never the key itself.
+"backend/finmeta/providers.py" = ["S106"]

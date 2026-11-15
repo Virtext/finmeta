@@ -829,10 +829,17 @@ export default function SettingsPage({ onBack, initialTab, initialOverlayLibrary
   const [configParsed, setConfigParsed] = useState<any>(null);
   const [ratingSources, setRatingSources] = useState<RatingSourcesResp | null>(null);
 
+  // SPEC_S13.md S13b item 2: "on, but its prerequisite is missing" warnings,
+  // computed server-side (api/config_warnings.py) and refreshed after saves.
+  const [warnings, setWarnings] = useState<{ path: string; message: string }[]>([]);
+  const refreshWarnings = useCallback(() => {
+    getConfig().then((d) => setWarnings(d.warnings ?? [])).catch(() => {});
+  }, []);
+
   const load = useCallback(() => {
     getSecrets().then(setSecrets).catch(() => {});
     getHelp().then(setHelp).catch(() => {});
-    getConfig().then((d) => { setConfigYaml(d.yaml); setConfigParsed(d.parsed); }).catch(() => {});
+    getConfig().then((d) => { setConfigYaml(d.yaml); setConfigParsed(d.parsed); setWarnings(d.warnings ?? []); }).catch(() => {});
     getProviders().then((d) => setProviders(d.providers)).catch(() => {});
     getRatingSources().then(setRatingSources).catch(() => {});
   }, []);
@@ -868,6 +875,7 @@ export default function SettingsPage({ onBack, initialTab, initialOverlayLibrary
       setConfigMsg('Config saved');
       setConfigParsed(YAML.load(configYaml));
       setPendingDiff(null);
+      refreshWarnings();
       setTimeout(() => setConfigMsg(null), 3000);
     } catch (e: any) {
       setConfigErr(e.message);
@@ -904,6 +912,7 @@ export default function SettingsPage({ onBack, initialTab, initialOverlayLibrary
       await putConfig(yamlText);
       setConfigYaml(yamlText);
       setConfigParsed(updated);
+      refreshWarnings();
     } catch (e: any) {
       throw e; // caller decides how to surface the error
     }
@@ -1017,6 +1026,24 @@ export default function SettingsPage({ onBack, initialTab, initialOverlayLibrary
           </div>
         )}
       </div>
+
+      {warnings.length > 0 && (
+        <div className="settings-warnings" role="status">
+          <strong>{warnings.length} setting{warnings.length === 1 ? '' : 's'} won't take effect:</strong>
+          <ul>
+            {warnings.map((w, i) => (
+              <li key={i}>
+                <button type="button" className="btn btn-ghost settings-warning-path"
+                        title="Find this setting"
+                        onClick={() => setSearch(w.path.replace(/\[\d+\].*$/, ''))}>
+                  {w.path}
+                </button>{' '}
+                {w.message}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <nav className="settings-tabs">
         {visibleTabs.map((t) => (

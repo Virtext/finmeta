@@ -927,3 +927,27 @@ button { font: inherit; cursor: pointer; }
 .backup-diff { list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 0.84rem; }
 .backup-diff li { overflow-wrap: anywhere; }
 .backup-result { margin-top: 14px; display: flex; flex-direction: column; gap: 4px; }
+
+/* S13b item 2: dependency warnings above the settings tabs */
+.settings-warnings {
+  border: 1px solid var(--warn); border-radius: 6px; padding: 8px 12px; margin: 8px 0 12px;
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+}
+.settings-warnings ul { margin: 6px 0 0; padding-left: 18px; }
+.settings-warnings li { margin: 2px 0; }
+.settings-warning-path { font-family: var(--mono, monospace); padding: 0 4px; }
+
+/* S12d: statistics charts (plain CSS bars) */
+.stats-panel { margin-top: 20px; }
+.stats-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.stats-head h3 { margin: 0; }
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px 24px; }
+.stats-grid h4 { margin: 8px 0; display: flex; gap: 4px; }
+.stats-bars { display: flex; flex-direction: column; gap: 4px; }
+.stats-bar-row { display: grid; grid-template-columns: minmax(80px, 140px) 1fr auto; gap: 8px; align-items: center; font-size: 0.9em; }
+.stats-bar-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stats-bar-track { height: 10px; background: color-mix(in srgb, currentColor 10%, transparent); border-radius: 5px; overflow: hidden; }
+.stats-bar-fill { display: block; height: 100%; background: var(--accent, #4c8dff); border-radius: 5px; }
+.stats-bar-n { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.stats-tab { background: none; border: 0; padding: 2px 6px; cursor: pointer; color: inherit; opacity: 0.6; font: inherit; }
+.stats-tab.active { opacity: 1; border-bottom: 2px solid var(--accent, #4c8dff); }

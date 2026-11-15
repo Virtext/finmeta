@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { dump as yamlDump } from 'js-yaml';
+import { downloadProfile, pickFile, readProfileFile } from '../profileFile';
 import {
   Badge, Button, Card, CardHeader, CardBody, Dialog, EmptyState,
   ErrorState, Input, PageHeader, Select, Skeleton, Tabs, useToast,
@@ -416,6 +417,25 @@ export function OverlaysPage(): React.ReactElement {
       .catch((e: any) => push({ message: e?.message ?? 'Could not delete.', tone: 'danger' }));
   };
 
+  const importProfile = () => pickFile(async (file) => {
+    if (!parsed) return;
+    try {
+      const r = await readProfileFile(file, Object.keys(profiles));
+      if (!r) return;
+      const next = structuredClone(parsed);
+      next.overlays ??= {};
+      next.overlays.profiles ??= {};
+      next.overlays.profiles[r.name] = r.profile;
+      await putConfig(yamlDump(next, { noRefs: true, lineWidth: -1 }));
+      push({ message: `Imported ${r.name}` });
+      setParsed(next);
+      selectProfile(r.name);
+      setTab('profiles');
+    } catch (e: any) {
+      push({ message: e?.message ?? 'Could not import.', tone: 'danger' });
+    }
+  });
+
   const deleteNamedStyle = (name: string) => {
     if (!parsed || !window.confirm(`Delete style "${name}"? This can't be undone.`)) return;
     const next = structuredClone(parsed);
@@ -519,7 +539,12 @@ export function OverlaysPage(): React.ReactElement {
       <PageHeader
         title="Overlays"
         description="Profiles decide which badges show on a library's posters."
-        actions={<Button variant="primary" onClick={() => setNewOpen(true)}>New profile</Button>}
+        actions={(
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Button variant="ghost" onClick={importProfile}>Import</Button>
+            <Button variant="primary" onClick={() => setNewOpen(true)}>New profile</Button>
+          </div>
+        )}
       />
 
       <Tabs
@@ -592,6 +617,7 @@ export function OverlaysPage(): React.ReactElement {
                     action={selected
                       ? (
                         <div style={{ display: 'flex', gap: 8 }}>
+                          <Button size="sm" variant="ghost" onClick={() => downloadProfile(selected, profiles[selected])}>Export</Button>
                           <Button size="sm" variant="ghost" onClick={() => deleteProfile(selected)}>Delete</Button>
                           <Button size="sm" variant="primary" loading={saving} onClick={saveSelected}>Save</Button>
                         </div>

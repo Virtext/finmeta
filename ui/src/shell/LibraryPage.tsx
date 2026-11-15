@@ -132,7 +132,7 @@ function PosterGrid({ library, selectedId, narrow, selection }: GridProps): Reac
             <PosterCard
               key={it.item_id}
               title={it.item_name}
-              imageUrl={itemImageUrl(it.item_id, 'poster')}
+              imageUrl={itemImageUrl(it.item_id, 'poster', 320, it.poster_tag)}
               selected={selection ? selection.ids.has(it.item_id) : it.item_id === selectedId}
               selectable={!!selection}
               onToggleSelect={selection ? () => selection.onToggle(it.item_id) : undefined}

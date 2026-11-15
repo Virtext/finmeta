@@ -5,10 +5,14 @@
 //
 // S9d4c: packs + Kometa import moved to the Overlays tab (OverlaysEditor.tsx)
 // so they sit next to the profile they apply to instead of a separate tab.
-import { useCallback, useEffect, useState } from 'react';
-import { getJellyfinLibraries, getConfig, putConfig } from '../api';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { getJellyfinLibraries, getConfig, putConfig, runPosterRotationNow, startRun, getJob } from '../api';
 import type { JfLibrary } from '../api';
 import * as YAML from 'js-yaml';
+import { downloadProfile, pickFile, readProfileFile } from '../profileFile';
+
+// Same terminal-status set used by LegacyApp.tsx's run pollers.
+const TERMINAL = new Set(['ok', 'partial', 'error', 'refused']);
 
 interface Props { onSaved?: () => void; onEditInOverlays?: (lib: string) => void }
 
@@ -43,6 +47,16 @@ export default function ProfilesPanel({ onSaved, onEditInOverlays }: Props) {
   const [saveErr, setSaveErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // S9d6 run-now: per-library manual poster-rotation trigger.
+  const [rotateBusy, setRotateBusy] = useState<string | null>(null);
+  const [rotateMsg, setRotateMsg] = useState<Record<string, string | null>>({});
+  // "Remove overlays": key is a library name, or 'ALL' for the global button.
+  const [removeBusy, setRemoveBusy] = useState<string | null>(null);
+  const [removeErr, setRemoveErr] = useState<Record<string, string | null>>({});
+  const removeTimers = useRef<Record<string, number>>({});
+  useEffect(() => () => {
+    Object.values(removeTimers.current).forEach((id) => window.clearInterval(id));
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -109,6 +123,24 @@ export default function ProfilesPanel({ onSaved, onEditInOverlays }: Props) {
     if (ok) { setNewName(''); flash(`Profile “${name}” created`); }
   }
 
+  function importProfile() {
+    pickFile(async (file) => {
+      try {
+        const r = await readProfileFile(file, Object.keys(profiles));
+        if (!r) return;
+        const ok = await saveConfigWith((doc) => {
+          doc.overlays ??= {};
+          doc.overlays.profiles ??= {};
+          if (doc.overlays.profiles[r.name]) throw new Error(`profile “${r.name}” already exists`);
+          doc.overlays.profiles[r.name] = r.profile;
+        });
+        if (ok) flash(`Imported “${r.name}”`);
+      } catch (e: any) {
+        setSaveErr(e?.message ?? 'import failed');
+      }
+    });
+  }
+
   async function renameProfile(oldName: string) {
     const next = window.prompt('Rename profile to:', oldName);
     if (!next || next === oldName) return;
@@ -171,6 +203,79 @@ export default function ProfilesPanel({ onSaved, onEditInOverlays }: Props) {
     if (ok) flash(profile ? `“${libName}” → ${profile}` : `“${libName}” profile cleared`);
   }
 
+  function pollRemoveJob(key: string, jobId: string) {
+    removeTimers.current[key] = window.setInterval(async () => {
+      try {
+        const j = await getJob(jobId);
+        if (TERMINAL.has(j.status)) {
+          window.clearInterval(removeTimers.current[key]);
+          delete removeTimers.current[key];
+          setRemoveBusy((b) => (b === key ? null : b));
+          flash(key === 'ALL'
+            ? `Overlays removed from all libraries — files written: ${j.files_written}, unchanged: ${j.files_unchanged}`
+            : `“${key}” overlays removed — files written: ${j.files_written}, unchanged: ${j.files_unchanged}`);
+        }
+      } catch (e) {
+        window.clearInterval(removeTimers.current[key]);
+        delete removeTimers.current[key];
+        setRemoveErr((p) => ({ ...p, [key]: (e as Error).message }));
+        setRemoveBusy((b) => (b === key ? null : b));
+      }
+    }, 1500);
+  }
+
+  // Clears overlay_profile AND the deprecated `overlays` list -- clearing
+  // only overlay_profile is not enough: config.models'
+  // _migrate_overlays_list_to_auto_profile re-creates "<lib>-auto" and
+  // re-points overlay_profile at it on the very next load whenever
+  // `overlays` is still non-empty (same resurrection bug deleteProfile()
+  // above already works around).
+  async function removeOverlays(libName: string) {
+    if (!window.confirm(`Remove overlays from “${libName}” and apply immediately? ` +
+        `This clears its overlay profile and re-writes its posters without overlays.`)) return;
+    setRemoveBusy(libName);
+    setRemoveErr((p) => ({ ...p, [libName]: null }));
+    const ok = await saveConfigWith((doc) => {
+      const lib = doc.libraries?.[libName];
+      if (!lib) throw new Error(`library “${libName}” not in config — add it in Advanced first`);
+      lib.overlay_profile = null;
+      if (lib.overlays) lib.overlays = [];
+    });
+    if (!ok) { setRemoveBusy(null); return; }
+    try {
+      const r = await startRun('apply', undefined, libName);
+      pollRemoveJob(libName, r.job_id);
+    } catch (e: any) {
+      setRemoveErr((p) => ({ ...p, [libName]: e?.message ?? 'apply failed' }));
+      setRemoveBusy(null);
+    }
+  }
+
+  // Mirrors the topbar's "Apply all libraries" / CollectionsPanel's "Apply
+  // (all libraries)" full-scope run -- startRun('apply') with no library arg.
+  async function removeOverlaysAll() {
+    const count = jlibs.filter((l) => l.configured).length;
+    if (!count) return;
+    if (!window.confirm(`Remove overlays from ALL ${count} configured libraries and apply ` +
+        `immediately? This affects every library at once.`)) return;
+    setRemoveBusy('ALL');
+    setRemoveErr((p) => ({ ...p, ALL: null }));
+    const ok = await saveConfigWith((doc) => {
+      for (const lib of Object.values<any>(doc.libraries ?? {})) {
+        lib.overlay_profile = null;
+        if (lib.overlays) lib.overlays = [];
+      }
+    });
+    if (!ok) { setRemoveBusy(null); return; }
+    try {
+      const r = await startRun('apply'); // no item/library -> full all-libraries scope
+      pollRemoveJob('ALL', r.job_id);
+    } catch (e: any) {
+      setRemoveErr((p) => ({ ...p, ALL: e?.message ?? 'apply failed' }));
+      setRemoveBusy(null);
+    }
+  }
+
   // S9d4a: set/clear a library's artwork_selection override.
   async function setArtworkSelection(libName: string, value: any) {
     const ok = await saveConfigWith((doc) => {
@@ -190,6 +295,25 @@ export default function ProfilesPanel({ onSaved, onEditInOverlays }: Props) {
       lib.poster_rotation = { ...(lib.poster_rotation ?? {}), ...patch };
     });
     if (ok) flash(`“${libName}” poster rotation updated`);
+  }
+
+  // S9d6 run-now: trigger the same guarded poster_rotation_job the cron
+  // schedule calls, on demand. Returns quickly (ranks + submits/queues a
+  // handful of applies) -- no polling loop needed, just report the result.
+  async function runRotationNow(libName: string) {
+    setRotateBusy(libName);
+    setRotateMsg((p) => ({ ...p, [libName]: null }));
+    try {
+      const r = await runPosterRotationNow(libName);
+      setRotateMsg((p) => ({
+        ...p,
+        [libName]: r.ok ? `rotated ${r.rotated} item${r.rotated === 1 ? '' : 's'}` : (r.reason ?? 'nothing to rotate'),
+      }));
+    } catch (e: any) {
+      setRotateMsg((p) => ({ ...p, [libName]: e?.message ?? 'run failed' }));
+    } finally {
+      setRotateBusy(null);
+    }
   }
 
   // Toggle one artwork kind (libraries.<lib>.artwork.<kind>) on/off. All
@@ -253,6 +377,7 @@ export default function ProfilesPanel({ onSaved, onEditInOverlays }: Props) {
                className="config-input" onChange={(e) => setNewName(e.target.value)}
                onKeyDown={(e) => { if (e.key === 'Enter') void createProfile(); }} />
         <button className="btn primary" onClick={() => void createProfile()} disabled={busy || !newName.trim()}>Create</button>
+        <button className="btn" onClick={importProfile} disabled={busy}>Import…</button>
       </div>
 
       <table className="profiles-table">
@@ -271,6 +396,7 @@ export default function ProfilesPanel({ onSaved, onEditInOverlays }: Props) {
                 <td><span className="field-hint muted">{usedBy.length ? usedBy.join(', ') : '—'}</span></td>
                 <td className="profiles-actions">
                   <span className="field-hint muted">style, elements &amp; packs: Overlays tab</span>
+                  <button className="btn" onClick={() => downloadProfile(n, profiles[n])}>Export</button>
                   <button className="btn" onClick={() => void renameProfile(n)}>Rename</button>
                   <button className="btn danger" onClick={() => void deleteProfile(n)}>Delete</button>
                 </td>
@@ -285,6 +411,13 @@ export default function ProfilesPanel({ onSaved, onEditInOverlays }: Props) {
         One profile per library ({'`'}libraries.&lt;lib&gt;.overlay_profile{'`'}). The dropdown is the only
         way to assign or clear it here; fine-grained overlay editing lives in the Overlays tab.
       </p>
+      <div className="profiles-create-row">
+        <button className="btn danger" disabled={busy || removeBusy !== null}
+                onClick={() => void removeOverlaysAll()}>
+          {removeBusy === 'ALL' ? 'Removing overlays…' : 'Remove overlays from all libraries'}
+        </button>
+      </div>
+      {removeErr['ALL'] && <div className="field-msg err">{removeErr['ALL']}</div>}
       <table className="profiles-table">
         <thead><tr><th>Library (Jellyfin)</th><th>Managed by Finmeta</th><th>Profile</th><th>Active elements</th><th></th></tr></thead>
         <tbody>
@@ -327,6 +460,11 @@ export default function ProfilesPanel({ onSaved, onEditInOverlays }: Props) {
                   {onEditInOverlays && (
                     <button className="btn" onClick={() => onEditInOverlays(l.name)}>Edit in Overlays</button>
                   )}
+                  <button className="btn danger" disabled={!l.configured || busy || removeBusy !== null}
+                          onClick={() => void removeOverlays(l.name)}>
+                    {removeBusy === l.name ? 'Removing…' : 'Remove overlays'}
+                  </button>
+                  {removeErr[l.name] && <div className="field-msg err">{removeErr[l.name]}</div>}
                 </td>
               </tr>
             );
@@ -433,7 +571,7 @@ export default function ProfilesPanel({ onSaved, onEditInOverlays }: Props) {
         <a href="https://crontab.guru/" target="_blank" rel="noreferrer" className="link">crontab.guru</a>.
       </p>
       <table className="profiles-table">
-        <thead><tr><th>Library</th><th>Enabled</th><th>Top N items</th><th>Cron</th></tr></thead>
+        <thead><tr><th>Library</th><th>Enabled</th><th>Top N items</th><th>Cron</th><th>Run now</th></tr></thead>
         <tbody>
           {jlibs.map((l) => {
             const pr = l.configured ? (posterRotation[l.name] ?? { enabled: false, item_count: 5, cron: '0 4 * * 0' }) : { enabled: false };
@@ -461,6 +599,14 @@ export default function ProfilesPanel({ onSaved, onEditInOverlays }: Props) {
                     title="5-field cron expression, e.g. `0 4 * * 0` (Sundays 04:00)"
                     onChange={(e) => void setPosterRotation(l.name, { cron: e.target.value })}
                   />
+                </td>
+                <td>
+                  <button className="btn" disabled={!l.configured || !pr.enabled || rotateBusy !== null}
+                          title={pr.enabled ? 'Rank and reapply this library’s top-rated posters now' : 'Enable rotation first'}
+                          onClick={() => void runRotationNow(l.name)}>
+                    {rotateBusy === l.name ? 'Running…' : 'Run now'}
+                  </button>
+                  {rotateMsg[l.name] && <div className="field-hint muted">{rotateMsg[l.name]}</div>}
                 </td>
               </tr>
             );

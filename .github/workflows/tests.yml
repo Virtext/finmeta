@@ -18,13 +18,14 @@ jobs:
       - name: Install
         run: pip install -e ".[dev]" uv
       - name: Ruff
-        # Audit 2026-11-11 "D2/D3": guards against a regression of the
-        # import-hygiene and SQL-injection false positives this audit
-        # cleared. NOT the full backend/ ruleset -- that still has ~128
-        # untriaged B904/S110/etc. findings predating this audit, a
-        # separate not-yet-scoped cleanup, not a regression of anything
-        # fixed here.
-        run: ruff check --select F401,F811,F841,S608 backend/
+        # Triage 2026-11-15: the ~128 untriaged B904/S110/etc. findings this
+        # comment used to reference (predating the 2026-11-11 audit) are now
+        # all either fixed or explicitly ignored (pyproject.toml / inline
+        # noqa, each with a reason). This runs the project's full default
+        # ruleset (select = ["F","B","S"] in pyproject.toml) instead of the
+        # narrow 4-code list from before, so a regression of ANY of those
+        # classes is caught here, not just F401/F811/F841/S608.
+        run: ruff check backend/
       - name: pip-audit
         # Audit 2026-11-11 "D5": audits the SHIPPED runtime dependency
         # set -- the same hash-pinned lockfile export the Dockerfile

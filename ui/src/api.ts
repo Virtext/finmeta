@@ -111,6 +111,20 @@ export const startRun = (action: string, item?: string, library?: string) =>
 
 export const getJob = (id: string) => j<JobResp>(`/api/jobs/${enc(id)}`);
 
+// S9d6 run-now: manual trigger for a library's poster rotation instead of
+// waiting for its cron schedule. Calls the same guarded job the cron path
+// calls, synchronously -- returns quickly (ranks + submits/queues a handful
+// of applies), no polling loop needed here unlike bulkRun above.
+export interface PosterRotationRunResp {
+  ok: boolean;
+  reason?: string | null;
+  rotated?: number;
+  run_id?: string | null;
+  queued?: string[];
+}
+export const runPosterRotationNow = (library: string) =>
+  j<PosterRotationRunResp>(`/api/libraries/${enc(library)}/poster-rotation/run`, { method: 'POST' });
+
 export interface BulkRunResultEntry {
   item_id: string; run_id: string | null; queued: boolean; error?: string;
 }
@@ -216,6 +230,10 @@ export const clearQueuedRuns = () =>
 export const cancelActiveRun = () =>
   j<{ cancelled: string }>('/api/activity/active/cancel', { method: 'POST' });
 export const getLatestScan = () => j<LatestScanResp>('/api/scans/latest');
+
+// S12d: {library: {breakdown: {label: count}}} for one scan.
+export interface ScanStats { libraries: Record<string, Record<string, Record<string, number>>> }
+export const getScanStats = (scanId: string) => j<ScanStats>(`/api/scans/${enc(scanId)}/stats`);
 
 export const getFindings = (
   scanId: string,
@@ -326,9 +344,16 @@ export function overlayProxyUrl(digest: string): string {
 // full-resolution image.
 export function itemImageUrl(
   itemId: string, kind: 'poster' | 'backdrop' | 'logo' | 'landscape', maxWidth: number | null = 320,
+  tag?: string | null,
 ): string {
   const w = maxWidth != null ? `&maxWidth=${maxWidth}` : '';
-  return `/api/items/${enc(itemId)}/image?kind=${kind}${w}`;
+  // `tag` is Jellyfin's own ImageTag (ItemLightView.poster_tag) -- the
+  // backend serves this URL with a long Cache-Control max-age, which is
+  // only safe because the tag changes whenever the underlying image does.
+  // Without it, two different images at the same item+kind share one URL
+  // forever (see routes_core.py's item_image docstring, 2026-11-15).
+  const t = tag ? `&tag=${enc(tag)}` : '';
+  return `/api/items/${enc(itemId)}/image?kind=${kind}${w}${t}`;
 }
 
 export function findFile(files: { kind: string; source_ref: string }[], kind: string) {
@@ -419,7 +444,7 @@ export const installLogoPack = (name: string) =>
   j<InstallLogoPackResp>(`/api/assets/logo-packs/${enc(name)}/install`, { method: 'POST' });
 
 export const getConfig = () =>
-  j<{ yaml: string; parsed: any; gen: number }>('/api/config');
+  j<{ yaml: string; parsed: any; gen: number; warnings?: { path: string; message: string }[] }>('/api/config');
 
 // S9d1: K9 default format rules from the backend (single source of truth --
 // the UI must not keep its own hardcoded copy).

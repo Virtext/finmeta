@@ -120,6 +120,12 @@ def init_scan_db(db_path: Path) -> None:
                 ON scan_findings(scan_id, check_code);
             CREATE INDEX IF NOT EXISTS idx_findings_item
                 ON scan_findings(item_id);
+            CREATE TABLE IF NOT EXISTS scan_stats (
+                scan_id  TEXT NOT NULL,
+                library  TEXT NOT NULL,
+                stats    TEXT NOT NULL DEFAULT '{}',
+                PRIMARY KEY (scan_id, library)
+            );
             """
         )
 
@@ -319,7 +325,30 @@ def delete_scan(db_path: Path, scan_id: str) -> bool:
     with _conn(db_path) as conn:
         cur = conn.execute("DELETE FROM scans WHERE scan_id = ?", (scan_id,))
         conn.execute("DELETE FROM scan_findings WHERE scan_id = ?", (scan_id,))
+        conn.execute("DELETE FROM scan_stats WHERE scan_id = ?", (scan_id,))
     return cur.rowcount > 0
+
+
+def save_scan_stats(db_path: Path, scan_id: str, library: str,
+                    stats: Dict[str, Dict[str, int]]) -> None:
+    """S12d: store one library's breakdowns for a scan (replaces any earlier row)."""
+    init_scan_db(db_path)
+    with _conn(db_path) as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO scan_stats (scan_id, library, stats) VALUES (?,?,?)",
+            (scan_id, library, json.dumps(stats)),
+        )
+
+
+def get_scan_stats(db_path: Path, scan_id: str) -> Dict[str, Dict[str, Dict[str, int]]]:
+    """S12d: ``{library: {breakdown: {label: count}}}`` for one scan."""
+    init_scan_db(db_path)
+    with _conn(db_path) as conn:
+        rows = conn.execute(
+            "SELECT library, stats FROM scan_stats WHERE scan_id = ? ORDER BY library",
+            (scan_id,),
+        ).fetchall()
+    return {r["library"]: json.loads(r["stats"]) for r in rows}
 
 
 def prune_scans(db_path: Path, keep: int = DEFAULT_KEEP_SCANS) -> int:
@@ -344,6 +373,7 @@ def prune_scans(db_path: Path, keep: int = DEFAULT_KEEP_SCANS) -> int:
         # sized by len(doomed); doomed's scan_ids came FROM this same DB
         # (the SELECT above), never from user input, and are bound params here.
         conn.execute(f"DELETE FROM scan_findings WHERE scan_id IN ({marks})", doomed)  # noqa: S608
+        conn.execute(f"DELETE FROM scan_stats WHERE scan_id IN ({marks})", doomed)  # noqa: S608
         conn.execute(f"DELETE FROM scans WHERE scan_id IN ({marks})", doomed)  # noqa: S608
     return len(doomed)
 
@@ -364,5 +394,6 @@ __all__ = [
     "init_scan_db", "start_scan", "add_findings", "bump_items_scanned",
     "finish_scan", "get_scan", "list_scans", "latest_scan", "scan_counts",
     "list_findings", "findings_by_ids", "mark_fixed", "delete_scan",
+    "save_scan_stats", "get_scan_stats",
     "prune_scans",
 ]

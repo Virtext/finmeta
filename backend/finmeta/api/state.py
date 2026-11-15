@@ -406,7 +406,7 @@ class AppContext:
             jf.close()
             try:
                 tmdb.close()
-            except Exception:
+            except Exception:  # noqa: S110 -- best-effort connection close, nothing to act on
                 pass
         plan = self._apply_overrides(plan)
         with self._cache_lock:

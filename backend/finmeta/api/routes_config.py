@@ -14,6 +14,7 @@ router = APIRouter(prefix="/api", tags=["config"])
 
 @router.get("/config")
 def get_config(ctx: AppContext = Depends(get_ctx)) -> dict:
+    from finmeta.api.config_warnings import config_warnings
     from finmeta.config.secretspec import valid_api_key_ref
 
     parsed = ctx.config.model_dump()
@@ -30,6 +31,7 @@ def get_config(ctx: AppContext = Depends(get_ctx)) -> dict:
         "config_error": ctx.config_error,
         "yaml": ctx.config_text(),
         "parsed": parsed,
+        "warnings": config_warnings(ctx.config, ctx.secrets),
     }
 
 
@@ -42,7 +44,7 @@ def put_config(body: ConfigPut, ctx: AppContext = Depends(get_ctx)) -> dict:
     try:
         ctx.put_config(body.yaml)
     except ConfigError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"ok": True, "gen": ctx.gen, "dry_run": ctx.config.dry_run}
 
 

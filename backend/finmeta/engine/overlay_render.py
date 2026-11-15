@@ -13,6 +13,7 @@ exactly where the local asset source already looks."""
 from __future__ import annotations
 
 import io
+import logging
 import os
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -21,6 +22,8 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 from PIL import Image, ImageDraw, ImageFont
 
 from finmeta.engine.style_presets import ELEMENT_KEYS, OverlayStyleDoc
+
+logger = logging.getLogger(__name__)
 
 # Anchor vocabulary. Note that "center" belongs to BOTH the row and column axis,
 _ROW_WORDS = ("top", "bottom")          # unambiguous row words
@@ -139,7 +142,8 @@ def load_pack_image_bytes(key: str, pack_name: str,
                 Image.open(fh).verify()
             return p.read_bytes()
     except Exception:
-        pass
+        logger.debug("logo image %s unreadable/corrupt, falling back to legacy layout", p,
+                     exc_info=True)
     # fall back to the legacy flat layout (<root>/logos/<key>.png) so pre-pack user-dropped logos keep working for any pack name (see _collect_placed).
     legacy = root / "logos" / f"{key}.png"
     try:
@@ -148,7 +152,7 @@ def load_pack_image_bytes(key: str, pack_name: str,
                 Image.open(fh).verify()
             return legacy.read_bytes()
     except Exception:
-        pass
+        logger.debug("legacy logo image %s unreadable/corrupt", legacy, exc_info=True)
     return None
 
 
@@ -575,13 +579,13 @@ def _render_overlay_image(poster_bytes: bytes, style_doc_json: Mapping,
         # instead of ever drawing text wider than the poster.
         fonts_fitted = [_fit_band_font(font, p.size, p.text or "", max_text_w) for p in band_placed]
         heights = []
-        for p, fnt in zip(band_placed, fonts_fitted):
+        for p, fnt in zip(band_placed, fonts_fitted, strict=True):
             tb = fnt.getbbox(p.text or "")
             heights.append((tb[3] - tb[1]) + band_pad_y)
         row0, _col0 = _normalize_anchor(band_placed[0].anchor)
         top = row0 == "top"
         y = 0 if top else ph
-        for p, h, fnt in zip(band_placed, heights, fonts_fitted):
+        for p, h, fnt in zip(band_placed, heights, fonts_fitted, strict=True):
             if not top:
                 y -= h
             # p.y_off nudges this band away from the edge it's flush with
