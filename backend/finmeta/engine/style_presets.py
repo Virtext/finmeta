@@ -94,11 +94,12 @@ class ElementStyle(_Strict):
                        description="Group name; elements in one group stack as a block.")
     weight: int = Field(default=100, ge=-1000, le=1000,
                         description="Sort key within its position column (lower first).")
-    full_width: bool = Field(
-        default=True,
+    full_width: Optional[bool] = Field(
+        default=None,
         description="TV status / trending rank only: draw as an edge-to-edge band "
-                    "flush with the poster (the long-standing default) instead of a "
-                    "normal position-anchored pill sized to the text plus padding.")
+                    "flush with the poster instead of a normal position-anchored pill "
+                    "sized to the text plus padding. Unset: TV status is a band, "
+                    "trending rank a normal badge (operator decision 2026-11-15).")
 
 
 class OverlayStyleDoc(_Strict):

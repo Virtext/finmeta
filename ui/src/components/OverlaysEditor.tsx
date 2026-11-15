@@ -381,7 +381,7 @@ export default function OverlaysEditor({ initialLibrary }: Props) {
       if (typeof e.padding_x === 'number') el.padding_x = e.padding_x;
       if (typeof e.padding_y === 'number') el.padding_y = e.padding_y;
       if (typeof e.opacity === 'number' && e.opacity < 1.0) el.opacity = e.opacity;
-      if ((key === 'status' || key === 'trending_rank') && e.full_width === false) el.full_width = false;
+      if ((key === 'status' || key === 'trending_rank') && typeof e.full_width === 'boolean') el.full_width = e.full_width;
       payloadElements[key] = el;
     }
     return {...d, elements: payloadElements};
@@ -729,7 +729,7 @@ export function ElementControls({doc, updateElement, setRibbonText, updateStatus
 
                 {(key==='status' || key==='trending_rank') && (
                   <label className="full-width-toggle">
-                    <input type="checkbox" checked={e.full_width !== false}
+                    <input type="checkbox" checked={e.full_width ?? key === 'status'}
                            onChange={(ev)=>updateElement(key,{full_width:ev.target.checked})}/>
                     <span>Full-width bar <span className="field-hint muted">(uncheck for a pill sized to the text, using Pad X/Y above)</span></span>
                   </label>

@@ -459,7 +459,7 @@ def _overlay_preview_source(
             "rating_imdb": "8.5", "rating_rt_critic": "92", "rating_metacritic": "78",
             "rating_tmdb": "7.9", "rating_letterboxd": "4.2", "rating_trakt": "8.1",
             "rating_rt_audience": "88", "resolution": "4K", "hdr": "HDR10",
-            "audio": "Atmos",
+            "audio": "Atmos", "trending_rank": "#1",
         }
         for key, ph in _PREVIEW_PLACEHOLDERS.items():
             if not (values.get(key) or "").strip():
@@ -589,7 +589,11 @@ def overlays_preview(body: OverlayPreviewIn, ctx: AppContext = Depends(get_ctx))
             try:
                 import io as _io
                 from PIL import Image as _PILImage
-                _fmt = (_PILImage.open(_io.BytesIO(poster_bytes)).format or "JPEG").lower()
+                _im = _PILImage.open(_io.BytesIO(poster_bytes))
+                # natural size the `layout` rects are in; the canvas must not
+                # guess it from a not-yet-loaded <img> (2026-11-15 drift bug)
+                entry["size"] = [_im.width, _im.height]
+                _fmt = (_im.format or "JPEG").lower()
                 _mime = {"jpeg": "image/jpeg", "jpg": "image/jpeg", "png": "image/png",
                         "webp": "image/webp"}.get(_fmt, "image/jpeg")
             except Exception:

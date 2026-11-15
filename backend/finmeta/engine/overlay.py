@@ -246,7 +246,7 @@ def render_poster(
 
 # Element names that render as a full-width ribbon band (see _draw_band)
 # instead of joining the normal corner-stacked badges.
-FULL_WIDTH_ELEMENTS = {"status", "trending_rank"}
+FULL_WIDTH_ELEMENTS = {"status"}  # trending_rank is a normal badge (2026-11-15)
 
 
 def ribbon_colors(name: str) -> tuple[Optional[str], Optional[str]]:
