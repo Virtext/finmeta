@@ -68,9 +68,12 @@ class ElementStyle(_Strict):
         default=None, pattern=f"^({'|'.join(GRID_POSITIONS)})$",
         description="Override for the base anchor; one of the 3x3 grid positions.",
         json_schema_extra={"help": "Anchor point on a 3\u00d73 grid. Empty follows the global position."})
-    x_offset: int = Field(default=0, ge=-500, le=500,
+    # +/-1500 reference px (poster = 1000 wide, ~1500 tall) so a badge can reach
+    # any spot; +/-500 was too tight once several badges stack in one corner
+    # (operator-reported 2026-11-15: badges pinned at 500, drag stopped moving them).
+    x_offset: int = Field(default=0, ge=-1500, le=1500,
                           description="Pixel offset from the anchor, horizontal.")
-    y_offset: int = Field(default=0, ge=-500, le=500,
+    y_offset: int = Field(default=0, ge=-1500, le=1500,
                           description="Pixel offset from the anchor, vertical.")
     size: Optional[int] = Field(default=None, ge=8, le=240,
                                 description="Font/badge height in pixels (default = base font_size).")

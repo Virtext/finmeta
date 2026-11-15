@@ -713,8 +713,8 @@ export function ElementControls({doc, updateElement, setRibbonText, updateStatus
                   <>
                     <NineGrid current={e.position || null} basePosition={doc.base_position} onSelect={(pos)=>updateElement(key,{position:pos})}/>
 
-                    <NumField label="X offset" value={e.x_offset??0} min={-500} max={500} onCommit={(v)=>updateElement(key,{x_offset:v})}/>
-                    <NumField label="Y offset" value={e.y_offset??0} min={-500} max={500} onCommit={(v)=>updateElement(key,{y_offset:v})}/>
+                    <NumField label="X offset" value={e.x_offset??0} min={-1500} max={1500} onCommit={(v)=>updateElement(key,{x_offset:v})}/>
+                    <NumField label="Y offset" value={e.y_offset??0} min={-1500} max={1500} onCommit={(v)=>updateElement(key,{y_offset:v})}/>
                     <SizeInput value={e.size ?? null} placeholder={`inherit (${doc.font_size}px)`}
                                onCommit={(v)=>updateElement(key,{size:v===null? null : Math.max(8,Math.min(240,v))})}/>
                   </>

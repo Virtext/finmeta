@@ -36,3 +36,20 @@ def test_poster_scale_clamp_matches_renderer():
     # same clamp bounds as overlay_render._poster_scale
     assert "Math.max(0.1, Math.min(naturalWidth / REFERENCE_WIDTH, 10))" in TSX
     assert overlay_render._poster_scale(50) == 0.1 and overlay_render._poster_scale(50_000) == 10.0
+
+
+def test_offset_beyond_old_500_bound_is_accepted_and_moves_the_badge():
+    # Operator's profile had a corner stack whose badges needed ~800 to reach
+    # the bottom; the old +/-500 bound 422'd every such preview.
+    import io
+
+    from PIL import Image
+
+    poster = io.BytesIO()
+    Image.new("RGB", (1000, 1500), "black").save(poster, format="JPEG")
+
+    def render(y):
+        doc = {"elements": {"resolution": {"enabled": True, "position": "top_left", "y_offset": y}}}
+        return overlay_render.render_overlay_png(poster.getvalue(), doc, values={"resolution": "4K"})
+
+    assert render(800) != render(500)

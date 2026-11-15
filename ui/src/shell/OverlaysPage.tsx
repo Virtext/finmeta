@@ -167,13 +167,14 @@ function nudgeStyle(position: string | null | undefined, xOff: number, yOff: num
 
 // The renderer's offsets are in 1000px-reference units, multiplied by the
 // poster's own width / 1000 (engine/overlay_render.py `_poster_scale`, same
-// clamp), and the style model rejects |offset| > 500 (style_presets
-// ElementStyle). Operator-reported 2026-11-15: dragging changed nothing on
-// the rendered poster -- the canvas wrote NATURAL-pixel offsets (2x too big
-// on a 2000px poster), so a short drag passed 500, the preview 422'd, and
-// that error was swallowed, leaving the old image up.
+// clamp), and the style model bounds |offset| (style_presets ElementStyle).
+// Operator-reported 2026-11-15: dragging changed nothing on the rendered
+// poster -- saved offsets were already at the old +/-500 bound, so every
+// further drag 422'd and that error was swallowed, leaving the old image up.
+// The bound is now +/-1500 (the whole poster); the canvas also used to write
+// NATURAL-pixel offsets, ~2x too big on a 2000px poster.
 const REFERENCE_WIDTH = 1000;
-const OFFSET_LIMIT = 500;
+const OFFSET_LIMIT = 1500;
 function posterScale(naturalWidth: number): number {
   return Math.max(0.1, Math.min(naturalWidth / REFERENCE_WIDTH, 10));
 }
