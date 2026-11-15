@@ -562,8 +562,12 @@ def overlays_preview(body: OverlayPreviewIn, ctx: AppContext = Depends(get_ctx))
     # preview item -- up to MAX_PREVIEW_ITEMS calls into _overlay_preview_source
     # were each rebuilding it from scratch. Same "one lookup, not per show"
     # rule plan_builder.build_plan already follows for a real apply.
+    # Only the TV-status badge reads it; skipping it otherwise saves those
+    # seconds on every Overlay Studio drag (operator-reported 2026-11-15).
     from finmeta.engine.plan_builder import build_sonarr_index
-    sonarr_index = build_sonarr_index(ctx.config, ctx.secrets)
+    _status_el = (doc_json.get("elements") or {}).get("status") or {}
+    sonarr_index = (build_sonarr_index(ctx.config, ctx.secrets)
+                    if _status_el.get("enabled", True) and "status" in (doc_json.get("elements") or {}) else {})
 
     results = []
     for item_id in body.item_ids[:MAX_PREVIEW_ITEMS]:
