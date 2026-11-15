@@ -491,6 +491,7 @@ export interface OverlayPreviewEntry {
   item_id: string; image?: string; error?: string; samples?: string[];
   /** Where each drawn badge landed, in natural px of `image` (absent key = not drawn). */
   layout?: { key: string; x: number; y: number; w: number; h: number }[];
+  size?: [number, number];
   /** Client-side only: the element offsets the request for this preview was sent with. */
   sentOffsets?: Record<string, { x: number; y: number }>;
   /** S9d4c: the EXACT pre-compositing candidate "image" was rendered from,

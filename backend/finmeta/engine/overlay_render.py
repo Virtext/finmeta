@@ -385,7 +385,8 @@ def _collect_placed(
             # edge-to-edge band, drawn separately below. When off, this falls
             # through to the normal position-anchored text pill instead
             # (padding_x/padding_y/radius/position already apply to that path).
-            kind = "band" if el.full_width else "text"
+            band = el.full_width if el.full_width is not None else key == "status"
+            kind = "band" if band else "text"
             if key == "status":
                 from finmeta.engine.tv_status import STATUS_COLORS
                 default_bg = (doc.status_colors or {}).get(status_key or "") or STATUS_COLORS.get(status_key or "")

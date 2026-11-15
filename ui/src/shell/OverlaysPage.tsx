@@ -96,7 +96,7 @@ function buildElementsPayload(draftStyle: Record<string, DocElementState>): Reco
     if (typeof e.padding_x === 'number') el.padding_x = e.padding_x;
     if (typeof e.padding_y === 'number') el.padding_y = e.padding_y;
     if (typeof e.opacity === 'number' && e.opacity < 1.0) el.opacity = e.opacity;
-    if ((key === 'status' || key === 'trending_rank') && e.full_width === false) el.full_width = false;
+    if ((key === 'status' || key === 'trending_rank') && typeof e.full_width === 'boolean') el.full_width = e.full_width;
     out[key] = el;
   }
   return out;
@@ -129,7 +129,8 @@ const ANCHOR_CSS: Record<string, React.CSSProperties> = {
 // canvas visibly moved the chip but had NO effect on the real poster --
 // pure placebo -- so the chip should not offer that drag at all.
 function isBandKey(key: string, draftStyle: Record<string, DocElementState>): boolean {
-  if (key === 'status' || key === 'trending_rank') return draftStyle[key]?.full_width !== false;
+  // unset: status is a band, trending_rank a normal badge (style_presets.ElementStyle.full_width)
+  if (key === 'status' || key === 'trending_rank') return draftStyle[key]?.full_width ?? key === 'status';
   return false;
 }
 
@@ -179,7 +180,8 @@ const OFFSET_LIMIT = 1500;
 function posterScale(naturalWidth: number): number {
   return Math.max(0.1, Math.min(naturalWidth / REFERENCE_WIDTH, 10));
 }
-const clampOffset = (v: number) => Math.max(-OFFSET_LIMIT, Math.min(OFFSET_LIMIT, Math.round(v)));
+// `|| 0`: Math.round can give -0, which the YAML save wrote as "-0.0"
+const clampOffset = (v: number) => Math.max(-OFFSET_LIMIT, Math.min(OFFSET_LIMIT, Math.round(v))) || 0;
 
 interface DragState { key: string; mode: 'move' | 'resize'; startX: number; startY: number; startOffX: number; startOffY: number; startSize: number; band: boolean }
 
@@ -225,6 +227,8 @@ export function OverlaysPage(): React.ReactElement {
   const [livePreview, setLivePreview] = useState<OverlayPreviewEntry | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
   const [naturalSize, setNaturalSize] = useState({ w: 1000, h: 1500 });
+  // "Simulate all badges": preview-only placeholders for data the item lacks
+  const [sampleAll, setSampleAll] = useState(false);
   const dragRef = useRef<DragState | null>(null);
   const previewSeq = useRef(0);
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -486,10 +490,11 @@ export function OverlaysPage(): React.ReactElement {
       // badge rect by (current offset - these) while the next render runs.
       const sentOffsets: Record<string, { x: number; y: number }> = {};
       for (const [k, el] of Object.entries(draftStyle)) sentOffsets[k] = { x: el?.x_offset ?? 0, y: el?.y_offset ?? 0 };
-      previewOverlay(style, [previewItem.item_id], false, selected || null)
+      previewOverlay(style, [previewItem.item_id], sampleAll, selected || null)
         .then((r) => {
           if (seq !== previewSeq.current) return;
           const p = r.previews?.[0];
+          if (p?.size) setNaturalSize({ w: p.size[0], h: p.size[1] });
           setLivePreview(p ? { ...p, sentOffsets } : null);
         })
         .catch((e: any) => {
@@ -501,7 +506,7 @@ export function OverlaysPage(): React.ReactElement {
         .finally(() => { if (seq === previewSeq.current) setPreviewBusy(false); });
     }, 300);
     return () => window.clearTimeout(t);
-  }, [selected, selectedStyle, previewItem, draftBase, draftStyle]);
+  }, [selected, selectedStyle, previewItem, draftBase, draftStyle, sampleAll]);
 
   const createProfile = () => {
     if (!newName.trim() || !parsed) return;
@@ -732,6 +737,11 @@ export function OverlaysPage(): React.ReactElement {
                                 onChange={(e) => setItemSearch(e.target.value)}
                                 style={{ flex: 1, minWidth: 200 }}
                               />
+                              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--text-sm)' }}
+                                     title="Fill every enabled badge with example values the item lacks, so you can place all of them. Preview only; real applies still skip badges without data.">
+                                <input type="checkbox" checked={sampleAll} onChange={(e) => setSampleAll(e.target.checked)} />
+                                Simulate all badges
+                              </label>
                             </div>
 
                             {!previewItem && itemResults.length > 0 && (
@@ -914,6 +924,17 @@ function OverlayCanvas({
   useEffect(() => {
     if (!livePreview?.layout) return;
     if (offCount === 0) { autoSnaps.current = 0; return; }
+    // Only a fresh render of exactly this draft at its real size may move
+    // anything: a stale one (re-opening a profile, switching item) made bogus
+    // snaps that scattered saved badges (operator-reported 2026-11-15).
+    const sz = livePreview.size;
+    if (!sz || sz[0] !== naturalSize.w || sz[1] !== naturalSize.h) return;
+    const sent = livePreview.sentOffsets ?? {};
+    const fresh = livePreview.layout.every(({ key }) => {
+      const e = draftStyle[key] ?? {};
+      return sent[key] && sent[key].x === (e.x_offset ?? 0) && sent[key].y === (e.y_offset ?? 0);
+    });
+    if (!fresh) return;
     if (autoSnaps.current >= 2) return;
     autoSnaps.current += 1;
     setMovedIn(offCount);

@@ -526,3 +526,16 @@ def test_preview_skips_sonarr_lookup_unless_status_badge_enabled(client, monkeyp
     r = client.post("/api/overlays/preview", json={"style": with_status, "item_ids": ["a"]})
     assert r.status_code == 200, r.text
     assert calls == [1]
+
+
+def test_preview_reports_poster_size_and_simulates_trending_rank(client):
+    # The Studio canvas maps `layout` rects with this size (guessing it from
+    # the <img> raced and scattered badges); "Simulate all badges" must also
+    # cover the trending-rank band, not just ratings/media badges.
+    doc = {**STYLE_DOC, "elements": {"trending_rank": {"enabled": True}}}
+    p = client.post("/api/overlays/preview",
+                    json={"style": doc, "item_ids": ["a"], "sample_data": True}).json()["previews"][0]
+    im = Image.open(io.BytesIO(base64.b64decode(p["base_image"].split(",", 1)[1])))
+    assert p["size"] == [im.width, im.height]
+    assert "trending_rank" in p.get("samples", [])
+    assert any(entry["key"] == "trending_rank" for entry in p["layout"])

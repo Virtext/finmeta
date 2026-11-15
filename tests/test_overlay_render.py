@@ -682,3 +682,27 @@ def test_image_badge_hdr_variant_mapping(tmp_path):
     assert info_pack_key("audio","Atmos") == "atmos"
     assert info_pack_key("audio","E-AC3 5.1") == "dd_plus"  # exact-codec string from Jellyfin stream metadata maps correctly
 
+
+
+def _trending_doc(full_width: bool | None) -> dict:
+    doc = _status_doc(None)
+    doc["elements"]["status"] = {"enabled": False}
+    el = {"enabled": True, "position": "top_center"}
+    if full_width is not None:
+        el["full_width"] = full_width
+    doc["elements"]["trending_rank"] = el
+    return doc
+
+
+def test_trending_rank_defaults_to_normal_badge_not_band():
+    """Operator decision (2026-11-15): the MDBList trending badge must behave
+    like the other badges (movable sideways), so unset ``full_width`` is a
+    pill; ``full_width: true`` still opts into the edge-to-edge band."""
+    base = Image.open(io.BytesIO(_poster(1000, 1500))).convert("RGB")
+    pill = Image.open(io.BytesIO(render_overlay_png(
+        _poster(1000, 1500), _trending_doc(None), values={"trending_rank": "#3"}))).convert("RGB")
+    assert _edge_columns_touched(pill, base) == (False, False)
+    assert _pixel_diff(base, pill) > 50
+    band = Image.open(io.BytesIO(render_overlay_png(
+        _poster(1000, 1500), _trending_doc(True), values={"trending_rank": "#3"}))).convert("RGB")
+    assert _edge_columns_touched(band, base) == (True, True)
