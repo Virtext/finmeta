@@ -511,3 +511,18 @@ def test_preview_no_samples_key_when_all_real_or_error_absent(client):
     e = body["previews"][0]
     if "error" not in e:
         assert "image" in e
+
+
+def test_preview_skips_sonarr_lookup_unless_status_badge_enabled(client, monkeypatch):
+    # 2026-11-15: every Overlay Studio drag paid a full Sonarr series fetch
+    # (seconds) even for movie profiles that never draw the status badge.
+    from finmeta.engine import plan_builder
+    calls = []
+    monkeypatch.setattr(plan_builder, "build_sonarr_index", lambda *a, **k: calls.append(1) or {})
+    r = client.post("/api/overlays/preview", json={"style": STYLE_DOC, "item_ids": ["a"]})
+    assert r.status_code == 200, r.text
+    assert calls == []
+    with_status = {**STYLE_DOC, "elements": {**STYLE_DOC["elements"], "status": {"enabled": True}}}
+    r = client.post("/api/overlays/preview", json={"style": with_status, "item_ids": ["a"]})
+    assert r.status_code == 200, r.text
+    assert calls == [1]

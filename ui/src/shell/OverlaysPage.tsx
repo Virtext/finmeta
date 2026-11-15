@@ -905,6 +905,23 @@ function OverlayCanvas({
   for (const [k, hd] of Object.entries(handles)) if (hd.snap) offSnaps[k] = hd.snap;
   const offCount = Object.keys(offSnaps).length;
 
+  // A badge off the poster is never wanted, and a red handle standing in for
+  // an invisible badge confused the operator (2026-11-15) -- so each fresh
+  // render pulls off-poster badges in to their handles (draft only; Save
+  // keeps it). Capped so an unreachable spot cannot loop renders forever.
+  const autoSnaps = useRef(0);
+  const [movedIn, setMovedIn] = useState(0);
+  useEffect(() => {
+    if (!livePreview?.layout) return;
+    if (offCount === 0) { autoSnaps.current = 0; return; }
+    if (autoSnaps.current >= 2) return;
+    autoSnaps.current += 1;
+    setMovedIn(offCount);
+    onSnapAll(offSnaps);
+    // only on a new server render, not on every drag frame
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [livePreview]);
+
   // The real renderer auto-stacks every non-band badge sharing one anchor
   // corner into a column (engine/overlay_render.py groups by anchor, then
   // lays each one below the last) -- the chip canvas has no equivalent, so
@@ -1029,7 +1046,7 @@ function OverlayCanvas({
                   }}
                   title={`${ELEMENT_LABELS[key] ?? key} — full width, drag up/down only`}
                 >
-                  {ELEMENT_LABELS[key] ?? key}
+                  {ELEMENT_LABELS[key] ?? key}{livePreview?.layout ? ' (no data)' : ''}
                   {resizeHandle}
                 </div>
               );
@@ -1076,10 +1093,9 @@ function OverlayCanvas({
             );
           })}
         </div>
-        {offCount > 0 && (
-          <div style={{ marginTop: 6, fontSize: 'var(--text-xs)', color: 'var(--danger)', maxWidth: displayWidth }}>
-            {offCount} badge{offCount > 1 ? 's are' : ' is'} off the poster.{' '}
-            <button className="btn btn-ghost" onClick={() => onSnapAll(offSnaps)}>Bring back onto poster</button>
+        {movedIn > 0 && (
+          <div style={{ marginTop: 6, fontSize: 'var(--text-xs)', color: 'var(--text-faint)', maxWidth: displayWidth }}>
+            {movedIn} badge{movedIn > 1 ? 's were' : ' was'} off the poster and moved to its edge. Save to keep.
           </div>
         )}
       </div>
