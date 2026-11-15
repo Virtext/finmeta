@@ -529,16 +529,28 @@ export function OverlaysPage(): React.ReactElement {
   // bounds -- no window-level listener needed. x/y deltas are measured in
   // screen px and scaled into the image's own pixel space so the offset
   // written to config matches what the server-side renderer actually uses.
-  const onChipPointerDown = (key: string, mode: 'move' | 'resize') => (e: React.PointerEvent) => {
+  // `snap` (reference units): an off-poster handle is drawn clamped to the
+  // edge; grabbing it first moves the badge to where its handle is, so the
+  // drag follows the cursor 1:1 instead of doing nothing until it re-enters.
+  const onChipPointerDown = (key: string, mode: 'move' | 'resize', snap?: { x: number; y: number }) => (e: React.PointerEvent) => {
     e.preventDefault();
     e.stopPropagation();
     const cur = draftStyle[key] ?? {};
+    const startOffX = clampOffset((cur.x_offset ?? 0) + (mode === 'move' ? snap?.x ?? 0 : 0));
+    const startOffY = clampOffset((cur.y_offset ?? 0) + (mode === 'move' ? snap?.y ?? 0 : 0));
+    if (mode === 'move' && snap) updateElement(key, { x_offset: startOffX, y_offset: startOffY });
     dragRef.current = {
       key, mode, startX: e.clientX, startY: e.clientY,
-      startOffX: cur.x_offset ?? 0, startOffY: cur.y_offset ?? 0, startSize: cur.size ?? 1,
+      startOffX, startOffY, startSize: cur.size ?? 1,
       band: isBandKey(key, draftStyle),
     };
     (e.target as Element).setPointerCapture?.(e.pointerId);
+  };
+  const snapAll = (snaps: Record<string, { x: number; y: number }>) => {
+    for (const [key, s] of Object.entries(snaps)) {
+      const cur = draftStyle[key] ?? {};
+      updateElement(key, { x_offset: clampOffset((cur.x_offset ?? 0) + s.x), y_offset: clampOffset((cur.y_offset ?? 0) + s.y) });
+    }
   };
   const onChipPointerMove = (e: React.PointerEvent) => {
     const d = dragRef.current;
@@ -747,6 +759,7 @@ export function OverlaysPage(): React.ReactElement {
                                 onNaturalSize={setNaturalSize}
                                 canvasRef={canvasRef}
                                 onChipPointerDown={onChipPointerDown}
+                                onSnapAll={snapAll}
                                 onChipPointerMove={onChipPointerMove}
                                 onChipPointerUp={onChipPointerUp}
                               />
@@ -829,7 +842,8 @@ interface OverlayCanvasProps {
   naturalSize: { w: number; h: number };
   onNaturalSize: (s: { w: number; h: number }) => void;
   canvasRef: React.RefObject<HTMLDivElement>;
-  onChipPointerDown: (key: string, mode: 'move' | 'resize') => (e: React.PointerEvent) => void;
+  onChipPointerDown: (key: string, mode: 'move' | 'resize', snap?: { x: number; y: number }) => (e: React.PointerEvent) => void;
+  onSnapAll: (snaps: Record<string, { x: number; y: number }>) => void;
   onChipPointerMove: (e: React.PointerEvent) => void;
   onChipPointerUp: () => void;
 }
@@ -841,12 +855,54 @@ interface OverlayCanvasProps {
 // -- it only needs to be close enough to grab and drag.
 function OverlayCanvas({
   item, onClear, draftStyle, livePreview, previewBusy,
-  naturalSize, onNaturalSize, canvasRef, onChipPointerDown, onChipPointerMove, onChipPointerUp,
+  naturalSize, onNaturalSize, canvasRef, onChipPointerDown, onSnapAll, onChipPointerMove, onChipPointerUp,
 }: OverlayCanvasProps): React.ReactElement {
   const baseImage = livePreview?.base_image;
   const displayWidth = 280;
   const displayHeight = Math.round(displayWidth * (naturalSize.h / naturalSize.w));
   const enabledKeys = ELEMENT_ORDER.filter((k) => draftStyle[k]?.enabled === true);
+
+  // Handle boxes from the last server render (preview `layout`), shifted
+  // live by how far each offset moved since. Off-poster ones are pulled
+  // inside the edge and stacked so each is grabbable on its own (they used
+  // to clamp onto one spot, operator-reported 2026-11-15); `snap` is the
+  // offset change that puts the real badge where its handle is drawn.
+  const refToDisp = (displayWidth / naturalSize.w) * posterScale(naturalSize.w);
+  const handles: Record<string, { left: number; top: number; w: number; h: number; band: boolean; snap?: { x: number; y: number } }> = {};
+  {
+    const disp = displayWidth / naturalSize.w;
+    const pile: Record<string, number> = {}; // per-edge running inset
+    for (const key of enabledKeys) {
+      const real = livePreview?.layout?.find((l) => l.key === key);
+      if (!real) continue;
+      const e = draftStyle[key] ?? {};
+      const sent = livePreview?.sentOffsets?.[key] ?? { x: e.x_offset ?? 0, y: e.y_offset ?? 0 };
+      const band = isBandKey(key, draftStyle);
+      const rawLeft = band ? 0 : real.x * disp + ((e.x_offset ?? 0) - sent.x) * refToDisp;
+      const rawTop = real.y * disp + ((e.y_offset ?? 0) - sent.y) * refToDisp;
+      const w = Math.min(Math.max(real.w * disp, 14), displayWidth);
+      const h = Math.min(Math.max(real.h * disp, 10), displayHeight);
+      let left = Math.min(Math.max(rawLeft, 0), displayWidth - w);
+      let top = Math.min(Math.max(rawTop, 0), displayHeight - h);
+      const off = rawLeft < -w / 2 || rawTop < -h / 2 || rawLeft > displayWidth - w / 2 || rawTop > displayHeight - h / 2;
+      if (off) {
+        const edge = rawTop > displayHeight - h / 2 ? 'b' : rawTop < -h / 2 ? 't' : rawLeft < 0 ? 'l' : 'r';
+        const inset = pile[edge] ?? 0;
+        pile[edge] = inset + (edge === 'b' || edge === 't' ? h : w) + 3;
+        if (edge === 'b') top = Math.max(0, top - inset);
+        else if (edge === 't') top = Math.min(displayHeight - h, top + inset);
+        else if (edge === 'l') left = Math.min(displayWidth - w, left + inset);
+        else left = Math.max(0, left - inset);
+      }
+      handles[key] = {
+        left, top, w, h, band,
+        snap: off ? { x: band ? 0 : Math.round((left - rawLeft) / refToDisp), y: Math.round((top - rawTop) / refToDisp) } : undefined,
+      };
+    }
+  }
+  const offSnaps: Record<string, { x: number; y: number }> = {};
+  for (const [k, hd] of Object.entries(handles)) if (hd.snap) offSnaps[k] = hd.snap;
+  const offCount = Object.keys(offSnaps).length;
 
   // The real renderer auto-stacks every non-band badge sharing one anchor
   // corner into a column (engine/overlay_render.py groups by anchor, then
@@ -919,23 +975,14 @@ function OverlayCanvas({
             // far the offset moved since that render. Operator-reported
             // 2026-11-15: the approximate chips sat inside the poster while
             // the real stacked badges had been pushed off its bottom edge.
-            const real = livePreview?.layout?.find((l) => l.key === key);
-            if (real) {
-              const disp = displayWidth / naturalSize.w;
-              const sent = livePreview?.sentOffsets?.[key] ?? { x: e.x_offset ?? 0, y: e.y_offset ?? 0 };
-              const band = isBandKey(key, draftStyle);
-              let left = band ? 0 : real.x * disp + ((e.x_offset ?? 0) - sent.x) * scale;
-              let top = real.y * disp + ((e.y_offset ?? 0) - sent.y) * scale;
-              const w = Math.max(real.w * disp, 14);
-              const h = Math.max(real.h * disp, 10);
-              // Keep a handle grabbable even when the badge is off the poster.
-              const off = left < -w / 2 || top < -h / 2 || left > displayWidth - w / 2 || top > displayHeight - h / 2;
-              left = Math.min(Math.max(left, 0), displayWidth - w);
-              top = Math.min(Math.max(top, 0), displayHeight - h);
+            const hd = handles[key];
+            if (hd) {
+              const { left, top, w, h, band } = hd;
+              const off = !!hd.snap;
               return (
                 <div
                   key={key}
-                  onPointerDown={onChipPointerDown(key, 'move')}
+                  onPointerDown={onChipPointerDown(key, 'move', hd.snap)}
                   onPointerMove={onChipPointerMove}
                   onPointerUp={onChipPointerUp}
                   style={{
@@ -1028,6 +1075,12 @@ function OverlayCanvas({
             );
           })}
         </div>
+        {offCount > 0 && (
+          <div style={{ marginTop: 6, fontSize: 'var(--text-xs)', color: 'var(--danger)', maxWidth: displayWidth }}>
+            {offCount} badge{offCount > 1 ? 's are' : ' is'} off the poster.{' '}
+            <button className="btn btn-ghost" onClick={() => onSnapAll(offSnaps)}>Bring back onto poster</button>
+          </div>
+        )}
       </div>
 
       <div>
