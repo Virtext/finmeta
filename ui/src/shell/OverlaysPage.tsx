@@ -120,14 +120,15 @@ const ANCHOR_CSS: Record<string, React.CSSProperties> = {
 // overlay_render.py: `kind = "band" if el.full_width else "text"`) instead
 // of a small positioned badge -- x_offset is then completely ignored
 // server-side (bands always span the whole poster width; only y_offset,
-// nudging it away from its edge, does anything). `ribbon` has no UI
-// toggle to turn this off (always a band); status/trending_rank default
+// nudging it away from its edge, does anything). `ribbon` is NOT one: the
+// renderer draws it as a normal positioned pill (kind "text"), so treating
+// it as a band locked its sideways drag and drew it full width (operator-
+// reported 2026-11-15). status/trending_rank default
 // to it (OverlaysEditor.tsx's "Full-width bar" checkbox, `full_width !==
 // false`). Operator-reported 2026-11-10: dragging these left/right in the
 // canvas visibly moved the chip but had NO effect on the real poster --
 // pure placebo -- so the chip should not offer that drag at all.
 function isBandKey(key: string, draftStyle: Record<string, DocElementState>): boolean {
-  if (key === 'ribbon') return true;
   if (key === 'status' || key === 'trending_rank') return draftStyle[key]?.full_width !== false;
   return false;
 }
@@ -994,7 +995,7 @@ function OverlayCanvas({
                   }}
                   title={`${ELEMENT_LABELS[key] ?? key}${off ? ' — OFF THE POSTER, drag it back' : ''} — drag to move`}
                 >
-                  {off && <span style={{ padding: '0 3px', textShadow: '0 0 2px #000' }}>{ELEMENT_LABELS[key] ?? key} (off poster)</span>}
+                  <span style={{ padding: '0 3px', textShadow: '0 0 2px #000, 0 0 2px #000' }}>{ELEMENT_LABELS[key] ?? key}{off ? ' (off poster)' : ''}</span>
                   {resizeHandle}
                 </div>
               );
