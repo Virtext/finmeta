@@ -227,7 +227,7 @@ def _do_apply(context: AppContext, run_id: str, cfg: Config,
         jf.close()
         try:
             tmdb.close()
-        except Exception:
+        except Exception:  # noqa: S110 -- best-effort connection close, nothing to act on
             pass
 
 
@@ -295,6 +295,7 @@ def _do_scan(context: AppContext, run_id: str, cfg: Config,
                 log(db, run_id, "info", f"scan {name}: skipped ({res.skipped_reason})")
                 continue
             scan_store.bump_items_scanned(db, run_id, res.items_scanned)
+            scan_store.save_scan_stats(db, run_id, name, res.stats)
             scanned += res.items_scanned
             findings += res.findings
             log(db, run_id, "info",
@@ -304,7 +305,7 @@ def _do_scan(context: AppContext, run_id: str, cfg: Config,
         if tmdb is not None:
             try:
                 tmdb.close()
-            except Exception:
+            except Exception:  # noqa: S110 -- best-effort connection close, nothing to act on
                 pass
         # One client instance is shared across every tvdbId from the same
         # server, so dedupe before closing (same as build_plan does).
@@ -312,7 +313,7 @@ def _do_scan(context: AppContext, run_id: str, cfg: Config,
                              for c, r in sonarr_index.values()}.values():
             try:
                 client.close()
-            except Exception:
+            except Exception:  # noqa: S110 -- best-effort connection close, nothing to act on
                 pass
 
     scan_store.finish_scan(db, run_id, status)
@@ -342,7 +343,7 @@ def _worker(context: AppContext, run_id: str, action: str,
         try:
             finish_run(context.db_path, run_id, "error")
             log(context.db_path, run_id, "error", context.redact(f"run crashed: {exc}"))
-        except Exception:
+        except Exception:  # noqa: S110 -- last-resort guard; the crash itself is already logged above
             pass
     finally:
         context.release_run(run_id)

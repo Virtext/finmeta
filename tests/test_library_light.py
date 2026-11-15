@@ -98,7 +98,9 @@ def test_light_list_has_names_only_no_diff_or_tmdb_fields(client):
     body = r.json()
     assert body["library"] == "Movies"
     assert [i["item_id"] for i in body["items"]] == ["m1", "m2"]
-    assert body["items"][0] == {"item_id": "m1", "item_name": "Movie One", "media_type": "movie"}
+    assert body["items"][0] == {
+        "item_id": "m1", "item_name": "Movie One", "media_type": "movie", "poster_tag": None,
+    }
     assert "diff" not in body["items"][0]
     assert "summary" not in body
 
@@ -146,8 +148,9 @@ def test_limit_and_offset_reach_jellyfin_and_window_the_page(client, context):
     assert last["limit"] == 1
     assert last["start_index"] == 1
     assert last["include_item_types"] == ["Movie", "Series"]
-    # Minimal fields: never Path/ProviderIds/Overview on this endpoint.
-    assert last["fields"] is None
+    # Minimal fields: only ImageTags (needed for the poster-grid cache-busting
+    # tag, 2026-11-15) -- never Path/ProviderIds/Overview on this endpoint.
+    assert last["fields"] == "ImageTags"
 
 
 def test_has_more_true_when_a_further_page_exists(client, context):
@@ -181,6 +184,27 @@ def test_never_an_unbounded_items_call(client, context):
     for call in jf.get_items_page_calls:
         assert call["limit"] is not None
         assert call["include_item_types"] == ["Movie", "Series"]
+
+
+# ---------------------------------------------------------------------------
+# poster_tag (2026-11-15): Jellyfin's own Primary ImageTag, threaded through
+# so the poster grid's cached image URL changes whenever the image does --
+# see routes_core.py's item_image docstring for why this matters.
+# ---------------------------------------------------------------------------
+
+def test_poster_tag_passed_through_from_jellyfins_image_tags(client, context):
+    jf = context.make_jellyfin()
+    jf._items["lib-movies"][0].image_tags = {"Primary": "abc123"}
+    r = client.get("/api/libraries/Movies/items/light")
+    body = r.json()
+    assert body["items"][0]["item_id"] == "m1"
+    assert body["items"][0]["poster_tag"] == "abc123"
+
+
+def test_poster_tag_is_none_when_jellyfin_reports_no_primary_image(client):
+    r = client.get("/api/libraries/Movies/items/light")
+    body = r.json()
+    assert body["items"][1]["poster_tag"] is None
 
 
 def test_jellyfin_502_mapping_still_works(context, client):

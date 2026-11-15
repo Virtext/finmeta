@@ -6,6 +6,7 @@ import type {
   FindingsResp, HelpResp, JobResp, LatestScanResp, LibraryView, ScanFinding, Severity,
 } from '../types';
 import HelpIcon from './HelpIcon';
+import StatsPanel from './StatsPanel';
 
 interface Props {
   libraries: LibraryView[];
@@ -473,6 +474,8 @@ export default function HealthPage({ libraries, dryRun, onBack, onPickArtwork }:
                 )}
               </div>
             </div>
+
+            <StatsPanel scanId={scan.scan_id} scanStatus={scan.status} />
 
             {(groupFilter || severityFilter || libFilter) && (
               <div className="health-filters muted">

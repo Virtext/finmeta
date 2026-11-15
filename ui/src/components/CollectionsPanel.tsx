@@ -7,6 +7,7 @@ import { getCollectionPresets, getConfig, putConfig, startRun, getJob,
          type CollectionPresetInfo } from '../api';
 import type { JobResp } from '../types';
 import * as YAML from 'js-yaml';
+import CustomCollections from './CustomCollections';
 
 const TERMINAL = new Set(['ok', 'partial', 'error', 'refused']);
 
@@ -133,6 +134,8 @@ export default function CollectionsPanel() {
         {charts.map((p) => <Row key={p.id} p={p} />)}
       </div>
 
+      <CustomCollections />
+
       {presets.length === 0 && !err && (
         <p className="field-hint muted">Loading preset catalog…</p>
       )}
@@ -141,8 +144,9 @@ export default function CollectionsPanel() {
 
       <h4>Run now</h4>
       <p className="field-hint muted">
-        The toggles above only take effect on a full, all-libraries plan/apply — not a
-        single-library or single-item one. Use this to run one now instead of waiting for a
+        Presets, and full sync of your own collections, only happen on a full, all-libraries
+        plan/apply — not a single-library or single-item one (those only add to your
+        collections). Use this to run one now instead of waiting for a
         schedule.
       </p>
       <div className="run-controls">

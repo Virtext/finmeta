@@ -27,6 +27,7 @@ from finmeta.engine.jobs import get_job_log, get_run, list_runs
 
 from finmeta.api.deps import get_ctx
 from finmeta.api.run_service import submit_run
+from finmeta.api.scheduler import poster_rotation_job
 from finmeta.api.state import AppContext
 
 router = APIRouter(prefix="/api", tags=["runs"])
@@ -58,6 +59,21 @@ def start_run(body: RunRequest, ctx: AppContext = Depends(get_ctx)) -> dict:
     if err:
         raise HTTPException(status_code=409, detail=err)
     return {"job_id": run_id, "status": "running", "action": body.action}
+
+
+@router.post("/libraries/{library}/poster-rotation/run")
+def poster_rotation_run(library: str, ctx: AppContext = Depends(get_ctx)) -> dict:
+    """Manual "Run now" trigger for a library's S9d6 poster rotation
+    (ProfilesPanel.tsx). Calls the exact same poster_rotation_job the cron
+    schedule calls (scheduler.py) -- same guard conditions (enabled/dry_run/
+    artwork.poster), same reshuffle+submit_run+queue_webhook_item chaining.
+    Returns quickly: ranking + submitting/queuing a handful of applies, not a
+    long-running job itself -- poll the returned run_id via GET /api/jobs/{id}
+    like any other run, when present.
+    """
+    if library not in ctx.config.libraries:
+        raise HTTPException(status_code=404, detail=f"unknown library {library!r}")
+    return poster_rotation_job(ctx, library)
 
 
 @router.get("/logs/export", response_class=PlainTextResponse)

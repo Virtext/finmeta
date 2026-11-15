@@ -16,11 +16,14 @@ from __future__ import annotations
 
 import hashlib
 import io
+import logging
 import time
 from pathlib import Path
 from typing import Callable, List, Mapping, Optional, Sequence, Union
 
 from PIL import Image, ImageDraw, ImageFont
+
+logger = logging.getLogger(__name__)
 from pydantic import BaseModel, ConfigDict
 
 from finmeta.config.models import OverlayStyle
@@ -215,7 +218,7 @@ def render_poster(
     if stack_badges:
         sizes = [_badge_size(b, font, style) for b in stack_badges]
         corners = _positions(sizes, style, base.width, base.height)
-        for badge, (x, y) in zip(stack_badges, corners):
+        for badge, (x, y) in zip(stack_badges, corners, strict=True):
             b_bg = _parse_color(badge.bg) if isinstance(badge, TextBadge) and badge.bg else bg
             b_fg = _parse_color(badge.fg) if isinstance(badge, TextBadge) and badge.fg else fg
             _draw_badge(base, badge, font, style, x, y, b_bg, b_fg)
@@ -227,7 +230,7 @@ def render_poster(
             heights.append((tb[3] - tb[1]) + _BAND_PAD_Y)
         top = style.position.startswith("top")
         y = 0 if top else base.height
-        for badge, h in zip(band_badges, heights):
+        for badge, h in zip(band_badges, heights, strict=True):
             if not top:
                 y -= h
             b_bg = _parse_color(badge.bg) if badge.bg else bg
@@ -433,6 +436,7 @@ def _live_overlay_digests(config_dir: Path) -> set[str]:
         try:
             plan = WritePlan.from_json(p.read_text())
         except Exception:
+            logger.debug("prune_overlay_cache: couldn't parse %s, skipping", p, exc_info=True)
             continue
         for item in plan.items:
             for fw in item.files:

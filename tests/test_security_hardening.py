@@ -548,3 +548,15 @@ class TestIsPublicFailsClosed:
     def test_is_public(self, path, expected):
         from finmeta.api.app import _is_public
         assert _is_public(path) is expected
+
+
+# ---------------------------------------------------------------------------
+# FINMETA_AUTH=off must be loud (CLAUDE.md §5)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("auth, warned", [(False, True), (True, False)])
+def test_auth_off_logs_a_startup_warning(cfg_dir, monkeypatch, caplog, auth, warned):
+    with caplog.at_level("WARNING", logger="finmeta.api.app"):
+        with _client(cfg_dir, monkeypatch, auth=auth):
+            pass  # entering the client runs the lifespan startup
+    assert any("authentication is DISABLED" in r.getMessage() for r in caplog.records) is warned

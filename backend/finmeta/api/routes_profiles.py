@@ -38,7 +38,7 @@ def profile_yaml(body: ProfileYamlIn, name: str, ctx: AppContext = Depends(get_c
     try:
         doc = _yaml.safe_load(body.yaml)
     except _yaml.YAMLError as exc:
-        raise HTTPException(status_code=422, detail=f"invalid YAML: {exc}")
+        raise HTTPException(status_code=422, detail=f"invalid YAML: {exc}") from exc
     if doc is None:
         doc = {}
     if not isinstance(doc, dict):

@@ -136,7 +136,7 @@ def delete_pack(name: str, ctx: AppContext = Depends(get_ctx)):
         try:
             ctx.put_config(new_yaml_text)
         except ConfigError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return {"ok": True, "name": name}
 

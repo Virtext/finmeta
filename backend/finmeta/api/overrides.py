@@ -7,6 +7,7 @@ applied on top of the computed WritePlan so the plan/preview reflects them.
 from __future__ import annotations
 
 import hashlib
+import logging
 import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
@@ -14,6 +15,8 @@ from typing import Any, Dict, List, Optional, Sequence
 from finmeta.engine import candidate_ref
 from finmeta.engine.plan import FileWrite, ItemPlan, WritePlan
 from finmeta.sqlite_conn import shared_connection
+
+logger = logging.getLogger(__name__)
 
 #: Every table this store owns, with its primary-key columns. The backup
 #: bundle (SPEC_S11 §D1) walks this, so a new table cannot be silently left
@@ -336,6 +339,8 @@ def apply_overrides(plan: WritePlan, overrides_by_item: Dict[str, List[Dict[str,
             try:
                 sha = _content_sha256(ref, allowed_roots=allowed_roots)
             except Exception:
+                logger.debug("apply_overrides: content hash failed for ref %r, skipping", ref,
+                             exc_info=True)
                 continue
             if existing is not None:
                 existing.source_ref = ref

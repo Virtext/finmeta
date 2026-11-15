@@ -15,11 +15,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
+
+logger = logging.getLogger(__name__)
 
 from pydantic import BaseModel, Field
 
@@ -195,6 +198,7 @@ def _first_touch_index(config_dir: Path) -> dict:
         try:
             data = json.loads(mp.read_text())
         except Exception:
+            logger.debug("couldn't parse %s, skipping", mp, exc_info=True)
             continue
         epoch = run_epoch(name)
         for entry in data.get("files") or []:

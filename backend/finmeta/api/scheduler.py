@@ -87,7 +87,7 @@ def _libraries_job(context: AppContext, action: str, libraries: list,
         logger.info("schedule queued %s/%s behind the active run", action, lib)
 
 
-def _poster_rotation_job(context: AppContext, library: str) -> None:
+def poster_rotation_job(context: AppContext, library: str) -> dict:
     """S9d6: reshuffle+reapply the poster of a library's top-rated items.
 
     Submits the first item directly and queues the rest on the same
@@ -95,35 +95,44 @@ def _poster_rotation_job(context: AppContext, library: str) -> None:
     ``pop_webhook_item``, drained one at a time as each run's worker thread
     finishes) -- reuses the existing single-run-slot chaining instead of a
     bespoke wait/poll loop.
+
+    Returns a result dict instead of ``None`` (added so the manual "Run now"
+    trigger, ``routes_runs.poster_rotation_run``, has something to report to
+    the UI) -- the cron registration below still ignores the return value,
+    unchanged. Public (no leading underscore) since it now has a second,
+    external caller beyond this module's own cron job.
     """
     cfg = context.config
     lib_cfg = cfg.libraries.get(library)
     if lib_cfg is None or not lib_cfg.enabled or not lib_cfg.poster_rotation.enabled:
-        return
+        return {"ok": False, "reason": "library not found, disabled, or poster rotation is off"}
     if cfg.dry_run:
         logger.warning("poster rotation skipped for %s: dry_run is true", library)
-        return
+        return {"ok": False, "reason": "dry_run is true"}
     if not lib_cfg.artwork.poster:
         logger.warning("poster rotation skipped for %s: artwork.poster is off", library)
-        return
+        return {"ok": False, "reason": "artwork.poster is off"}
     jf = context.make_jellyfin(cfg)
     item_types = ["Movie"] if lib_cfg.type == "movies" else ["Series"]
     item_ids = top_rated_item_ids(jf, library, lib_cfg.poster_rotation.item_count, item_types)
     if not item_ids:
         logger.info("poster rotation: no rated items found for %s", library)
-        return
+        return {"ok": True, "rotated": 0, "reason": "no rated items found"}
     for item_id in item_ids:
         context.overrides.increment_reshuffle(item_id, "poster")
     first, rest = item_ids[0], item_ids[1:]
     run_id, err = submit_run(context, "apply", item_id=first)
+    queued = list(rest)
     if run_id:
         logger.info("poster rotation: apply started for %s (run %s)", first, run_id)
     else:
         context.queue_webhook_item(first)
+        queued = [first] + queued
         logger.info("poster rotation: run busy (%s), queued %s", err, first)
     for item_id in rest:
         context.queue_webhook_item(item_id)
     logger.info("poster rotation: rotated %d item(s) in %s", len(item_ids), library)
+    return {"ok": True, "rotated": len(item_ids), "run_id": run_id, "queued": queued}
 
 
 def _build_jobs(context: AppContext, scheduler: BackgroundScheduler) -> None:
@@ -171,7 +180,7 @@ def _build_jobs(context: AppContext, scheduler: BackgroundScheduler) -> None:
         if not rot.enabled:
             continue
         scheduler.add_job(
-            _poster_rotation_job,
+            poster_rotation_job,
             trigger=CronTrigger.from_crontab(rot.cron),
             args=[context, lib_name],
             id=f"poster-rotation-{lib_name}",

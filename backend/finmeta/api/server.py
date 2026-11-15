@@ -37,7 +37,7 @@ def _configure_logging() -> None:
 def main() -> None:
     _configure_logging()
     config_path = os.environ.get("FINMETA_CONFIG", DEFAULT_CONFIG_PATH)
-    host = os.environ.get("FINMETA_HOST", "0.0.0.0")
+    host = os.environ.get("FINMETA_HOST", "0.0.0.0")  # noqa: S104 -- must be reachable from outside the container
     port = int(os.environ.get("FINMETA_PORT", "8765"))
     app = create_app_from_path(config_path)
     uvicorn.run(app, host=host, port=port, log_level="info")

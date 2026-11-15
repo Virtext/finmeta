@@ -1047,7 +1047,8 @@ def _apply_candidate_overrides(resolved: Dict[str, Any], item_id: str,
                 )
                 overridden.add(kind)
     except Exception:
-        pass
+        logger.debug("_apply_candidate_overrides: overrides.db read failed for item %s, "
+                     "proceeding without overrides", item_id, exc_info=True)
     return overridden
 
 
@@ -1082,7 +1083,8 @@ def _locked_candidates(item_id: str, kinds: List[str], config_dir=None) -> Dict[
                     ref=str(lock["ref"]), lang=None, width=None, height=None, score=0.0,
                 )
     except Exception:
-        pass
+        logger.debug("_locked_candidates: overrides.db read failed for item %s, "
+                     "proceeding without locks", item_id, exc_info=True)
     return out
 
 
@@ -1324,7 +1326,8 @@ def _build_api_actions(
             else:
                 details_cache[ip.tmdb_id] = tmdb.tv_details(ip.tmdb_id, language=language)
         except Exception:
-            pass
+            logger.debug("collection filter: TMDb details fetch failed for tmdb_id=%s",
+                         ip.tmdb_id, exc_info=True)
 
     def _matches(details: Dict[str, Any], flt) -> bool:
         if flt is None:
@@ -1347,24 +1350,39 @@ def _build_api_actions(
                 return False
         return True
 
-    # Collections
+    # Collections. Membership is only fully reconciled ("sync": also removes
+    # members, deletes when empty) on a full all-libraries run with
+    # sync_mode=sync -- a scoped run (one library page, one item) only sees a
+    # subset of the library, so it stays additive ("create") there.
+    full_sync = library_name is None and cfg.sync_mode == "sync"
     for coll in cfg.collections:
         if library_name and coll.library != library_name:
             continue
+        lib = cfg.libraries.get(coll.library)
+        if lib is None or not getattr(lib, "enabled", False):
+            continue  # disabled library: its items aren't in plan_items, don't empty the collection
+        # On a full run plan_items spans every library; scoped runs carry
+        # library=None on older/hand-built ItemPlans, so only filter when set.
+        lib_items = [ip for ip in plan_items if ip.library in (None, coll.library)]
         add_ids: List[str] = []
         if isinstance(coll, ListCollection):
-            for ip in plan_items:
+            for ip in lib_items:
                 if ip.tmdb_id in coll.tmdb_ids:
                     add_ids.append(ip.item_id)
         elif isinstance(coll, FilterCollection):
-            for ip in plan_items:
+            for ip in lib_items:
                 if ip.tmdb_id is None:
                     continue
                 if _matches(details_cache.get(ip.tmdb_id, {}), coll.filter):
                     add_ids.append(ip.item_id)
         elif isinstance(coll, TmdbCollection):
             continue  # v1: skip
-        if add_ids:
+        if full_sync:
+            actions.append(ApiAction(
+                action="sync", kind="collection",
+                name=coll.name, add_ids=add_ids,
+            ))
+        elif add_ids:
             actions.append(ApiAction(
                 action="create", kind="collection",
                 name=coll.name, add_ids=add_ids,
@@ -1609,7 +1627,7 @@ def build_plan(
             ))
     else:
         # All libraries
-        for name, lc in cfg.libraries.items():
+        for name in cfg.libraries:
             jf_lib = jf.get_library(name)
             if jf_lib is None:
                 continue
@@ -1789,7 +1807,7 @@ def build_plan(
     for client, _ in {id(c): (c, r) for c, r in sonarr_index.values()}.values():
         try:
             client.close()
-        except Exception:
+        except Exception:  # noqa: S110 -- best-effort connection close, nothing to act on
             pass
 
     api_actions = _build_api_actions(

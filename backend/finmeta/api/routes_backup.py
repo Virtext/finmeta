@@ -138,7 +138,7 @@ def download_bundle(name: str, ctx: AppContext = Depends(get_ctx)) -> Response:
     try:
         path = safe_bundle_path(_bundles_dir(ctx), name)
     except BundleError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if not path.is_file():
         raise HTTPException(status_code=404, detail=f"no such bundle {name!r}")
     return Response(
@@ -151,7 +151,7 @@ def delete_bundle(name: str, ctx: AppContext = Depends(get_ctx)) -> dict:
     try:
         path = safe_bundle_path(_bundles_dir(ctx), name)
     except BundleError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if not path.is_file():
         raise HTTPException(status_code=404, detail=f"no such bundle {name!r}")
     path.unlink()
@@ -207,11 +207,11 @@ async def _bundle_from_request(request: Request, ctx: AppContext) -> tuple:
         import json
         try:
             payload = json.loads(body)
-        except ValueError:
+        except ValueError as exc:
             raise HTTPException(
                 status_code=422,
                 detail="send the bundle as a zip body (Content-Type: application/zip) "
-                       "or a JSON body naming a stored bundle")
+                       "or a JSON body naming a stored bundle") from exc
         if isinstance(payload, dict):
             name = payload.get("bundle")
             options["mode"] = payload.get("mode", "merge")
@@ -226,7 +226,7 @@ def _load_stored(ctx: AppContext, name: str) -> bytes:
     try:
         path = safe_bundle_path(_bundles_dir(ctx), name)
     except BundleError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if not path.is_file():
         raise HTTPException(status_code=404, detail=f"no such bundle {name!r}")
     return path.read_bytes()
@@ -240,7 +240,7 @@ def _diff_summary(ctx: AppContext, config_text: Optional[str]) -> Dict[str, Any]
         incoming = yaml.safe_load(config_text) or {}
     except yaml.YAMLError as exc:
         raise HTTPException(status_code=422,
-                            detail=f"bundle config.yml is not valid YAML: {exc}")
+                            detail=f"bundle config.yml is not valid YAML: {exc}") from exc
     current = ctx.config.model_dump(mode="json")
     cur_libs = set((current.get("libraries") or {}).keys())
     new_libs = set((incoming.get("libraries") or {}).keys())
@@ -277,7 +277,7 @@ async def inspect_bundle(request: Request,
     try:
         parsed = Bundle(data)
     except BundleError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     try:
         overrides = parsed.overrides
         summary = {
@@ -318,7 +318,7 @@ async def restore_bundle(request: Request,
     try:
         parsed = Bundle(data)
     except BundleError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     restored: Dict[str, Any] = {"config": False, "overrides": {}}
     manifest = dict(parsed.manifest)
@@ -331,7 +331,7 @@ async def restore_bundle(request: Request,
                 # Schema/validation failure: nothing else has been touched.
                 raise HTTPException(
                     status_code=422,
-                    detail=ctx.redact(f"bundle config.yml was rejected: {exc}"))
+                    detail=ctx.redact(f"bundle config.yml was rejected: {exc}")) from exc
             restored["config"] = True
         overrides = parsed.overrides
         if overrides:

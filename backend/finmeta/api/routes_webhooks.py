@@ -48,7 +48,7 @@ logger = logging.getLogger("finmeta.api.webhooks")
 router = APIRouter(prefix="/api", tags=["webhooks"])
 
 #: Not the token itself -- see module docstring.
-_HASH_SECRET_NAME = "jellyfin_webhook_token_hash"
+_HASH_SECRET_NAME = "jellyfin_webhook_token_hash"  # noqa: S105 -- a field name, not a secret
 
 #: Buffer between a webhook ItemAdded hit and actually running the apply.
 #: Confirmed live 2026-11-05: Jellyfin's own LibraryMonitor (real-time file

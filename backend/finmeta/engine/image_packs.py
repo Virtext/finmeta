@@ -344,8 +344,8 @@ def load_packs(config_dir: Path) -> List[PackInfo]:
                                 f"{cat_name}/{key} is {im.width}x{im.height}px -- looks "
                                 "poster-sized; badges should be a tightly-cropped icon "
                                 f"(under {_POSTER_LIKE_HEIGHT}px tall), not a full poster canvas")
-                except Exception:
-                    pass   # unreadable/corrupt image: resolve_pack_image already treats it as missing
+                except Exception:  # noqa: S110 -- unreadable/corrupt image: resolve_pack_image already treats it as missing
+                    pass
         out.append(PackInfo(
             name=pdef.name, description=pdef.description,
             categories=pdef.categories, missing_images=missing,

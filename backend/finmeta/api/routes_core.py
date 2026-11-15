@@ -148,7 +148,7 @@ def jellyfin_libraries(ctx: AppContext = Depends(get_ctx)) -> dict:
                 "overlay_profile": getattr(lc, "overlay_profile", None) if lc else None,
             })
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Jellyfin library list failed: {exc}")
+        raise HTTPException(status_code=502, detail=f"Jellyfin library list failed: {exc}") from exc
     finally:
         jf.close()
     return {"libraries": libs}
@@ -203,17 +203,29 @@ def library_items_light(
         else:
             page = jf.get_items_page(
                 parent_id=jf_lib.item_id, recursive=True,
-                include_item_types=["Movie", "Series"], fields=None,
+                include_item_types=["Movie", "Series"], fields="ImageTags",
                 limit=limit, start_index=offset, search_term=search,
             )
             page_items, total = page.items, page.total_record_count
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=_jellyfin_502_detail(exc))
+        raise HTTPException(status_code=502, detail=_jellyfin_502_detail(exc)) from exc
     finally:
         jf.close()
     light = [
         {"item_id": it.id, "item_name": it.name,
-         "media_type": "movie" if it.type == "Movie" else "tvshow"}
+         "media_type": "movie" if it.type == "Movie" else "tvshow",
+         # Jellyfin's own Primary ImageTag -- appended to the poster-grid
+         # image URL (itemImageUrl) as a cache-buster. Added 2026-11-15:
+         # GET /items/{id}/image serves `Cache-Control: public, max-age=3600`
+         # on a URL with no version info at all, which was fine while nothing
+         # in the app changed an item's own current image bytes without
+         # Jellyfin also changing which image is shown -- "Remove overlays"
+         # and poster rotation's "Run now" both broke that assumption (same
+         # image slot, new bytes), so the browser kept serving an hour-old
+         # cached poster after a successful apply. The real Jellyfin ImageTag
+         # changes whenever the image does, so threading it into the URL
+         # fixes the cache key instead of just shortening the window.
+         "poster_tag": it.image_tags.get("Primary")}
         for it in page_items
     ]
     overlay_elements = _profile_overlay_names(lib_cfg, ctx.config)
@@ -261,7 +273,7 @@ def library_items(
         # of titles doesn't block on building a plan for every one of them.
         plan: WritePlan = ctx.get_plan(library=name, limit=limit, offset=offset)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=_jellyfin_502_detail(exc))
+        raise HTTPException(status_code=502, detail=_jellyfin_502_detail(exc)) from exc
     items = [_item_view(ip) for ip in plan.items]
     # S9d4c Fase A step 3: single source of truth for "does this library get
     # overlays" (profile wins over the deprecated list, auto-migration
@@ -307,7 +319,7 @@ def item_plan(item_id: str, library: Optional[str] = None,
     try:
         plan = ctx.get_plan(library=library, item_id=item_id)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=_jellyfin_502_detail(exc))
+        raise HTTPException(status_code=502, detail=_jellyfin_502_detail(exc)) from exc
     item = next((ip for ip in plan.items if ip.item_id == item_id), None)
     if item is None:
         # unmatched or not in scope
@@ -369,7 +381,7 @@ def item_image(item_id: str, kind: str = Query(default="poster"),
     try:
         result = jf.get_image_bytes(item_id, image_type, max_width=max_width)
     except JellyfinError as exc:
-        raise HTTPException(status_code=502, detail=f"jellyfin error: {exc}")
+        raise HTTPException(status_code=502, detail=f"jellyfin error: {exc}") from exc
     if result is None:
         raise HTTPException(status_code=404, detail=f"no {kind} image for {item_id}")
     data, content_type = result

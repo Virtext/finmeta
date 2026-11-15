@@ -1318,7 +1318,11 @@ class Config(_Strict):
     @model_validator(mode="after")
     def _check_references(self) -> "Config":
         libs = set(self.libraries)
+        seen_names: set = set()
         for c in self.collections:
+            if c.name in seen_names:
+                raise ValueError(f"duplicate collection name {c.name!r}")
+            seen_names.add(c.name)
             if c.library not in libs:
                 raise ValueError(f"collection {c.name!r} references unconfigured library {c.library!r}")
         for p in self.playlists:
