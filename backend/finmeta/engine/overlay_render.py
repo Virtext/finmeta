@@ -327,6 +327,18 @@ def _logo_pack_list(logo_pack: str | Sequence[str]) -> List[str]:
     return [p for p in seq if p and p != "none"]
 
 
+# Stand-in values used only to size badges an item has no data for, so the
+# home layout (see _render_overlay_image) is the same for every item. Never
+# drawn. network/status are left out: their size needs a fetched logo / a
+# TV-status lookup.
+_GHOST_VALUES: Dict[str, Tuple[str, str]] = {
+    **{k: (f"rating_{k}", "8.5") for k in ("imdb", "rt_critic", "rt_audience", "metacritic",
+                                            "tmdb", "letterboxd", "trakt")},
+    "resolution": ("resolution", "4K"), "hdr": ("hdr", "HDR10"), "audio": ("audio", "Atmos"),
+    "trending_rank": ("trending_rank", "#1"),
+}
+
+
 def _collect_placed(
     doc: OverlayStyleDoc, values: Mapping[str, Optional[str]],
     config_dir: Optional[Path] = None,
@@ -530,20 +542,32 @@ def _render_overlay_image(poster_bytes: bytes, style_doc_json: Mapping,
     band_placed = [p for p in placed if p.kind == "band"]
     placed = [p for p in placed if p.kind != "band"]
 
-    # Each badge sits at its OWN spot: anchor corner + its offset, never a
-    # slot in a stack built from whichever other badges happen to have data
-    # (operator decision 2026-11-15: toggling "Simulate all badges", or an
-    # item missing a rating, used to move every other badge). Overlaps are
-    # then resolved by pushing a badge just past the one it hits (down, or up
-    # on bottom rows), so untouched badges sharing a corner still stack, and
-    # everything is clamped fully inside the poster. Badges the user moved
-    # (non-zero offset) are placed first, so a newly shown badge never
-    # displaces them.
+    # Layout (operator decisions 2026-11-15):
+    # 1. A "home" layout is built as if EVERY enabled badge had data (what
+    #    "Simulate all badges" shows): each badge at anchor + its offset, moved
+    #    badges placed first, an overlapping one pushed just past the badge it
+    #    hits (up on bottom rows, else down), all clamped inside the poster.
+    #    So a badge's spot never depends on which other badges have data.
+    # 2. Badges that sit edge to edge in that home layout form a stack; when
+    #    some of a stack have no data, the rest close up toward the nearer
+    #    poster edge (top half -> up, bottom half -> down) instead of leaving
+    #    holes.
     margin = max(round(doc.margin * poster_scale), 0)
     gap = lambda size: max(size // 6, 4)
 
+    drawn = {p.el_key for p in placed}
+    ghost_vals = {vk: v for key, (vk, v) in _GHOST_VALUES.items()
+                  if key not in drawn and (doc.elements.get(key) is not None and doc.elements[key].enabled)}
+    ghosts: List[_Placed] = []
+    if ghost_vals:
+        ghost_keys = {k for k, (vk, _v) in _GHOST_VALUES.items() if vk in ghost_vals}
+        ghosts = [_scale_placed(g, poster_scale) for g in _collect_placed(
+            doc, ghost_vals, config_dir, assets_root, logo_pack=(logo_pack or "none"),
+            packs_profile=packs_profile, sample_keys=ghost_keys)
+            if g.el_key in ghost_keys and g.kind != "band"]
+
     entries = []
-    for p in placed:
+    for p in placed + ghosts:
         # NOTE: _normalize_anchor returns (row, col); keep that order everywhere below.
         row, col = _normalize_anchor(p.anchor)
         if col is None or row is None:
@@ -556,17 +580,28 @@ def _render_overlay_image(poster_bytes: bytes, style_doc_json: Mapping,
         (-1 if e[0] == "bottom" else 1) * ELEMENT_KEYS.index(e[2].el_key),
         e[2].weight))
 
+    homes = []   # (placed, font, x, y, w, h, desired_x, desired_y)
     taken: List[Tuple[int, int, int, int]] = []
     for row, col, p in entries:
         fnt = font(p.size)
         w, h = _badge_size(p, fnt)
-        x = int(round(x_origin(col, margin, pw, w) + p.x_off))
-        y = int(round(y_origin(row, margin, ph, h) + p.y_off))
-        x, y = _free_spot(x, y, w, h, pw, ph, taken, gap(p.size), up=(row == "bottom"))
+        dx = int(round(x_origin(col, margin, pw, w) + p.x_off))
+        dy = int(round(y_origin(row, margin, ph, h) + p.y_off))
+        x, y = _free_spot(dx, dy, w, h, pw, ph, taken, gap(p.size), up=(row == "bottom"))
         taken.append((x, y, w, h))
-        _draw_badge(work, p, fnt, w, h, x, y)
+        homes.append((p, fnt, x, y, w, h, dx, dy))
+
+    final_y = _close_stack_gaps(
+        [(x, y, w, h, gap(p.size), p.el_key in drawn) for p, _f, x, y, w, h, _dx, _dy in homes], ph)
+    for (p, fnt, x, y, w, h, dx, dy), fy in zip(homes, final_y, strict=True):
+        if p.el_key not in drawn:
+            continue
+        _draw_badge(work, p, fnt, w, h, x, fy)
         if layout is not None:
-            layout.append({"key": p.el_key, "x": x, "y": y, "w": w, "h": h})
+            # push_*: home minus where the offset alone put it (natural px);
+            # the Studio folds it into the offset so what you see is saved.
+            layout.append({"key": p.el_key, "x": x, "y": fy, "w": w, "h": h,
+                           "push_x": x - dx, "push_y": y - dy})
 
     if band_placed:
         band_placed = sorted(band_placed, key=lambda q: ELEMENT_KEYS.index(q.el_key))
@@ -662,6 +697,53 @@ def render_overlay_jpeg(poster_bytes: bytes, style_doc_json: Mapping,
     buf = io.BytesIO()
     work.convert("RGB").save(buf, format="JPEG", quality=quality)
     return buf.getvalue()
+
+
+def _close_stack_gaps(boxes: Sequence[Tuple[int, int, int, int, int, bool]], ph: int) -> List[int]:
+    """Final y per home box ``(x, y, w, h, gap, drawn)``. Boxes that overlap
+    horizontally and sit within a gap or two of each other vertically form a
+    stack; its drawn boxes are re-packed in order toward the nearer poster
+    edge, so a missing badge leaves no hole. Lone boxes keep their y."""
+    n = len(boxes)
+    parent = list(range(n))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for i in range(n):
+        xi, yi, wi, hi, gi, _ = boxes[i]
+        for j in range(i + 1, n):
+            xj, yj, wj, hj, gj, _ = boxes[j]
+            if not (xi < xj + wj and xj < xi + wi):
+                continue
+            space = max(yj - (yi + hi), yi - (yj + hj))
+            if space <= 2 * max(gi, gj):
+                parent[find(i)] = find(j)
+    out = [b[1] for b in boxes]
+    stacks: Dict[int, List[int]] = {}
+    for i in range(n):
+        stacks.setdefault(find(i), []).append(i)
+    for members in stacks.values():
+        if len(members) < 2 or all(boxes[i][5] for i in members):
+            continue
+        members.sort(key=lambda i: boxes[i][1])
+        top = min(boxes[i][1] for i in members)
+        bottom = max(boxes[i][1] + boxes[i][3] for i in members)
+        drawn = [i for i in members if boxes[i][5]]
+        if (top + bottom) / 2 < ph / 2:
+            cursor = top
+            for i in drawn:
+                out[i] = cursor
+                cursor += boxes[i][3] + boxes[i][4]
+        else:
+            cursor = bottom
+            for i in reversed(drawn):
+                out[i] = cursor - boxes[i][3]
+                cursor = out[i] - boxes[i][4]
+    return out
 
 
 def _free_spot(x: int, y: int, w: int, h: int, pw: int, ph: int,

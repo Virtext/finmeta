@@ -127,3 +127,44 @@ def test_badge_positions_do_not_depend_on_which_other_badges_have_data():
     few = where({"rating_imdb": "8.1", "rating_tmdb": "7.0"})
     many = where({"rating_imdb": "8.1", "rating_tmdb": "7.0", "rating_metacritic": "80", "resolution": "4K"})
     assert few["imdb"] == many["imdb"] and few["tmdb"] == many["tmdb"]
+
+
+def _layout(doc, vals, size=(1000, 1500)):
+    import io
+
+    from PIL import Image
+
+    poster = io.BytesIO()
+    Image.new("RGB", size, "black").save(poster, format="JPEG")
+    lay: list = []
+    overlay_render.render_overlay_png(poster.getvalue(), doc, values=vals, layout=lay)
+    return {e["key"]: e for e in lay}
+
+
+ALL3 = {"rating_imdb": "8", "rating_metacritic": "7", "rating_tmdb": "6"}
+ENDS = {"rating_imdb": "8", "rating_tmdb": "6"}
+
+
+def test_stack_with_a_missing_badge_closes_up_toward_the_nearer_edge():
+    # Operator 2026-11-15: three stacked badges where only the top and bottom
+    # have data must close up toward the nearest top/bottom edge, no hole.
+    els = {k: {"enabled": True} for k in ("imdb", "metacritic", "tmdb")}
+    top_all, top = _layout({"base_position": "top_left", "elements": els}, ALL3), \
+        _layout({"base_position": "top_left", "elements": els}, ENDS)
+    assert top["imdb"]["y"] == top_all["imdb"]["y"]
+    assert top["tmdb"]["y"] == top_all["metacritic"]["y"]          # moved up into the hole
+    bot_all, bot = _layout({"base_position": "bottom_left", "elements": els}, ALL3), \
+        _layout({"base_position": "bottom_left", "elements": els}, ENDS)
+    assert bot["tmdb"]["y"] == bot_all["tmdb"]["y"]
+    # moved down into the hole (bottom edges line up; badge heights differ)
+    assert bot["imdb"]["y"] + bot["imdb"]["h"] == bot_all["metacritic"]["y"] + bot_all["metacritic"]["h"]
+
+
+def test_layout_reports_the_push_the_studio_folds_into_the_offset():
+    # Two badges dropped on one spot: the second is pushed clear, and the
+    # layout says by how much so the Studio can save where it is really drawn.
+    els = {"imdb": {"enabled": True, "x_offset": 300, "y_offset": 300},
+           "metacritic": {"enabled": True, "x_offset": 300, "y_offset": 300}}
+    both = _layout({"base_position": "top_left", "elements": els}, {"rating_imdb": "8", "rating_metacritic": "7"})
+    assert both["imdb"]["push_y"] == 0 and both["metacritic"]["push_y"] > 0
+    assert both["metacritic"]["y"] >= both["imdb"]["y"] + both["imdb"]["h"]
