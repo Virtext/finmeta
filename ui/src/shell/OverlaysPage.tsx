@@ -547,7 +547,7 @@ export function OverlaysPage(): React.ReactElement {
     if (mode === 'move' && snap) updateElement(key, { x_offset: startOffX, y_offset: startOffY });
     dragRef.current = {
       key, mode, startX: e.clientX, startY: e.clientY,
-      startOffX, startOffY, startSize: cur.size ?? 1,
+      startOffX, startOffY, startSize: cur.size ?? draftBase.font_size ?? 42,
       band: isBandKey(key, draftStyle),
     };
     (e.target as Element).setPointerCapture?.(e.pointerId);
@@ -573,8 +573,9 @@ export function OverlaysPage(): React.ReactElement {
     if (d.mode === 'move') {
       updateElement(d.key, { x_offset: clampOffset(d.startOffX + dx), y_offset: clampOffset(d.startOffY + dy) });
     } else {
-      const next = Math.min(2.5, Math.max(0.4, d.startSize + dy / 150));
-      updateElement(d.key, { size: Math.round(next * 100) / 100 });
+      // `size` is the badge height in reference px (ElementStyle.size, int 8-240);
+      // it used to be written as a 0.4-2.5 factor, which the backend 422'd.
+      updateElement(d.key, { size: Math.min(240, Math.max(8, Math.round(d.startSize + dy))) });
     }
   };
   const onChipPointerUp = () => { dragRef.current = null; };
@@ -865,9 +866,12 @@ interface OverlayCanvasProps {
 // renderer's exact text/padding/font math (Pillow on the server, not CSS)
 // -- it only needs to be close enough to grab and drag.
 function OverlayCanvas({
-  item, onClear, draftStyle, livePreview, previewBusy,
+  item, onClear, draftStyle, livePreview: livePreviewAny, previewBusy,
   naturalSize, onNaturalSize, canvasRef, onChipPointerDown, onSnapAll, onChipPointerMove, onChipPointerUp,
 }: OverlayCanvasProps): React.ReactElement {
+  // Another item's render (still showing while the new one loads) has the
+  // wrong geometry for this poster -- ignore it (operator-reported 2026-11-15).
+  const livePreview = livePreviewAny?.item_id === item.item_id ? livePreviewAny : null;
   const baseImage = livePreview?.base_image;
   const displayWidth = 280;
   const displayHeight = Math.round(displayWidth * (naturalSize.h / naturalSize.w));
@@ -993,11 +997,17 @@ function OverlayCanvas({
               }}
             />
           )}
-          {enabledKeys.map((key) => {
+          {!livePreview?.layout && previewBusy && (
+            <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: '#fff', fontSize: 12, textShadow: '0 0 3px #000' }}>
+              Rendering…
+            </div>
+          )}
+          {/* no guessed handles while this item's first render is on its way */}
+          {(livePreview?.layout || !previewBusy) && enabledKeys.map((key) => {
             const e = draftStyle[key] ?? {};
             // reference-unit offset -> on-canvas px (inverse of the drag conversion)
             const scale = (displayWidth / naturalSize.w) * posterScale(naturalSize.w);
-            const size = e.size ?? 1;
+            const size = e.size ? e.size / 42 : 1; // chip scale only
             const resizeHandle = (
               <span
                 onPointerDown={(ev) => { ev.stopPropagation(); onChipPointerDown(key, 'resize')(ev); }}

@@ -87,3 +87,12 @@ def test_render_without_layout_arg_is_unchanged():
     a = overlay_render.render_overlay_png(poster.getvalue(), doc, values={"resolution": "4K"})
     b = overlay_render.render_overlay_png(poster.getvalue(), doc, values={"resolution": "4K"}, layout=[])
     assert a == b
+
+
+def test_resize_writes_integer_px_within_style_bounds():
+    # 2026-11-15: the resize handle wrote a 0.4-2.5 factor (e.g. 1.33) into
+    # `size`, which is int px; the preview 422'd and the profile was saved broken.
+    meta = {type(m).__name__: m for m in ElementStyle.model_fields["size"].metadata}
+    lo, hi = meta["Ge"].ge, meta["Le"].le
+    assert f"size: Math.min({hi}, Math.max({lo}, Math.round(" in TSX
+    assert "Math.min(2.5" not in TSX
