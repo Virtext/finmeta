@@ -488,7 +488,8 @@ def _render_overlay_image(poster_bytes: bytes, style_doc_json: Mapping,
                           k9m: Optional[Mapping[str, Any]] = None,
                           filename: str = "",
                           rating_value: Optional[float] = None,
-                          sample_keys: Optional[Set[str]] = None) -> "Image.Image":
+                          sample_keys: Optional[Set[str]] = None,
+                          layout: Optional[List[Dict[str, Any]]] = None) -> "Image.Image":
     """Render ``poster_bytes`` with the posted style document; RGBA PIL image.
 
     The shared core behind both :func:`render_overlay_png` (editor preview,
@@ -564,6 +565,8 @@ def _render_overlay_image(poster_bytes: bytes, style_doc_json: Mapping,
             x = int(round(ox + sb.placed.x_off))
             y = int(round(cursor_y + sb.placed.y_off))
             _draw_badge(work, sb.placed, sb.font, sb.w, sb.h, x, y)
+            if layout is not None:
+                layout.append({"key": sb.placed.el_key, "x": x, "y": y, "w": sb.w, "h": sb.h})
             cursor_y += sb.h + gap(sb.placed.size)
 
     if band_placed:
@@ -593,6 +596,8 @@ def _render_overlay_image(poster_bytes: bytes, style_doc_json: Mapping,
             # above) -- the stacking cursor itself (y) is unaffected, so
             # multiple bands keep their relative order regardless of offset.
             _draw_band(work, p.text or "", fnt, y + p.y_off, h, pw, p.bg, p.fg)
+            if layout is not None:
+                layout.append({"key": p.el_key, "x": 0, "y": y + p.y_off, "w": pw, "h": h})
             y += (h + band_gap) if top else -band_gap
 
     return work
@@ -608,7 +613,8 @@ def render_overlay_png(poster_bytes: bytes, style_doc_json: Mapping,
                        k9m: Optional[Mapping[str, Any]] = None,
                        filename: str = "",
                        rating_value: Optional[float] = None,
-                       sample_keys: Optional[Set[str]] = None) -> bytes:
+                       sample_keys: Optional[Set[str]] = None,
+                       layout: Optional[List[Dict[str, Any]]] = None) -> bytes:
     """Render ``poster_bytes`` with the posted style document; PNG output.
 
     Thin encoding wrapper around :func:`_render_overlay_image` -- see its
@@ -624,7 +630,7 @@ def render_overlay_png(poster_bytes: bytes, style_doc_json: Mapping,
         poster_bytes, style_doc_json, values=values, config_dir=config_dir,
         assets_root=assets_root, logo_pack=logo_pack, status_key=status_key,
         packs_profile=packs_profile, k9m=k9m, filename=filename, rating_value=rating_value,
-        sample_keys=sample_keys)
+        sample_keys=sample_keys, layout=layout)
     buf = io.BytesIO()
     work.convert("RGB").save(buf, format="PNG")
     return buf.getvalue()
