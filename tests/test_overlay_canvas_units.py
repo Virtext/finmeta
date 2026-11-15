@@ -53,3 +53,37 @@ def test_offset_beyond_old_500_bound_is_accepted_and_moves_the_badge():
         return overlay_render.render_overlay_png(poster.getvalue(), doc, values={"resolution": "4K"})
 
     assert render(800) != render(500)
+
+
+def test_render_reports_real_badge_layout_including_off_poster_badges():
+    # The Studio canvas places its drag handles from this; the operator's
+    # profile (8 badges stacked bottom_left, y_offset +500) drew most of them
+    # below the poster while the old approximate chips looked fine.
+    import io
+
+    from PIL import Image
+
+    poster = io.BytesIO()
+    Image.new("RGB", (720, 1080), "black").save(poster, format="JPEG")
+    keys = ["imdb", "metacritic", "letterboxd", "trakt"]
+    doc = {"base_position": "bottom_left", "margin": 14, "font_size": 60,
+           "elements": {k: {"enabled": True, "y_offset": 500} for k in keys}}
+    vals = {f"rating_{k}": "8.1" for k in keys}
+    layout: list = []
+    overlay_render.render_overlay_png(poster.getvalue(), doc, values=vals, layout=layout)
+    assert sorted(entry["key"] for entry in layout) == sorted(keys)
+    assert all({"x", "y", "w", "h"} <= set(entry) for entry in layout)
+    assert any(entry["y"] >= 1080 for entry in layout)  # pushed past the bottom edge
+
+
+def test_render_without_layout_arg_is_unchanged():
+    import io
+
+    from PIL import Image
+
+    poster = io.BytesIO()
+    Image.new("RGB", (1000, 1500), "black").save(poster, format="JPEG")
+    doc = {"elements": {"resolution": {"enabled": True}}}
+    a = overlay_render.render_overlay_png(poster.getvalue(), doc, values={"resolution": "4K"})
+    b = overlay_render.render_overlay_png(poster.getvalue(), doc, values={"resolution": "4K"}, layout=[])
+    assert a == b

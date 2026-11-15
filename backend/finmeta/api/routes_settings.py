@@ -596,13 +596,19 @@ def overlays_preview(body: OverlayPreviewIn, ctx: AppContext = Depends(get_ctx))
             _local_src = getattr(getattr(ctx.config, "sources", None), "local", None)
             _local_root = _local_src.path if _local_src is not None else None
             _packs = list(getattr(getattr(ctx.config, "overlays", None), "logo_packs", []) or [])
+            layout: list = []
             png = render_overlay_png(
                 poster_bytes, doc_json, values=values,
                 config_dir=ctx.config_dir, assets_root=_local_root, logo_pack=_packs,
                 status_key=status_key, packs_profile=prof, k9m=k9m, filename=filename,
-                sample_keys=sample)
+                sample_keys=sample, layout=layout)
             b64 = base64.b64encode(png).decode("ascii")
             entry["image"] = f"data:image/png;base64,{b64}"
+            # Where each drawn badge really landed (natural px of `image`), so
+            # the Overlay Studio canvas can put its drag handles on the real
+            # badges instead of an approximation. A key missing here was not
+            # drawn at all (no data for this item).
+            entry["layout"] = layout
             # Which overlay cells are synthetic (no real data) so the UI can tag them.
             if sample:
                 entry["samples"] = sorted(sample)

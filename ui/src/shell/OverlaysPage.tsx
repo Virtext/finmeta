@@ -481,8 +481,16 @@ export function OverlaysPage(): React.ReactElement {
       // Responses can arrive out of order while dragging (each render takes
       // seconds); only the newest request may update the image.
       const seq = ++previewSeq.current;
+      // Offsets this render was made with -- the canvas shifts each real
+      // badge rect by (current offset - these) while the next render runs.
+      const sentOffsets: Record<string, { x: number; y: number }> = {};
+      for (const [k, el] of Object.entries(draftStyle)) sentOffsets[k] = { x: el?.x_offset ?? 0, y: el?.y_offset ?? 0 };
       previewOverlay(style, [previewItem.item_id], false, selected || null)
-        .then((r) => { if (seq === previewSeq.current) setLivePreview(r.previews?.[0] ?? null); })
+        .then((r) => {
+          if (seq !== previewSeq.current) return;
+          const p = r.previews?.[0];
+          setLivePreview(p ? { ...p, sentOffsets } : null);
+        })
         .catch((e: any) => {
           if (seq !== previewSeq.current) return;
           // Keep the last good image (and base) but say why it didn't update.
@@ -906,6 +914,45 @@ function OverlayCanvas({
               />
             );
 
+            // Real geometry from the last server render (preview `layout`):
+            // the handle sits exactly on the drawn badge, shifted live by how
+            // far the offset moved since that render. Operator-reported
+            // 2026-11-15: the approximate chips sat inside the poster while
+            // the real stacked badges had been pushed off its bottom edge.
+            const real = livePreview?.layout?.find((l) => l.key === key);
+            if (real) {
+              const disp = displayWidth / naturalSize.w;
+              const sent = livePreview?.sentOffsets?.[key] ?? { x: e.x_offset ?? 0, y: e.y_offset ?? 0 };
+              const band = isBandKey(key, draftStyle);
+              let left = band ? 0 : real.x * disp + ((e.x_offset ?? 0) - sent.x) * scale;
+              let top = real.y * disp + ((e.y_offset ?? 0) - sent.y) * scale;
+              const w = Math.max(real.w * disp, 14);
+              const h = Math.max(real.h * disp, 10);
+              // Keep a handle grabbable even when the badge is off the poster.
+              const off = left < -w / 2 || top < -h / 2 || left > displayWidth - w / 2 || top > displayHeight - h / 2;
+              left = Math.min(Math.max(left, 0), displayWidth - w);
+              top = Math.min(Math.max(top, 0), displayHeight - h);
+              return (
+                <div
+                  key={key}
+                  onPointerDown={onChipPointerDown(key, 'move')}
+                  onPointerMove={onChipPointerMove}
+                  onPointerUp={onChipPointerUp}
+                  style={{
+                    position: 'absolute', left, top, width: w, height: h,
+                    border: `2px solid ${off ? 'var(--danger)' : 'var(--accent)'}`, borderRadius: 4,
+                    background: off ? 'rgba(200,0,0,0.35)' : 'rgba(0,0,0,0.15)',
+                    cursor: band ? 'ns-resize' : 'move', userSelect: 'none', boxSizing: 'border-box',
+                    fontSize: 10, color: '#fff', overflow: 'hidden', whiteSpace: 'nowrap',
+                  }}
+                  title={`${ELEMENT_LABELS[key] ?? key}${off ? ' — OFF THE POSTER, drag it back' : ''} — drag to move`}
+                >
+                  {off && <span style={{ padding: '0 3px', textShadow: '0 0 2px #000' }}>{ELEMENT_LABELS[key] ?? key} (off poster)</span>}
+                  {resizeHandle}
+                </div>
+              );
+            }
+
             if (isBandKey(key, draftStyle)) {
               // Matches the real renderer: always full width, only the
               // vertical nudge (y_offset) does anything -- see isBandKey's
@@ -971,9 +1018,11 @@ function OverlayCanvas({
                   cursor: 'move', userSelect: 'none', whiteSpace: 'nowrap',
                   border: '1px solid rgba(255,255,255,0.3)',
                 }}
-                title={`${ELEMENT_LABELS[key] ?? key} — drag to move`}
+                title={livePreview?.layout
+                  ? `${ELEMENT_LABELS[key] ?? key} — not drawn for this item (no data); approximate position`
+                  : `${ELEMENT_LABELS[key] ?? key} — drag to move`}
               >
-                {ELEMENT_LABELS[key] ?? key}
+                {ELEMENT_LABELS[key] ?? key}{livePreview?.layout ? ' (no data)' : ''}
                 {resizeHandle}
               </div>
             );
