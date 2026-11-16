@@ -309,3 +309,20 @@ class TestExecutorIntegration:
                   config_dir=config_dir, db_path=db, poll_timeout=0.1)
         assert not bk2.is_file()  # still moved to trash
         assert list((config_dir / "trash").rglob("*.jpg"))  # but nothing purged from it
+
+
+def test_a_slow_sweep_is_not_repeated_after_every_apply(tmp_path, monkeypatch):
+    # Operator-reported 2026-11-16: a one-file fix took ~9 minutes because the
+    # sweep walked ~40k backup/trash files after every apply.
+    calls = []
+    monkeypatch.setattr(trash, "sweep", lambda *a, **k: calls.append(1) or {"moved_to_trash": 0, "purged": 0})
+    trash.sweep_if_due(tmp_path)                       # fast sweep ...
+    trash.sweep_if_due(tmp_path)                       # ... runs every time
+    assert len(calls) == 2
+    (tmp_path / ".trash-sweep").write_text("480.0")    # the last one was slow
+    assert trash.sweep_if_due(tmp_path) == {"moved_to_trash": 0, "purged": 0}
+    assert len(calls) == 2
+    old = time.time() - 2 * 86400
+    os.utime(tmp_path / ".trash-sweep", (old, old))    # a day later it runs again
+    trash.sweep_if_due(tmp_path)
+    assert len(calls) == 3

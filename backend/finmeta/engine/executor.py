@@ -570,7 +570,7 @@ def apply_plan(
     # S9d5: trash + retention (CLAUDE.md §4.1) -- best-effort, never fails
     # an otherwise-successful apply.
     try:
-        swept = trash.sweep(config_dir, cfg.backup_retention_days)
+        swept = trash.sweep_if_due(config_dir, cfg.backup_retention_days)
         pruned_runs = prune_runs_dir(config_dir, cfg.backup.keep_runs)
         pruned_cache = prune_overlay_cache(config_dir)
         if swept["moved_to_trash"] or swept["purged"] or pruned_runs or pruned_cache:
