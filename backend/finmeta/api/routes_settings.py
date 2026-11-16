@@ -455,12 +455,10 @@ def _overlay_preview_source(
     # in samples[]. Real-data behavior elsewhere is untouched: plan/apply keep
     # "missing data -> no badge". Never overwrite non-empty real values.
     if sample_data:
-        _PREVIEW_PLACEHOLDERS = {
-            "rating_imdb": "8.5", "rating_rt_critic": "92", "rating_metacritic": "78",
-            "rating_tmdb": "7.9", "rating_letterboxd": "4.2", "rating_trakt": "8.1",
-            "rating_rt_audience": "88", "resolution": "4K", "hdr": "HDR10",
-            "audio": "Atmos", "trending_rank": "#1",
-        }
+        # Same stand-ins the renderer sizes missing badges with, so turning
+        # this on changes no badge's size and therefore moves nothing.
+        from finmeta.engine.overlay_render import _GHOST_VALUES
+        _PREVIEW_PLACEHOLDERS = dict(_GHOST_VALUES.values())
         for key, ph in _PREVIEW_PLACEHOLDERS.items():
             if not (values.get(key) or "").strip():
                 values[key] = ph
@@ -614,8 +612,8 @@ def overlays_preview(body: OverlayPreviewIn, ctx: AppContext = Depends(get_ctx))
             entry["image"] = f"data:image/png;base64,{b64}"
             # Where each drawn badge really landed (natural px of `image`), so
             # the Overlay Studio canvas can put its drag handles on the real
-            # badges instead of an approximation. A key missing here was not
-            # drawn at all (no data for this item).
+            # badges instead of an approximation. `ghost` entries were not
+            # drawn (no data for this item); a key missing here has no box.
             entry["layout"] = layout
             # Which overlay cells are synthetic (no real data) so the UI can tag them.
             if sample:

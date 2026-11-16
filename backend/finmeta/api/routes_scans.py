@@ -166,6 +166,7 @@ def fix_findings(scan_id: str, body: FixRequest,
 
     submitted: List[dict] = []
     fixed_ids: List[int] = []
+    no_better: List[int] = []
 
     if refresh_items:
         jf = ctx.make_jellyfin()
@@ -200,8 +201,22 @@ def fix_findings(scan_id: str, body: FixRequest,
             for kind in kinds:
                 ctx.overrides.increment_reshuffle(item_id, kind)
                 ctx.overrides.clear_lock(item_id, kind)
+        no_better = _pick_better_candidates(ctx, pick_rows)
         if kinds_by_item:
             ctx.invalidate_plans()
+
+    # A truncated/unreadable file whose candidate is LOCKED (S9d5) would be
+    # re-fetched from the very same ref forever -- e.g. an .svg logo written
+    # as logo.png before the TMDb source learned to skip those. Drop the lock
+    # so the apply resolves a fresh candidate.
+    relock = [r for r in apply_rows
+              if r["check_code"].startswith(("artwork_quality.tiny_file.", "artwork_quality.unreadable."))]
+    for r in relock:
+        kind = (r["detail"] or {}).get("kind")
+        if kind:
+            ctx.overrides.clear_lock(r["item_id"], kind)
+    if relock:
+        ctx.invalidate_plans()
 
     for item_id in apply_items:
         run_id, err = submit_run(ctx, "apply", item_id=item_id)
@@ -219,7 +234,69 @@ def fix_findings(scan_id: str, body: FixRequest,
 
     scan_store.mark_fixed(ctx.db_path, fixed_ids)
     return {"submitted": submitted, "not_fixable": not_fixable,
-            "unknown": unknown}
+            "unknown": unknown, "no_better": no_better}
+
+
+def _pick_better_candidates(ctx: AppContext, pick_rows: List[dict]) -> List[int]:
+    """For each low-resolution finding, pick a candidate that actually passes.
+
+    The reshuffle alone changes nothing under the default ``best_rated``
+    preset (operator-reported 2026-11-16: "try automatic fix" did nothing).
+    So: among the item's ranked candidates wider than the current file, take a
+    random one of the best-ranked ``top_n`` that meet the scan's width floor
+    (else simply the widest), and store it as the item's candidate pick --
+    the same thing the manual picker does. Returns the finding ids for which
+    the sources have nothing wider; those are still re-applied, best effort.
+    """
+    import random
+
+    from finmeta.api.routes_candidates import _default_candidates_provider
+    from finmeta.engine.candidate_ref import RefNotAllowed
+
+    cfg = ctx.config
+    provider = ctx._candidates_provider or _default_candidates_provider
+    top_n = max(int(cfg.artwork_selection.top_n), 1)
+    no_better: List[int] = []
+    def _opt(make):   # no TMDb key: lookups below then fail per item -> "no better"
+        try:
+            return make(cfg)
+        except Exception as exc:
+            logger.warning("candidate lookup degraded: %s", exc)
+            return None
+
+    jf = ctx.make_jellyfin(cfg)
+    tmdb = _opt(ctx.make_tmdb)
+    try:
+        sources = _opt(ctx.make_sources) or {}
+        mapper = _opt(ctx.make_mapper)
+        by_item: dict = {}
+        for r in pick_rows:
+            by_item.setdefault(r["item_id"], []).append(r)
+        for item_id, rows in by_item.items():
+            try:
+                by_kind, _ = provider(jf.get_item(item_id), cfg, jf, tmdb, sources, mapper)
+            except Exception as exc:
+                logger.warning("candidate lookup failed for %s: %s", item_id, exc)
+                by_kind = {}
+            for r in rows:
+                detail = r["detail"] or {}
+                kind = detail.get("kind")
+                have = int(detail.get("width") or 0)
+                wider = [c for c in by_kind.get(kind, []) if (c.width or 0) > have]
+                good = [c for c in wider if c.width >= int(detail.get("floor") or 0)][:top_n]
+                choice = random.choice(good) if good else max(wider, key=lambda c: c.width, default=None)  # noqa: S311
+                if choice is None:
+                    no_better.append(r["id"])
+                    continue
+                try:
+                    ctx.set_candidate(item_id, kind, choice.ref, choice.source)
+                except RefNotAllowed:
+                    no_better.append(r["id"])
+    finally:
+        jf.close()
+        if tmdb is not None:
+            tmdb.close()
+    return no_better
 
 
 @router.delete("/scans/{scan_id}")

@@ -318,6 +318,8 @@ export interface FixResp {
   }>;
   not_fixable: number[];
   unknown: number[];
+  /** Low-resolution findings where no source has a wider image. */
+  no_better?: number[];
 }
 
 // ---- S11a: Activity Center ----

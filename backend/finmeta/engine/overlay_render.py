@@ -594,14 +594,19 @@ def _render_overlay_image(poster_bytes: bytes, style_doc_json: Mapping,
     final_y = _close_stack_gaps(
         [(x, y, w, h, gap(p.size), p.el_key in drawn) for p, _f, x, y, w, h, _dx, _dy in homes], ph)
     for (p, fnt, x, y, w, h, dx, dy), fy in zip(homes, final_y, strict=True):
-        if p.el_key not in drawn:
-            continue
-        _draw_badge(work, p, fnt, w, h, x, fy)
+        is_drawn = p.el_key in drawn
+        if is_drawn:
+            _draw_badge(work, p, fnt, w, h, x, fy)
         if layout is not None:
             # push_*: home minus where the offset alone put it (natural px);
             # the Studio folds it into the offset so what you see is saved.
-            layout.append({"key": p.el_key, "x": x, "y": fy, "w": w, "h": h,
-                           "push_x": x - dx, "push_y": y - dy})
+            # home_y: the spot before stacks close up -- the Studio puts its
+            # handles there so they are the same for every item and with
+            # "Simulate all badges" on or off. ghost: enabled but not drawn
+            # (no data for this item), reported so it gets a real handle too.
+            layout.append({"key": p.el_key, "x": x, "y": fy if is_drawn else y, "w": w, "h": h,
+                           "home_y": y, "push_x": x - dx, "push_y": y - dy,
+                           **({} if is_drawn else {"ghost": True})})
 
     if band_placed:
         band_placed = sorted(band_placed, key=lambda q: ELEMENT_KEYS.index(q.el_key))

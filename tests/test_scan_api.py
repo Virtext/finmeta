@@ -55,6 +55,9 @@ class RecordingJellyfin(FakeJellyfin):
     def close(self) -> None:
         self.closed += 1
 
+    def get_item(self, item_id: str):
+        return movie(item_id, item_id)
+
 
 @pytest.fixture
 def media(tmp_path) -> Path:
@@ -490,3 +493,48 @@ def test_a_deep_scan_without_sonarr_configured_still_finishes(ctx_factory):
         _wait_for_run(ctx)
         scan = client.get("/api/scans/latest").json()["scan"]
         assert scan["status"] == "ok"
+
+
+def test_low_resolution_fix_picks_a_candidate_that_passes(ctx_factory):
+    """Operator-reported 2026-11-16: "try automatic fix" did nothing -- under
+    the default best_rated preset a reshuffle re-picks the same image. The fix
+    now stores a wider candidate as the item's pick (as the manual picker
+    does), and says so when no source has one."""
+    from finmeta.sources.candidate import Candidate
+
+    def cand(n, w):
+        return Candidate(kind="poster", source="tmdb", width=w, height=w * 3 // 2,
+                         ref=f"https://image.tmdb.org/t/p/original/{n}.jpg")
+
+    ctx = ctx_factory(dry_run=False)
+    ctx._candidates_provider = lambda item, *a: (
+        {"poster": [cand("small", 500), cand("ok", 2000), cand("mid", 800)]}
+        if item.id == "item-1" else {"poster": [cand("small", 500)]}, 1)
+    low = dict(severity="warning", media_type="movie", fix_kind="candidate_picker",
+               library="Movies", check_code="artwork_quality.low_resolution.poster",
+               detail={"kind": "poster", "width": 500, "floor": 1000})
+    scan_id, rows = _seed(ctx, [Finding(item_id="item-1", item_name="A", **low),
+                                Finding(item_id="item-2", item_name="B", **low)])
+    with _client(ctx) as client:
+        assert ctx.claim_run("blocking-run", action="apply")
+        body = client.post(f"/api/scans/{scan_id}/fix",
+                           json={"finding_ids": [x["id"] for x in rows]}).json()
+        ctx.release_run("blocking-run")
+    assert ctx.overrides.get("item-1", "poster")["ref"].endswith("/ok.jpg")
+    assert ctx.overrides.get("item-2", "poster") is None
+    assert body["no_better"] == [rows[1]["id"]]
+
+
+def test_unreadable_artwork_fix_drops_the_lock_on_the_bad_candidate(ctx_factory):
+    ctx = ctx_factory(dry_run=False)
+    ctx.overrides.set_lock("item-1", "logo", "https://image.tmdb.org/t/p/original/x.svg", "0" * 64)
+    scan_id, rows = _seed(ctx, [Finding(
+        library="Movies", check_code="artwork_quality.unreadable.logo", severity="error",
+        item_id="item-1", item_name="A", media_type="movie", fix_kind="apply_item",
+        detail={"kind": "logo"})])
+    with _client(ctx) as client:
+        assert ctx.claim_run("blocking-run", action="apply")
+        assert client.post(f"/api/scans/{scan_id}/fix",
+                           json={"finding_ids": [rows[0]["id"]]}).status_code == 200
+        ctx.release_run("blocking-run")
+    assert ctx.overrides.get_lock("item-1", "logo") is None

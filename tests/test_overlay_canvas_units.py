@@ -168,3 +168,22 @@ def test_layout_reports_the_push_the_studio_folds_into_the_offset():
     both = _layout({"base_position": "top_left", "elements": els}, {"rating_imdb": "8", "rating_metacritic": "7"})
     assert both["imdb"]["push_y"] == 0 and both["metacritic"]["push_y"] > 0
     assert both["metacritic"]["y"] >= both["imdb"]["y"] + both["imdb"]["h"]
+
+
+def test_layout_reports_home_spots_and_ghosts_so_simulating_moves_no_handle():
+    # Operator-reported 2026-11-16: "Simulate all badges" rearranged the
+    # Studio's handles, and badges without data had no real (clamped) handle.
+    # Handles sit at (x, home_y); a badge without data is reported as a ghost.
+    from finmeta.engine.overlay_render import _GHOST_VALUES
+
+    els = {k: {"enabled": True} for k in ("imdb", "metacritic", "tmdb", "resolution")}
+    doc = {"base_position": "top_right", "elements": els}
+    real = {"rating_imdb": "8", "rating_tmdb": "6"}
+    off = _layout(doc, real)
+    on = _layout(doc, {**dict(_GHOST_VALUES.values()), **real})   # what sample_data sends
+    assert off["metacritic"]["ghost"] and off["resolution"]["ghost"]
+    assert not any(e.get("ghost") for e in on.values())
+    assert off["tmdb"]["y"] != off["tmdb"]["home_y"]               # drawn closed up...
+    for k in els:                                                  # ...handle stays put
+        assert (off[k]["x"], off[k]["home_y"], off[k]["w"], off[k]["h"]) == \
+            (on[k]["x"], on[k]["home_y"], on[k]["w"], on[k]["h"]), k
