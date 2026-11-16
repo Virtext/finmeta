@@ -46,11 +46,12 @@ def _backup_copies_by_relpath(config_dir: Path) -> Dict[str, List[Tuple[str, Pat
     for run_dir in base.iterdir():
         if not run_dir.is_dir():
             continue
-        for f in run_dir.rglob("*"):
-            if not f.is_file():
-                continue
-            rel = str(f.relative_to(run_dir))
-            out.setdefault(rel, []).append((run_dir.name, f))
+        # os.walk, not rglob + is_file(): one stat per file costs ~7 ms on a
+        # FUSE share (Unraid), minutes for a real library's backups.
+        for root, _dirs, files in os.walk(run_dir):
+            for name in files:
+                f = Path(root) / name
+                out.setdefault(str(f.relative_to(run_dir)), []).append((run_dir.name, f))
     return out
 
 
@@ -124,22 +125,28 @@ def purge_expired(config_dir: Path = DEFAULT_CONFIG_DIR, retention_days: int = 1
         return 0
     cutoff = time.time() - retention_days * 86400
     deleted = 0
-    for f in trash_root.rglob("*"):
-        if not f.is_file():
+    nonempty: set = set()   # dirs that still hold something -- never rmdir'd
+    for root, dirs, files in os.walk(trash_root, topdown=False):
+        kept = False
+        for name in files:
+            f = os.path.join(root, name)
+            try:
+                if os.stat(f).st_mtime < cutoff:
+                    os.unlink(f)
+                    deleted += 1
+                    continue
+            except OSError:
+                pass
+            kept = True
+        if root == str(trash_root):
+            continue
+        if kept or any(os.path.join(root, d) in nonempty for d in dirs):
+            nonempty.add(root)
             continue
         try:
-            if f.stat().st_mtime < cutoff:
-                f.unlink()
-                deleted += 1
+            os.rmdir(root)
         except OSError:
-            continue
-    dirs = sorted((d for d in trash_root.rglob("*") if d.is_dir()),
-                  key=lambda d: len(d.parts), reverse=True)
-    for d in dirs:
-        try:
-            d.rmdir()
-        except OSError:
-            continue
+            nonempty.add(root)
     return deleted
 
 
@@ -151,4 +158,34 @@ def sweep(config_dir: Path = DEFAULT_CONFIG_DIR, retention_days: int = 14) -> Di
     }
 
 
-__all__ = ["sweep", "sweep_to_trash", "purge_expired"]
+#: A sweep slower than this is only repeated once per ``_SLOW_SWEEP_INTERVAL``.
+_SLOW_SWEEP_SECONDS = 5.0
+_SLOW_SWEEP_INTERVAL = 86400.0
+
+
+def sweep_if_due(config_dir: Path = DEFAULT_CONFIG_DIR, retention_days: int = 14) -> Dict[str, int]:
+    """:func:`sweep`, but at most once a day where it is slow.
+
+    Operator-reported 2026-11-16: every apply -- even a one-file artwork fix
+    -- ended with ~8 minutes of sweeping ~40k backup/trash files on an Unraid
+    share. Retention is counted in days, so a daily sweep loses nothing. The
+    last sweep's duration is kept in ``<config>/.trash-sweep``; a fast setup
+    (small library, local disk) still sweeps after every apply.
+    """
+    marker = Path(config_dir) / ".trash-sweep"
+    try:
+        slow = float(marker.read_text()) > _SLOW_SWEEP_SECONDS
+        if slow and time.time() - marker.stat().st_mtime < _SLOW_SWEEP_INTERVAL:
+            return {"moved_to_trash": 0, "purged": 0}
+    except (OSError, ValueError):
+        pass
+    started = time.monotonic()
+    out = sweep(config_dir, retention_days)
+    try:
+        marker.write_text(f"{time.monotonic() - started:.1f}")
+    except OSError:
+        pass
+    return out
+
+
+__all__ = ["sweep", "sweep_if_due", "sweep_to_trash", "purge_expired"]
