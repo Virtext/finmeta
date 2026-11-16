@@ -94,11 +94,13 @@ export function ArtworkPage({ dryRun }: { dryRun: boolean }): React.ReactElement
     // "fix all" routinely has hundreds (operator hit "153 > 50").
     fixFindingsBatched(scanId, targets)
       .then((r) => {
-        const started = r.submitted.filter((s) => s.run_id).length;
+        // queued ones count too: only the first item gets a run_id straight away
+        const started = r.submitted.filter((s) => s.run_id || s.queued).length;
         const refreshed = r.submitted.filter((s) => s.action === 'refresh_item' && !s.error).length;
         const failed = r.submitted.filter((s) => s.error).length;
         const parts = [];
-        if (started) parts.push(`${started} apply run started`);
+        if (started) parts.push(`${started} item${started === 1 ? '' : 's'} being re-applied`);
+        if (r.no_better?.length) parts.push(`${r.no_better.length} have no larger image at any source`);
         if (refreshed) parts.push(`${refreshed} Jellyfin refresh requested`);
         if (failed) parts.push(`${failed} failed`);
         push({ message: `${parts.join(' · ') || 'Nothing to do'}. Rescan to confirm.` });

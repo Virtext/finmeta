@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { dump as yamlDump } from 'js-yaml';
-import { downloadProfile, pickFile, readProfileFile } from '../profileFile';
+import { downloadProfile, pickFile, profileMatchesLibrary, readProfileFile } from '../profileFile';
 import {
   Badge, Button, Card, CardHeader, CardBody, Dialog, EmptyState,
   ErrorState, Input, PageHeader, Select, Skeleton, Tabs, useToast,
@@ -102,20 +102,6 @@ function buildElementsPayload(draftStyle: Record<string, DocElementState>): Reco
   return out;
 }
 
-// Anchor -> CSS corner for the canvas's draggable chips (deliberately
-// APPROXIMATE -- see the canvas section's own comment further down).
-const ANCHOR_CSS: Record<string, React.CSSProperties> = {
-  top_left: { top: 0, left: 0 },
-  top_center: { top: 0, left: '50%', transform: 'translateX(-50%)' },
-  top_right: { top: 0, right: 0 },
-  center_left: { top: '50%', left: 0, transform: 'translateY(-50%)' },
-  center: { top: '50%', left: '50%', transform: 'translate(-50%, -50%)' },
-  center_right: { top: '50%', right: 0, transform: 'translateY(-50%)' },
-  bottom_left: { bottom: 0, left: 0 },
-  bottom_center: { bottom: 0, left: '50%', transform: 'translateX(-50%)' },
-  bottom_right: { bottom: 0, right: 0 },
-};
-
 // Keys the real renderer can turn into a full-width band (engine/
 // overlay_render.py: `kind = "band" if el.full_width else "text"`) instead
 // of a small positioned badge -- x_offset is then completely ignored
@@ -146,25 +132,6 @@ function anchorCol(position: string | null | undefined): 'left' | 'right' | 'cen
   if (position.endsWith('right')) return 'right';
   if (position.endsWith('left')) return 'left';
   return 'center';
-}
-
-// `marginLeft`/`marginTop` only move a chip the way a drag expects when
-// the anchor's `left`/`top` is the side ANCHOR_CSS actually specifies --
-// for an abs-positioned box, the browser solves the AUTO side from the
-// OPPOSITE margin, so a box anchored by `right`/`bottom` instead needs
-// `marginRight`/`marginBottom` (sign flipped, so increasing x/y_offset
-// still visually means "right"/"down"); the margin on the SPECIFIED side
-// has no effect on position at all. Operator-reported 2026-11-10:
-// dragging some elements only seemed to respond left/right, or jumped to
-// odd positions near an edge -- this is why: every chip used
-// marginLeft/marginTop regardless of which corner it was anchored to.
-function nudgeStyle(position: string | null | undefined, xOff: number, yOff: number, scale: number): React.CSSProperties {
-  const out: React.CSSProperties = {};
-  if (anchorCol(position) === 'right') out.marginRight = -xOff * scale;
-  else out.marginLeft = xOff * scale;
-  if (anchorRow(position) === 'bottom') out.marginBottom = -yOff * scale;
-  else out.marginTop = yOff * scale;
-  return out;
 }
 
 // The renderer's offsets are in 1000px-reference units, multiplied by the
@@ -239,6 +206,10 @@ export function OverlaysPage(): React.ReactElement {
     if (libraryNames.length && !previewLibrary) setPreviewLibrary(libraryNames[0]);
   }, [libraryNames, previewLibrary]);
 
+  // The previous library's titles must not stay clickable while the new
+  // library's list loads (they put a Movies title under a Shows profile).
+  useEffect(() => { setItemResults([]); }, [previewLibrary]);
+
   // Item search, debounced -- mirrors OverlaysEditor's own preview picker.
   useEffect(() => {
     if (!previewLibrary) { setItemResults([]); return; }
@@ -272,12 +243,20 @@ export function OverlaysPage(): React.ReactElement {
 
   // TV-only elements (status/network) only make sense for a profile actually
   // used by a TV library -- null (show everything) when unassigned or mixed.
+  // The libraries a profile is for: the ones assigned to it, else (not
+  // assigned anywhere yet) the one it is named after -- so opening
+  // "Shows-auto" never shows the Movies library (operator-reported 2026-11-16).
+  const libsFor = useCallback((name: string): string[] => {
+    const used = usedBy(name);
+    return used.length ? used : Object.keys(parsed?.libraries ?? {}).filter((l) => profileMatchesLibrary(name, l));
+  }, [usedBy, parsed]);
+
   const collectionTypeFor = useCallback((name: string): string | null => {
-    const libs = usedBy(name);
+    const libs = libsFor(name);
     if (!libs.length) return null;
     const t = parsed?.libraries?.[libs[0]]?.type;
     return t === 'movies' || t === 'tvshows' ? t : null;
-  }, [usedBy, parsed]);
+  }, [libsFor, parsed]);
 
   const selectProfile = (name: string) => {
     setSelected(name);
@@ -290,7 +269,7 @@ export function OverlaysPage(): React.ReactElement {
     // profile to whichever library actually uses it, and drop the stale
     // item so the canvas doesn't silently keep rendering a title the new
     // profile was never meant for.
-    const usedLibs = usedBy(name);
+    const usedLibs = libsFor(name);
     if (usedLibs.length && !usedLibs.includes(previewLibrary)) {
       setPreviewLibrary(usedLibs[0]);
       setPreviewItem(null);
@@ -488,8 +467,8 @@ export function OverlaysPage(): React.ReactElement {
       const seq = ++previewSeq.current;
       // Offsets this render was made with -- the canvas shifts each real
       // badge rect by (current offset - these) while the next render runs.
-      const sentOffsets: Record<string, { x: number; y: number }> = {};
-      for (const [k, el] of Object.entries(draftStyle)) sentOffsets[k] = { x: el?.x_offset ?? 0, y: el?.y_offset ?? 0 };
+      const sentOffsets: Record<string, { x: number; y: number; size?: number }> = {};
+      for (const [k, el] of Object.entries(draftStyle)) sentOffsets[k] = { x: el?.x_offset ?? 0, y: el?.y_offset ?? 0, size: el?.size ?? draftBase.font_size ?? 42 };
       previewOverlay(style, [previewItem.item_id], sampleAll, selected || null)
         .then((r) => {
           if (seq !== previewSeq.current) return;
@@ -572,7 +551,12 @@ export function OverlaysPage(): React.ReactElement {
       updateElement(d.key, { size: Math.min(240, Math.max(8, Math.round(d.startSize + dy))) });
     }
   };
-  const onChipPointerUp = () => { dragRef.current = null; };
+  const onChipPointerUp = (nudgeY = 0) => {
+    const d = dragRef.current;
+    dragRef.current = null;
+    if (d?.mode !== 'move' || !nudgeY) return;
+    setDraftStyle((prev) => ({ ...prev, [d.key]: { ...(prev[d.key] || {}), y_offset: clampOffset((prev[d.key]?.y_offset ?? 0) + nudgeY) } }));
+  };
 
   if (error) return <ErrorState title="Could not load overlay profiles" description={error} action={<Button onClick={load}>Retry</Button>} />;
   if (!parsed) return <Skeleton height={200} />;
@@ -759,6 +743,7 @@ export function OverlaysPage(): React.ReactElement {
                                 item={previewItem}
                                 onClear={() => setPreviewItem(null)}
                                 draftStyle={draftStyle}
+                                base={draftBase}
                                 livePreview={livePreview}
                                 previewBusy={previewBusy}
                                 naturalSize={naturalSize}
@@ -842,6 +827,7 @@ interface OverlayCanvasProps {
   item: ItemLightView;
   onClear: () => void;
   draftStyle: Record<string, DocElementState>;
+  base: BaseDoc;
   livePreview: OverlayPreviewEntry | null;
   previewBusy: boolean;
   naturalSize: { w: number; h: number };
@@ -849,7 +835,7 @@ interface OverlayCanvasProps {
   canvasRef: React.RefObject<HTMLDivElement>;
   onChipPointerDown: (key: string, mode: 'move' | 'resize', snap?: { x: number; y: number }) => (e: React.PointerEvent) => void;
   onChipPointerMove: (e: React.PointerEvent) => void;
-  onChipPointerUp: () => void;
+  onChipPointerUp: (nudgeY?: number) => void;
 }
 
 // The draggable layer (chips, approximate anchor math) sits over the plain
@@ -858,7 +844,7 @@ interface OverlayCanvasProps {
 // renderer's exact text/padding/font math (Pillow on the server, not CSS)
 // -- it only needs to be close enough to grab and drag.
 function OverlayCanvas({
-  item, onClear, draftStyle, livePreview: livePreviewAny, previewBusy,
+  item, onClear, draftStyle, base, livePreview: livePreviewAny, previewBusy,
   naturalSize, onNaturalSize, canvasRef, onChipPointerDown, onChipPointerMove, onChipPointerUp,
 }: OverlayCanvasProps): React.ReactElement {
   // Another item's render (still showing while the new one loads) has the
@@ -880,52 +866,76 @@ function OverlayCanvas({
   const refToDisp = (displayWidth / naturalSize.w) * posterScale(naturalSize.w);
   const folded = useRef<Record<string, { x: number; y: number }>>({});
   useEffect(() => { folded.current = {}; }, [livePreview]);
-  const handles: Record<string, { left: number; top: number; w: number; h: number; band: boolean; snap?: { x: number; y: number } }> = {};
+  const handles: Record<string, { left: number; top: number; w: number; h: number; band: boolean; noData: boolean; est?: boolean; snap?: { x: number; y: number } }> = {};
   {
     const disp = displayWidth / naturalSize.w;
     const ps = posterScale(naturalSize.w);
+    const clamp = (v: number, hi: number) => Math.min(Math.max(v, 0), Math.max(hi, 0));
+    let estimated = 0;
     for (const key of enabledKeys) {
       const real = livePreview?.layout?.find((l) => l.key === key);
-      if (!real) continue;
       const e = draftStyle[key] ?? {};
+      const band = isBandKey(key, draftStyle);
+      if (!real) {
+        // No box from the renderer (network/status/ribbon without a value):
+        // an estimated one, kept inside the poster like the real ones
+        // (operator-reported 2026-11-16: these could be dragged off it).
+        const w = band ? displayWidth : Math.min((ELEMENT_LABELS[key] ?? key).length * 6 + 60, displayWidth * 0.85);
+        const h = 18;
+        const row = anchorRow(e.position);
+        const col = anchorCol(e.position);
+        const x0 = band || col === 'left' ? 0 : col === 'right' ? displayWidth - w : (displayWidth - w) / 2;
+        const step = estimated++ * 20; // keep same-corner ones apart so each can be grabbed
+        const y0 = row === 'bottom' ? displayHeight - h - step : (row === 'top' ? 0 : (displayHeight - h) / 2) + step;
+        handles[key] = {
+          left: clamp(x0 + (band ? 0 : (e.x_offset ?? 0) * refToDisp), displayWidth - w),
+          top: clamp(y0 + (e.y_offset ?? 0) * refToDisp, displayHeight - h),
+          w, h, band, noData: !!livePreview?.layout, est: true,
+        };
+        continue;
+      }
       const sent = livePreview?.sentOffsets?.[key] ?? { x: e.x_offset ?? 0, y: e.y_offset ?? 0 };
       const f = folded.current[key] ?? { x: 0, y: 0 };
-      const band = isBandKey(key, draftStyle);
-      const w = Math.min(Math.max(real.w * disp, 14), displayWidth);
-      const h = Math.min(Math.max(real.h * disp, 10), displayHeight);
-      const left = band ? 0 : Math.min(Math.max(real.x * disp + ((e.x_offset ?? 0) - sent.x - f.x) * refToDisp, 0), displayWidth - w);
-      const top = Math.min(Math.max(real.y * disp + ((e.y_offset ?? 0) - sent.y - f.y) * refToDisp, 0), displayHeight - h);
+      // Resize shows at once: the box scales with the size being dragged,
+      // growing away from its anchor corner, instead of waiting seconds for
+      // the next server render (operator-reported 2026-11-16: resize felt stuck).
+      const grow = band ? 1 : (e.size ?? base.font_size ?? 42) / (sent.size ?? e.size ?? base.font_size ?? 42);
+      const w = Math.min(Math.max(real.w * disp * grow, 14), displayWidth);
+      const h = Math.min(Math.max(real.h * disp * grow, 10), displayHeight);
+      const pos = e.position || base.base_position;
+      const growX = anchorCol(pos) === 'right' ? real.w * disp - w : anchorCol(pos) === 'center' ? (real.w * disp - w) / 2 : 0;
+      const growY = anchorRow(pos) === 'bottom' ? real.h * disp - h : anchorRow(pos) === 'center' ? (real.h * disp - h) / 2 : 0;
+      // home_y, not y: the saved spot, before a stack closes up over badges
+      // this item has no data for -- so handles never move with the item or
+      // with "Simulate all badges" (operator-reported 2026-11-16).
+      const left = band ? 0 : clamp(real.x * disp + growX + ((e.x_offset ?? 0) - sent.x - f.x) * refToDisp, displayWidth - w);
+      const top = clamp((real.home_y ?? real.y) * disp + growY + ((e.y_offset ?? 0) - sent.y - f.y) * refToDisp, displayHeight - h);
       const fresh = sent.x === (e.x_offset ?? 0) && sent.y === (e.y_offset ?? 0) && !folded.current[key];
       const px = band ? 0 : Math.round((real.push_x ?? 0) / ps);
       const py = Math.round((real.push_y ?? 0) / ps);
-      handles[key] = { left, top, w, h, band, snap: fresh && (px || py) ? { x: px, y: py } : undefined };
+      handles[key] = { left, top, w, h, band, noData: !!real.ghost, snap: fresh && (px || py) ? { x: px, y: py } : undefined };
     }
   }
 
-  // The real renderer auto-stacks every non-band badge sharing one anchor
-  // corner into a column (engine/overlay_render.py groups by anchor, then
-  // lays each one below the last) -- the chip canvas has no equivalent, so
-  // same-anchor chips used to render exactly on top of each other with
-  // only the last-painted one actually clickable (operator-reported:
-  // several rating-source badges "had nothing you could move" -- they
-  // were buried under whichever chip happened to paint last). This is a
-  // rough visual stagger, not a layout replica: real stacking depends on
-  // each badge's actual rendered size, which this canvas doesn't compute.
-  // It only needs to put each chip somewhere independently grabbable.
-  const STAGGER = 46; // natural-image px per stacked position
-  const groupIndex: Record<string, number> = {};
-  const groupSize: Record<string, number> = {};
-  {
-    const byAnchor: Record<string, string[]> = {};
-    for (const key of enabledKeys) {
-      if (isBandKey(key, draftStyle)) continue;
-      const pos = draftStyle[key]?.position || 'top_left';
-      (byAnchor[pos] ??= []).push(key);
+  // Dropped on top of another badge: the renderer would push one of the two
+  // clear, and not always the one just dragged (operator-reported 2026-11-16:
+  // ribbon dropped under IMDb, IMDb jumped below it). Move the dragged one
+  // just clear instead; returns that y nudge in reference units.
+  const dropNudge = (key: string): number => {
+    const a = handles[key];
+    if (!a || a.band || a.est) return 0;
+    for (const [k, b] of Object.entries(handles)) {
+      if (k === key || b.band || b.est) continue;
+      if (!(a.left < b.left + b.w && b.left < a.left + a.w && a.top < b.top + b.h && b.top < a.top + a.h)) continue;
+      const below = b.top + b.h + 3;
+      const above = b.top - a.h - 3;
+      let t = a.top + a.h / 2 >= b.top + b.h / 2 ? below : above;
+      if (t < 0) t = below;
+      if (t > displayHeight - a.h) t = above;
+      return (t - a.top) / refToDisp;
     }
-    for (const keys of Object.values(byAnchor)) {
-      keys.forEach((key, i) => { groupIndex[key] = i; groupSize[key] = keys.length; });
-    }
-  }
+    return 0;
+  };
 
   return (
     <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', alignItems: 'flex-start' }}>
@@ -959,121 +969,36 @@ function OverlayCanvas({
           )}
           {/* no guessed handles while this item's first render is on its way */}
           {(livePreview?.layout || !previewBusy) && enabledKeys.map((key) => {
-            const e = draftStyle[key] ?? {};
-            // reference-unit offset -> on-canvas px (inverse of the drag conversion)
-            const scale = (displayWidth / naturalSize.w) * posterScale(naturalSize.w);
-            const size = e.size ? e.size / 42 : 1; // chip scale only
-            const resizeHandle = (
-              <span
-                onPointerDown={(ev) => { ev.stopPropagation(); onChipPointerDown(key, 'resize')(ev); }}
-                style={{
-                  position: 'absolute', right: -4, bottom: -4, width: 8, height: 8,
-                  background: 'var(--accent)', borderRadius: '50%', cursor: 'nwse-resize',
-                }}
-                title="Drag to resize"
-              />
-            );
-
-            // Real geometry from the last server render (preview `layout`):
-            // the handle sits exactly on the drawn badge, shifted live by how
-            // far the offset moved since that render. Operator-reported
-            // 2026-11-15: the approximate chips sat inside the poster while
-            // the real stacked badges had been pushed off its bottom edge.
             const hd = handles[key];
-            if (hd) {
-              const { left, top, w, h, band } = hd;
-              return (
-                <div
-                  key={key}
-                  onPointerDown={(ev) => { if (hd.snap) folded.current[key] = hd.snap; onChipPointerDown(key, 'move', hd.snap)(ev); }}
-                  onPointerMove={onChipPointerMove}
-                  onPointerUp={onChipPointerUp}
-                  style={{
-                    position: 'absolute', left, top, width: w, height: h,
-                    border: '2px solid var(--accent)', borderRadius: 4,
-                    background: 'rgba(0,0,0,0.15)',
-                    cursor: band ? 'ns-resize' : 'move', userSelect: 'none', boxSizing: 'border-box',
-                    fontSize: 10, color: '#fff', overflow: 'hidden', whiteSpace: 'nowrap',
-                  }}
-                  title={`${ELEMENT_LABELS[key] ?? key} — drag to move`}
-                >
-                  <span style={{ padding: '0 3px', textShadow: '0 0 2px #000, 0 0 2px #000' }}>{ELEMENT_LABELS[key] ?? key}</span>
-                  {resizeHandle}
-                </div>
-              );
-            }
-
-            if (isBandKey(key, draftStyle)) {
-              // Matches the real renderer: always full width, only the
-              // vertical nudge (y_offset) does anything -- see isBandKey's
-              // comment. Rendered as a strip across the canvas, not a
-              // small chip, and drag is vertical-only (onChipPointerMove
-              // already locks dx for band keys).
-              const row = anchorRow(e.position);
-              const edge: React.CSSProperties = row === 'bottom'
-                ? { bottom: 0, ...nudgeStyle(e.position, 0, e.y_offset ?? 0, scale) }
-                : row === 'top'
-                  ? { top: 0, ...nudgeStyle(e.position, 0, e.y_offset ?? 0, scale) }
-                  : { top: '50%', marginTop: (e.y_offset ?? 0) * scale - 10 };
-              return (
-                <div
-                  key={key}
-                  onPointerDown={onChipPointerDown(key, 'move')}
-                  onPointerMove={onChipPointerMove}
-                  onPointerUp={onChipPointerUp}
-                  style={{
-                    position: 'absolute', left: 0, right: 0, ...edge,
-                    padding: `${Math.min(2 * size, 5)}px 6px`, fontSize: Math.min(10 * size, 13),
-                    textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                    background: 'rgba(0,0,0,0.72)', color: '#fff',
-                    cursor: 'ns-resize', userSelect: 'none',
-                    borderTop: '1px solid rgba(255,255,255,0.3)', borderBottom: '1px solid rgba(255,255,255,0.3)',
-                  }}
-                  title={`${ELEMENT_LABELS[key] ?? key} — full width, drag up/down only`}
-                >
-                  {ELEMENT_LABELS[key] ?? key}{livePreview?.layout ? ' (no data)' : ''}
-                  {resizeHandle}
-                </div>
-              );
-            }
-
-            const anchor = ANCHOR_CSS[e.position || 'top_left'] ?? ANCHOR_CSS.top_left;
-            const idx = groupIndex[key] ?? 0;
-            const n = groupSize[key] ?? 1;
-            // Stagger, in natural y_offset units: 'bottom'-anchored groups
-            // stack upward from the edge (the real renderer's LAST item in
-            // anchor order sits closest to that edge), everything else
-            // stacks downward. Sign-matched to nudgeStyle's own
-            // "down-positive" convention so it composes with it below.
-            const stepsFromAnchor = anchorRow(e.position) === 'bottom' ? -(n - 1 - idx) : idx;
-            const nudge = nudgeStyle(e.position, e.x_offset ?? 0, (e.y_offset ?? 0) + stepsFromAnchor * STAGGER, scale);
+            if (!hd) return null;
+            const { left, top, w, h, band, noData } = hd;
+            const label = ELEMENT_LABELS[key] ?? key;
             return (
               <div
                 key={key}
-                onPointerDown={onChipPointerDown(key, 'move')}
+                onPointerDown={(ev) => { if (hd.snap) folded.current[key] = hd.snap; onChipPointerDown(key, 'move', hd.snap)(ev); }}
                 onPointerMove={onChipPointerMove}
-                onPointerUp={onChipPointerUp}
+                onPointerUp={() => onChipPointerUp(dropNudge(key))}
                 style={{
-                  position: 'absolute', ...anchor, ...nudge,
-                  // `size` is the element's real on-poster scale (often 2-4x
-                  // for visibility on a full-resolution render) -- applied
-                  // directly to padding/fontSize here it could make a chip
-                  // with a long label (e.g. "TV status") cover the entire
-                  // 280px preview canvas. Clamp so the chip stays a grabbable
-                  // label at any configured size instead of a full-image veil.
-                  padding: `${Math.min(2 * size, 5)}px ${Math.min(5 * size, 10)}px`,
-                  fontSize: Math.min(10 * size, 13),
-                  maxWidth: '85%', overflow: 'hidden', textOverflow: 'ellipsis',
-                  background: 'rgba(0,0,0,0.72)', color: '#fff', borderRadius: 4,
-                  cursor: 'move', userSelect: 'none', whiteSpace: 'nowrap',
-                  border: '1px solid rgba(255,255,255,0.3)',
+                  position: 'absolute', left, top, width: w, height: h,
+                  border: `2px ${noData ? 'dashed' : 'solid'} var(--accent)`, borderRadius: 4,
+                  background: noData ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0.15)',
+                  cursor: band ? 'ns-resize' : 'move', userSelect: 'none', boxSizing: 'border-box',
+                  fontSize: 10, color: '#fff', overflow: 'hidden', whiteSpace: 'nowrap',
                 }}
-                title={livePreview?.layout
-                  ? `${ELEMENT_LABELS[key] ?? key} — not drawn for this item (no data); approximate position`
-                  : `${ELEMENT_LABELS[key] ?? key} — drag to move`}
+                title={noData
+                  ? `${label} — not drawn for this item (no data); this is where it goes when it has data`
+                  : `${label} — ${band ? 'full width, drag up/down only' : 'drag to move'}`}
               >
-                {ELEMENT_LABELS[key] ?? key}{livePreview?.layout ? ' (no data)' : ''}
-                {resizeHandle}
+                <span style={{ padding: '0 3px', textShadow: '0 0 2px #000, 0 0 2px #000' }}>{label}{noData ? ' (no data)' : ''}</span>
+                <span
+                  onPointerDown={(ev) => { ev.stopPropagation(); onChipPointerDown(key, 'resize')(ev); }}
+                  style={{
+                    position: 'absolute', right: 0, bottom: 0, width: 12, height: 12,
+                    background: 'var(--accent)', borderRadius: '50%', cursor: 'nwse-resize',
+                  }}
+                  title="Drag to resize"
+                />
               </div>
             );
           })}

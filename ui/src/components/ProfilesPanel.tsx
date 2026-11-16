@@ -9,7 +9,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { getJellyfinLibraries, getConfig, putConfig, runPosterRotationNow, startRun, getJob } from '../api';
 import type { JfLibrary } from '../api';
 import * as YAML from 'js-yaml';
-import { downloadProfile, pickFile, readProfileFile } from '../profileFile';
+import { downloadProfile, pickFile, profileMatchesLibrary, readProfileFile } from '../profileFile';
 
 // Same terminal-status set used by LegacyApp.tsx's run pollers.
 const TERMINAL = new Set(['ok', 'partial', 'error', 'refused']);
@@ -211,7 +211,9 @@ export default function ProfilesPanel({ onSaved, onEditInOverlays }: Props) {
           window.clearInterval(removeTimers.current[key]);
           delete removeTimers.current[key];
           setRemoveBusy((b) => (b === key ? null : b));
-          flash(key === 'ALL'
+          flash(key.startsWith('RUN:')
+            ? `${key === 'RUN:ALL' ? 'All libraries' : `“${key.slice(4)}”`} run ${j.status} — files written: ${j.files_written}, unchanged: ${j.files_unchanged}`
+            : key === 'ALL'
             ? `Overlays removed from all libraries — files written: ${j.files_written}, unchanged: ${j.files_unchanged}`
             : `“${key}” overlays removed — files written: ${j.files_written}, unchanged: ${j.files_unchanged}`);
         }
@@ -247,6 +249,22 @@ export default function ProfilesPanel({ onSaved, onEditInOverlays }: Props) {
       pollRemoveJob(libName, r.job_id);
     } catch (e: any) {
       setRemoveErr((p) => ({ ...p, [libName]: e?.message ?? 'apply failed' }));
+      setRemoveBusy(null);
+    }
+  }
+
+  // Manual run (operator-requested 2026-11-16): the same apply the schedule
+  // and the topbar run, for one library or (no name) all of them.
+  async function runOverlays(libName?: string) {
+    if (!libName && !window.confirm('Run now on ALL libraries? This re-writes posters with the current overlay profiles.')) return;
+    const key = `RUN:${libName ?? 'ALL'}`;
+    setRemoveBusy(key);
+    setRemoveErr((p) => ({ ...p, [key]: null }));
+    try {
+      const r = await startRun('apply', undefined, libName);
+      pollRemoveJob(key, r.job_id);
+    } catch (e: any) {
+      setRemoveErr((p) => ({ ...p, [key]: e?.message ?? 'apply failed' }));
       setRemoveBusy(null);
     }
   }
@@ -412,12 +430,17 @@ export default function ProfilesPanel({ onSaved, onEditInOverlays }: Props) {
         way to assign or clear it here; fine-grained overlay editing lives in the Overlays tab.
       </p>
       <div className="profiles-create-row">
+        <button className="btn" disabled={busy || removeBusy !== null}
+                title="Apply now on every enabled library: writes posters with the current overlay profiles"
+                onClick={() => void runOverlays()}>
+          {removeBusy === 'RUN:ALL' ? 'Running…' : 'Run all libraries now'}
+        </button>
         <button className="btn danger" disabled={busy || removeBusy !== null}
                 onClick={() => void removeOverlaysAll()}>
           {removeBusy === 'ALL' ? 'Removing overlays…' : 'Remove overlays from all libraries'}
         </button>
       </div>
-      {removeErr['ALL'] && <div className="field-msg err">{removeErr['ALL']}</div>}
+      {(removeErr['ALL'] || removeErr['RUN:ALL']) && <div className="field-msg err">{removeErr['ALL'] || removeErr['RUN:ALL']}</div>}
       <table className="profiles-table">
         <thead><tr><th>Library (Jellyfin)</th><th>Managed by Finmeta</th><th>Profile</th><th>Active elements</th><th></th></tr></thead>
         <tbody>
@@ -445,6 +468,18 @@ export default function ProfilesPanel({ onSaved, onEditInOverlays }: Props) {
                     <option value="">(none)</option>
                     {names.map((n) => <option key={n} value={n}>{n}</option>)}
                   </select>
+                  {/* Suggest only -- never assigned on its own, so existing
+                      setups with their own profile names are left alone. */}
+                  {l.configured && !assignments[l.name] && (() => {
+                    const match = names.find((n) => profileMatchesLibrary(n, l.name));
+                    return match ? (
+                      <button className="btn" disabled={busy} style={{ marginLeft: 6 }}
+                              title={`A profile named like this library exists — assign it`}
+                              onClick={() => void assign(l.name, match)}>
+                        Use “{match}”
+                      </button>
+                    ) : null;
+                  })()}
                 </td>
                 <td>
                   {profName ? (
@@ -460,11 +495,16 @@ export default function ProfilesPanel({ onSaved, onEditInOverlays }: Props) {
                   {onEditInOverlays && (
                     <button className="btn" onClick={() => onEditInOverlays(l.name)}>Edit in Overlays</button>
                   )}
+                  <button className="btn" disabled={!l.configured || !l.enabled || busy || removeBusy !== null}
+                          title={l.enabled ? 'Apply now on this library: writes its posters with the current overlay profile' : 'Enable the library first'}
+                          onClick={() => void runOverlays(l.name)}>
+                    {removeBusy === `RUN:${l.name}` ? 'Running…' : 'Run now'}
+                  </button>
                   <button className="btn danger" disabled={!l.configured || busy || removeBusy !== null}
                           onClick={() => void removeOverlays(l.name)}>
                     {removeBusy === l.name ? 'Removing…' : 'Remove overlays'}
                   </button>
-                  {removeErr[l.name] && <div className="field-msg err">{removeErr[l.name]}</div>}
+                  {(removeErr[l.name] || removeErr[`RUN:${l.name}`]) && <div className="field-msg err">{removeErr[l.name] || removeErr[`RUN:${l.name}`]}</div>}
                 </td>
               </tr>
             );

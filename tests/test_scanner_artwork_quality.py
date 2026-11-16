@@ -147,3 +147,12 @@ def test_artwork_quality_can_be_switched_off(tmp_path):
                               min_artwork_width=WIDTHS, min_artwork_bytes=20480),
     )
     assert emitted == []
+
+
+def test_a_small_but_readable_image_is_not_a_tiny_file(tmp_path):
+    # 2026-11-16: an 18 kB logo was flagged "tiny" forever; re-applying
+    # fetched the same perfectly good file.
+    _png(tmp_path / "Movies" / "Alpha" / "logo.png", 800, 300)
+    out = check_artwork_quality(_mapped(tmp_path), library="Movies",
+                                kinds=["logo"], min_width=WIDTHS, min_bytes=20480)
+    assert out == []

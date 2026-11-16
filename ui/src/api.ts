@@ -287,12 +287,13 @@ export async function fixFindingsBatched(
   }
   if (current.length > 0) batches.push(current);
 
-  const merged: FixResp = { submitted: [], not_fixable: [], unknown: [] };
+  const merged: FixResp = { submitted: [], not_fixable: [], unknown: [], no_better: [] };
   for (const batch of batches) {
     const r = await fixFindings(scanId, batch);
     merged.submitted.push(...r.submitted);
     merged.not_fixable.push(...r.not_fixable);
     merged.unknown.push(...r.unknown);
+    merged.no_better!.push(...(r.no_better ?? []));
   }
   return merged;
 }
@@ -490,10 +491,10 @@ export interface FormatRuleMatch { key: string; label: string }
 export interface OverlayPreviewEntry {
   item_id: string; image?: string; error?: string; samples?: string[];
   /** Where each drawn badge landed, in natural px of `image` (absent key = not drawn). */
-  layout?: { key: string; x: number; y: number; w: number; h: number; push_x?: number; push_y?: number }[];
+  layout?: { key: string; x: number; y: number; w: number; h: number; push_x?: number; push_y?: number; home_y?: number; ghost?: boolean }[];
   size?: [number, number];
   /** Client-side only: the element offsets the request for this preview was sent with. */
-  sentOffsets?: Record<string, { x: number; y: number }>;
+  sentOffsets?: Record<string, { x: number; y: number; size?: number }>;
   /** S9d4c: the EXACT pre-compositing candidate "image" was rendered from,
    * as a data URL -- show this as "Base image" so it's guaranteed to match
    * "With overlay" (they used to come from two independently-selected

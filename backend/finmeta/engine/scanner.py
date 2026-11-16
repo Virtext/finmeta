@@ -843,7 +843,10 @@ def check_artwork_quality(
                 "library": library, "item_id": item.id, "item_name": item.name,
                 "media_type": _media_type(item),
             }
-            if min_bytes and size < min_bytes:
+            dims = _image_size(target)
+            # A small file that opens fine is a real image (logos are often
+            # under 20 kB) -- only an unreadable one is a placeholder/truncation.
+            if min_bytes and size < min_bytes and dims is None:
                 out.append(Finding(
                     **base_fields, check_code=f"artwork_quality.tiny_file.{kind}",
                     severity="warning", fix_kind="apply_item",
@@ -853,7 +856,6 @@ def check_artwork_quality(
                                     "download rather than a real image."},
                 ))
                 continue
-            dims = _image_size(target)
             if dims is None:
                 out.append(Finding(
                     **base_fields, check_code=f"artwork_quality.unreadable.{kind}",

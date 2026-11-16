@@ -45,3 +45,13 @@ export function pickFile(onFile: (f: File) => void): void {
   input.onchange = () => { const f = input.files?.[0]; if (f) onFile(f); };
   input.click();
 }
+
+/** A profile "belongs" to a library by name: same name ignoring case and
+ *  punctuation ("Anime" / "anime"), or the auto-migrated "<lib>-auto". Only
+ *  ever used to SUGGEST -- an explicit overlay_profile assignment always wins. */
+export function profileMatchesLibrary(profile: string, library: string): boolean {
+  const norm = (v: string) => v.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+  const p = norm(profile);
+  const l = norm(library);
+  return !!l && (p === l || p === `${l}auto`);
+}
