@@ -365,6 +365,7 @@ export default function HealthPage({ libraries, dryRun, onBack, onPickArtwork }:
       if (refreshed) parts.push(`${refreshed} Jellyfin refresh requested`);
       if (failed) parts.push(`${failed} failed`);
       if (r.no_source?.length) parts.push(`${r.no_source.length} have no such image at any source`);
+      if (r.no_better?.length) parts.push(`${r.no_better.length} have no larger image at any source (Ignore them, or lower the floor in Settings)`);
       if (r.not_fixable.length) parts.push(`${r.not_fixable.length} not fixable here`);
       setFixMsg(`${parts.join(' · ') || 'Nothing to do'}. Rescan to confirm.`);
       setSelected(new Map());

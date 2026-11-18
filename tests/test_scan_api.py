@@ -525,6 +525,31 @@ def test_low_resolution_fix_picks_a_candidate_that_passes(ctx_factory):
     assert body["no_better"] == [rows[1]["id"]]
 
 
+def test_low_resolution_with_nothing_wider_is_not_applied_or_stamped(ctx_factory):
+    """Operator-reported 2026-11-18: a 1280px backdrop under a 1920 floor,
+    no wider source -> the fix re-downloaded the same image (written=0) and
+    the finding came back every scan. Now: reported no_better, no apply, no
+    reshuffle (a later apply would swap in a random no-wider image), not fixed."""
+    from finmeta.sources.candidate import Candidate
+
+    small = Candidate(kind="backdrop", source="tmdb", width=1280, height=720,
+                      ref="https://image.tmdb.org/t/p/original/b.jpg")
+    ctx = ctx_factory(dry_run=False)
+    ctx._candidates_provider = lambda item, *a: ({"backdrop": [small]}, 1)
+    scan_id, rows = _seed(ctx, [Finding(
+        library="Movies", check_code="artwork_quality.low_resolution.backdrop",
+        severity="warning", item_id="item-1", item_name="A", media_type="movie",
+        fix_kind="candidate_picker", detail={"kind": "backdrop", "width": 1280, "floor": 1920})])
+    with _client(ctx) as client:
+        body = client.post(f"/api/scans/{scan_id}/fix",
+                           json={"finding_ids": [rows[0]["id"]]}).json()
+    assert body["no_better"] == [rows[0]["id"]]
+    assert body["submitted"] == []
+    assert ctx.overrides.reshuffle_counts("item-1") == {}
+    rows, _ = scan_store.list_findings(ctx.db_path, scan_id)
+    assert not rows[0]["fixed_at"]
+
+
 def test_unreadable_artwork_fix_drops_the_lock_on_the_bad_candidate(ctx_factory):
     ctx = ctx_factory(dry_run=False)
     ctx.overrides.set_lock("item-1", "logo", "https://image.tmdb.org/t/p/original/x.svg", "0" * 64)
