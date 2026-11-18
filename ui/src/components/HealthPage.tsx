@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  deleteScan, fixFindingsBatched, getConfig, getFindings, getHelp, getJob, getLatestScan, startScan,
+  clearIgnores, deleteScan, fixFindingsBatched, getConfig, getFindings, getHelp, getJob, getLatestScan,
+  ignoreFindings, startScan,
 } from '../api';
 import type {
   FindingsResp, HelpResp, JobResp, LatestScanResp, LibraryView, ScanFinding, Severity,
@@ -207,7 +208,10 @@ export default function HealthPage({ libraries, dryRun, onBack, onPickArtwork }:
   const [scanning, setScanning] = useState(false);
   const timer = useRef<number | null>(null);
 
-  const [selected, setSelected] = useState<Set<number>>(new Set());
+  // Keyed by id so a "select all" in a category can hold rows that aren't
+  // on the loaded page (fix batching needs each row's item_id).
+  const [selected, setSelected] = useState<Map<number, ScanFinding>>(new Map());
+  const [busy, setBusy] = useState<string | null>(null);
   const [fixMsg, setFixMsg] = useState<string | null>(null);
   const [fixErr, setFixErr] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -269,7 +273,7 @@ export default function HealthPage({ libraries, dryRun, onBack, onPickArtwork }:
           if (TERMINAL.has(jb.status)) {
             if (timer.current) window.clearInterval(timer.current);
             setScanning(false);
-            setSelected(new Set());
+            setSelected(new Map());
             reload();
           }
         } catch (e) {
@@ -302,11 +306,39 @@ export default function HealthPage({ libraries, dryRun, onBack, onPickArtwork }:
     [],
   );
 
-  const toggle = (id: number) => setSelected((prev) => {
-    const next = new Set(prev);
-    if (next.has(id)) next.delete(id); else next.add(id);
+  const toggle = (f: ScanFinding) => setSelected((prev) => {
+    const next = new Map(prev);
+    if (next.has(f.id)) next.delete(f.id); else next.set(f.id, f);
     return next;
   });
+
+  // Every finding of one check (with the current library/severity filters),
+  // not just the loaded page.
+  const selectCategory = useCallback(async (code: string, on: boolean) => {
+    if (!latest?.scan) return;
+    setFixErr(null);
+    setBusy(`select:${code}`);
+    try {
+      const all: ScanFinding[] = [];
+      for (let off = 0; ; off += 500) {
+        const r = await getFindings(latest.scan.scan_id, {
+          check: code, severity: severityFilter || undefined, library: libFilter || undefined,
+          limit: 500, offset: off,
+        });
+        all.push(...r.findings.filter((f) => f.check_code === code));
+        if (!r.has_more) break;
+      }
+      setSelected((prev) => {
+        const next = new Map(prev);
+        all.forEach((f) => (on ? next.set(f.id, f) : next.delete(f.id)));
+        return next;
+      });
+    } catch (e) {
+      setFixErr((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }, [latest, severityFilter, libFilter]);
 
   const toggleGroup = (code: string) => setCollapsed((prev) => {
     const next = new Set(prev);
@@ -316,7 +348,7 @@ export default function HealthPage({ libraries, dryRun, onBack, onPickArtwork }:
 
   const submitFix = useCallback(async (targets: ScanFinding[]) => {
     if (!latest?.scan || !targets.length) return;
-    setFixMsg(null); setFixErr(null);
+    setFixMsg(null); setFixErr(null); setBusy('fix');
     try {
       // Batched: the backend refuses more than 50 distinct items in one
       // request, and "fix selected" across a whole library's findings
@@ -335,14 +367,47 @@ export default function HealthPage({ libraries, dryRun, onBack, onPickArtwork }:
       if (r.no_source?.length) parts.push(`${r.no_source.length} have no such image at any source`);
       if (r.not_fixable.length) parts.push(`${r.not_fixable.length} not fixable here`);
       setFixMsg(`${parts.join(' · ') || 'Nothing to do'}. Rescan to confirm.`);
-      setSelected(new Set());
+      setSelected(new Map());
       const l = await getLatestScan();
       setLatest(l);
       if (l.scan) await loadFindings(l.scan.scan_id, 0);
     } catch (e) {
       setFixErr((e as Error).message);
+    } finally {
+      setBusy(null);
     }
   }, [latest, loadFindings]);
+
+  const submitIgnore = useCallback(async (targets: ScanFinding[]) => {
+    if (!latest?.scan || !targets.length) return;
+    setFixMsg(null); setFixErr(null); setBusy('ignore');
+    try {
+      let n = 0;
+      for (let i = 0; i < targets.length; i += 500) {
+        n += (await ignoreFindings(latest.scan.scan_id, targets.slice(i, i + 500).map((f) => f.id))).ignored;
+      }
+      setFixMsg(`${n} finding(s) ignored — later scans won't report them again.`);
+      setSelected(new Map());
+      const l = await getLatestScan();
+      setLatest(l);
+      if (l.scan) await loadFindings(l.scan.scan_id, 0);
+    } catch (e) {
+      setFixErr((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }, [latest, loadFindings]);
+
+  const showIgnored = useCallback(async () => {
+    if (!window.confirm('Show every ignored finding again from the next scan on?')) return;
+    try {
+      const r = await clearIgnores();
+      setFixMsg(`${r.cleared} ignored finding(s) will be reported again — rescan to see them.`);
+      setLatest(await getLatestScan());
+    } catch (e) {
+      setFixErr((e as Error).message);
+    }
+  }, []);
 
   const clearScan = useCallback(async () => {
     if (!latest?.scan) return;
@@ -358,10 +423,8 @@ export default function HealthPage({ libraries, dryRun, onBack, onPickArtwork }:
 
   const counts = latest?.counts;
   const scan = latest?.scan || null;
-  const selectedFixable = useMemo(
-    () => (findings?.findings || []).filter((f) => selected.has(f.id) && fixable(f)),
-    [findings, selected, fixable],
-  );
+  const selectedAll = useMemo(() => [...selected.values()], [selected]);
+  const selectedFixable = useMemo(() => selectedAll.filter(fixable), [selectedAll, fixable]);
 
   return (
     <div className="settings-page">
@@ -430,6 +493,12 @@ export default function HealthPage({ libraries, dryRun, onBack, onPickArtwork }:
           <>
             <div className="health-summary">
               <div className="health-scan-meta">
+                {!!latest?.ignored && (
+                  <span className="muted">
+                    {latest.ignored} ignored ·{' '}
+                    <button className="link" onClick={showIgnored}>show again</button> ·{' '}
+                  </span>
+                )}
                 <strong>{scan.finding_count}</strong> finding(s) in{' '}
                 <strong>{scan.items_scanned}</strong> item(s) ·{' '}
                 {scan.library || 'all libraries'} ·{' '}
@@ -493,22 +562,32 @@ export default function HealthPage({ libraries, dryRun, onBack, onPickArtwork }:
               </div>
             )}
 
-            {selectedFixable.length > 0 && (
+            {(selectedAll.length > 0 || fixMsg || fixErr || busy) && (
               <div className="health-bulk">
-                <span>{selectedFixable.length} selected</span>
-                <button
-                  className="btn primary"
-                  onClick={() => submitFix(selectedFixable)}
-                >
-                  Fix selected
-                </button>
-                <button className="btn btn-ghost" onClick={() => setSelected(new Set())}>
-                  Deselect
-                </button>
+                {selectedAll.length > 0 && (
+                  <>
+                    <span>{selectedAll.length} selected</span>
+                    <button
+                      className="btn primary"
+                      disabled={busy !== null || selectedFixable.length === 0}
+                      title={selectedFixable.length === 0 ? 'None of the selected findings has an automatic fix' : undefined}
+                      onClick={() => submitFix(selectedFixable)}
+                    >
+                      {busy === 'fix' ? 'Fixing…' : `Fix ${selectedFixable.length}`}
+                    </button>
+                    <button className="btn" disabled={busy !== null} onClick={() => submitIgnore(selectedAll)}>
+                      {busy === 'ignore' ? 'Ignoring…' : `Ignore ${selectedAll.length}`}
+                    </button>
+                    <button className="btn btn-ghost" disabled={busy !== null} onClick={() => setSelected(new Map())}>
+                      Deselect
+                    </button>
+                  </>
+                )}
+                {busy?.startsWith('select:') && <span className="muted">Selecting…</span>}
+                {fixMsg && <div className="field-msg ok health-msg">{fixMsg}</div>}
+                {fixErr && <div className="field-msg err health-msg">{fixErr}</div>}
               </div>
             )}
-            {fixMsg && <div className="field-msg ok health-msg">{fixMsg}</div>}
-            {fixErr && <div className="field-msg err health-msg">{fixErr}</div>}
 
             {grouped.map(([code, rows]) => (
               <section className="health-group" key={code}>
@@ -522,19 +601,30 @@ export default function HealthPage({ libraries, dryRun, onBack, onPickArtwork }:
                   <span className={`health-sev sev-${rows[0].severity}`}>
                     {rows[0].severity}
                   </span>
+                  {(() => {
+                    const n = (severityFilter || libFilter) ? null : counts?.by_check?.[code];
+                    const allOn = rows.every((f) => selected.has(f.id));
+                    return (
+                      <button
+                        className="btn btn-ghost health-group-select"
+                        disabled={busy !== null}
+                        onClick={(e) => { e.stopPropagation(); void selectCategory(code, !allOn); }}
+                      >
+                        {allOn ? 'Deselect all' : `Select all${n ? ` ${n}` : ''}`}
+                      </button>
+                    );
+                  })()}
                 </h3>
                 {!collapsed.has(code) && (
                   <ul className="health-rows">
                     {rows.map((f) => (
                       <li className="health-row" key={f.id}>
-                        {fixable(f) && (
-                          <input
-                            type="checkbox"
-                            checked={selected.has(f.id)}
-                            onChange={() => toggle(f.id)}
-                            aria-label={`Select ${f.item_name}`}
-                          />
-                        )}
+                        <input
+                          type="checkbox"
+                          checked={selected.has(f.id)}
+                          onChange={() => toggle(f)}
+                          aria-label={`Select ${f.item_name}`}
+                        />
                         <div className="health-row-main">
                           <div className="health-row-head">
                             {/* Clickable regardless of fix_kind (operator-
@@ -607,6 +697,14 @@ export default function HealthPage({ libraries, dryRun, onBack, onPickArtwork }:
                           {f.fix_kind === 'none' && (
                             <span className="muted health-nofix">report only</span>
                           )}
+                          <button
+                            className="btn btn-ghost"
+                            disabled={busy !== null}
+                            title="Hide this finding now and in later scans"
+                            onClick={() => submitIgnore([f])}
+                          >
+                            Ignore
+                          </button>
                           {f.check_code === 'path_unmapped' && (
                             <span className="muted health-nofix">fix in Settings</span>
                           )}

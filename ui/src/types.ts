@@ -303,7 +303,12 @@ export interface ScanFinding {
 }
 
 export interface ScansResp { scans: ScanRow[] }
-export interface LatestScanResp { scan: ScanRow | null; counts: ScanCounts }
+export interface LatestScanResp {
+  scan: ScanRow | null;
+  counts: ScanCounts;
+  /** How many item+check pairs the operator chose to ignore. */
+  ignored?: number;
+}
 export interface FindingsResp {
   scan_id: string;
   findings: ScanFinding[];

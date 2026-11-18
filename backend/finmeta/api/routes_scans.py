@@ -55,11 +55,31 @@ def latest_scan(ctx: AppContext = Depends(get_ctx)) -> dict:
     Includes a still-running scan: the UI shows live counts while it works.
     """
     scan = scan_store.latest_scan(ctx.db_path)
+    ignored = scan_store.count_ignores(ctx.db_path)
     if scan is None:
         return {"scan": None, "counts": {"by_severity": {}, "by_group": {},
-                                         "by_check": {}}}
+                                         "by_check": {}}, "ignored": ignored}
     return {"scan": scan, "counts": scan_store.scan_counts(ctx.db_path,
-                                                           scan["scan_id"])}
+                                                           scan["scan_id"]),
+            "ignored": ignored}
+
+
+@router.post("/scans/{scan_id}/ignore")
+def ignore_findings(scan_id: str, body: FixRequest,
+                    ctx: AppContext = Depends(get_ctx)) -> dict:
+    """Hide findings the operator doesn't want fixed -- in this scan and in
+    every later one (remembered per item + check). Writes no media."""
+    if scan_store.get_scan(ctx.db_path, scan_id) is None:
+        raise HTTPException(status_code=404, detail=f"unknown scan {scan_id!r}")
+    if not body.finding_ids:
+        raise HTTPException(status_code=422, detail="finding_ids must not be empty")
+    return {"ignored": scan_store.ignore_findings(ctx.db_path, scan_id, body.finding_ids)}
+
+
+@router.delete("/scan-ignores")
+def clear_ignores(ctx: AppContext = Depends(get_ctx)) -> dict:
+    """Forget every ignored finding; the next scan reports them again."""
+    return {"cleared": scan_store.clear_ignores(ctx.db_path)}
 
 
 @router.get("/scans/{scan_id}")
@@ -151,11 +171,15 @@ def fix_findings(scan_id: str, body: FixRequest,
     apply_items = _distinct([r["item_id"] for r in apply_rows] + [r["item_id"] for r in pick_rows])
     refresh_items = _distinct([r["item_id"] for r in refresh_rows])
 
-    if len(apply_items) + len(refresh_items) > MAX_FIX_ITEMS:
+    # Distinct items across both kinds: one item with an apply AND a refresh
+    # finding is still one item (the UI batches by item -- counting it twice
+    # here 422'd a 50-item batch as "51 > 50", operator-reported 2026-11-18).
+    n_items = len(set(apply_items) | set(refresh_items))
+    if n_items > MAX_FIX_ITEMS:
         raise HTTPException(
             status_code=422,
             detail=f"too many items in one fix request "
-                   f"({len(apply_items) + len(refresh_items)} > {MAX_FIX_ITEMS}); "
+                   f"({n_items} > {MAX_FIX_ITEMS}); "
                    "narrow the selection and fix in batches")
 
     if apply_items and ctx.config.dry_run:
