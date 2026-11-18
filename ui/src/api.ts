@@ -56,12 +56,14 @@ const enc = (s: string) => encodeURIComponent(s);
 
 export const getLibraries = () => j<LibrariesResp>('/api/libraries');
 export const getItemsLight = (
-  lib: string, opts?: { limit?: number; offset?: number; search?: string },
+  lib: string, opts?: { limit?: number; offset?: number; search?: string; sort?: string; order?: 'asc' | 'desc' },
 ) => {
   const params = new URLSearchParams();
   if (opts?.limit != null) params.set('limit', String(opts.limit));
   if (opts?.offset != null) params.set('offset', String(opts.offset));
   if (opts?.search) params.set('search', opts.search);
+  if (opts?.sort) params.set('sort', opts.sort);
+  if (opts?.order) params.set('order', opts.order);
   const qs = params.toString();
   return j<LibItemsLightResp>(`/api/libraries/${enc(lib)}/items/light${qs ? `?${qs}` : ''}`);
 };

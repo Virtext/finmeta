@@ -47,7 +47,7 @@ class FakeJf:
         self.get_items_page_calls.append({
             "parent_id": parent_id, "include_item_types": include_item_types,
             "fields": fields, "limit": limit, "start_index": start_index,
-            "search_term": search_term,
+            "search_term": search_term, "sort_by": sort_by, "sort_order": sort_order,
         })
         pool = list(self._items.get(parent_id, []))
         if include_item_types:
@@ -100,6 +100,7 @@ def test_light_list_has_names_only_no_diff_or_tmdb_fields(client):
     assert [i["item_id"] for i in body["items"]] == ["m1", "m2"]
     assert body["items"][0] == {
         "item_id": "m1", "item_name": "Movie One", "media_type": "movie", "poster_tag": None,
+        "year": None,
     }
     assert "diff" not in body["items"][0]
     assert "summary" not in body
@@ -215,3 +216,24 @@ def test_jellyfin_502_mapping_still_works(context, client):
     jf.get_items_page = _boom  # type: ignore[method-assign]
     r = client.get("/api/libraries/Movies/items/light")
     assert r.status_code == 502
+
+
+def test_sort_and_order_reach_jellyfin_with_stable_tiebreakers(client, context):
+    r = client.get("/api/libraries/Movies/items/light?sort=year&order=desc")
+    assert r.status_code == 200
+    last = context.make_jellyfin().get_items_page_calls[-1]
+    assert last["sort_by"] == ["ProductionYear", "SortName", "Id"]
+    assert last["sort_order"] == "Descending"
+    assert "year" in r.json()["items"][0]
+
+
+def test_default_sort_is_name_ascending(client, context):
+    client.get("/api/libraries/Movies/items/light")
+    last = context.make_jellyfin().get_items_page_calls[-1]
+    assert last["sort_by"] == ["SortName", "SortName", "Id"]
+    assert last["sort_order"] == "Ascending"
+
+
+def test_unknown_sort_is_422(client):
+    assert client.get("/api/libraries/Movies/items/light?sort=Path").status_code == 422
+    assert client.get("/api/libraries/Movies/items/light?order=up").status_code == 422

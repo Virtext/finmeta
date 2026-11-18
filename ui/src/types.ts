@@ -37,6 +37,7 @@ export interface ItemLightView {
   // Jellyfin's own Primary ImageTag -- pass to itemImageUrl() so the poster
   // grid's cached image URL changes whenever the image actually does.
   poster_tag?: string | null;
+  year?: number | null;
 }
 
 export interface UnmatchedView {
