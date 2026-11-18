@@ -586,3 +586,47 @@ def test_missing_artwork_still_applies_when_the_lookup_fails(ctx_factory):
         ctx.release_run("blocking-run")
     assert body["no_source"] == []
     assert [s["item_id"] for s in body["submitted"]] == ["item-1"]
+
+
+def test_an_item_with_apply_and_refresh_findings_counts_once(ctx_factory):
+    """Operator-reported 2026-11-18: a 50-item batch from the UI 422'd as
+    "51 > 50" because one item had both an apply and a refresh finding."""
+    ctx = ctx_factory(dry_run=False)
+    findings = [_f("artwork.missing.poster", item=f"item-{i}") for i in range(MAX_FIX_ITEMS)]
+    findings.append(_f("artwork.stale_jellyfin.logo", item="item-0", fix="refresh_item"))
+    scan_id, rows = _seed(ctx, findings)
+    with _client(ctx) as client:
+        assert ctx.claim_run("blocking-run", action="apply")
+        r = client.post(f"/api/scans/{scan_id}/fix", json={"finding_ids": [x["id"] for x in rows]})
+        ctx.release_run("blocking-run")
+    assert r.status_code == 200
+
+
+def test_ignore_hides_a_finding_now_and_in_later_scans(ctx_factory):
+    ctx = ctx_factory()
+    scan_id, rows = _seed(ctx, [_f("artwork.missing.logo", item="item-1"),
+                                _f("artwork.missing.logo", item="item-2")])
+    with _client(ctx) as client:
+        r = client.post(f"/api/scans/{scan_id}/ignore", json={"finding_ids": [rows[0]["id"]]})
+        assert r.json() == {"ignored": 1}
+        left, _ = scan_store.list_findings(ctx.db_path, scan_id)
+        assert [x["item_id"] for x in left] == ["item-2"]
+        assert scan_store.get_scan(ctx.db_path, scan_id)["finding_count"] == 1
+        assert client.get("/api/scans/latest").json()["ignored"] == 1
+
+        # a later scan does not report the ignored item+check again
+        later, rows2 = _seed(ctx, [_f("artwork.missing.logo", item="item-1"),
+                                   _f("artwork.missing.poster", item="item-1")], scan_id="scan-2")
+        assert [x["check_code"] for x in rows2] == ["artwork.missing.poster"]
+
+        assert client.delete("/api/scan-ignores").json() == {"cleared": 1}
+        _, rows3 = _seed(ctx, [_f("artwork.missing.logo", item="item-1")], scan_id="scan-3")
+        assert len(rows3) == 1
+
+
+def test_ignore_rejects_empty_and_unknown_scan(ctx_factory):
+    ctx = ctx_factory()
+    scan_id, _ = _seed(ctx, [_f("artwork.missing.logo")])
+    with _client(ctx) as client:
+        assert client.post(f"/api/scans/{scan_id}/ignore", json={"finding_ids": []}).status_code == 422
+        assert client.post("/api/scans/nope/ignore", json={"finding_ids": [1]}).status_code == 404

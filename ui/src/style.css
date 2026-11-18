@@ -817,10 +817,14 @@ button { font: inherit; cursor: pointer; }
 
 .health-filters { display: flex; align-items: center; gap: 10px; font-size: 0.8rem; margin-bottom: 12px; }
 .health-bulk {
-  display: flex; align-items: center; gap: 10px; font-size: 0.85rem;
+  display: flex; align-items: center; gap: 10px; font-size: 0.85rem; flex-wrap: wrap;
   padding: 8px 12px; margin-bottom: 12px; border-radius: var(--radius);
-  background: var(--panel-glass); border: 1px solid var(--accent);
+  background: var(--panel); border: 1px solid var(--accent);
+  /* stays in view while scrolling a long list, so the result is visible */
+  position: sticky; top: 0; z-index: 5;
 }
+.health-bulk .field-msg { flex-basis: 100%; margin: 0; }
+.health-group-select { margin-left: auto; font-size: 0.8rem; }
 
 .health-group { margin-bottom: 20px; max-width: 980px; }
 .health-group h3 {

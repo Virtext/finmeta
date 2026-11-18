@@ -301,6 +301,16 @@ export async function fixFindingsBatched(
   return merged;
 }
 
+export const ignoreFindings = (scanId: string, findingIds: number[]) =>
+  j<{ ignored: number }>(`/api/scans/${enc(scanId)}/ignore`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ finding_ids: findingIds }),
+  });
+
+export const clearIgnores = () =>
+  j<{ cleared: number }>('/api/scan-ignores', { method: 'DELETE' });
+
 export const deleteScan = (scanId: string) =>
   j<{ deleted: string }>(`/api/scans/${enc(scanId)}`, { method: 'DELETE' });
 

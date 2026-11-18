@@ -120,6 +120,12 @@ def init_scan_db(db_path: Path) -> None:
                 ON scan_findings(scan_id, check_code);
             CREATE INDEX IF NOT EXISTS idx_findings_item
                 ON scan_findings(item_id);
+            CREATE TABLE IF NOT EXISTS scan_ignores (
+                item_id     TEXT NOT NULL,
+                check_code  TEXT NOT NULL,
+                ignored_at  TEXT NOT NULL,
+                PRIMARY KEY (item_id, check_code)
+            );
             CREATE TABLE IF NOT EXISTS scan_stats (
                 scan_id  TEXT NOT NULL,
                 library  TEXT NOT NULL,
@@ -152,13 +158,21 @@ def add_findings(db_path: Path, scan_id: str, findings: Sequence[Finding], *,
     if not findings:
         return 0
     init_scan_db(db_path)
+    with _conn(db_path) as conn:
+        ignored = {(r["item_id"], r["check_code"])
+                   for r in conn.execute("SELECT item_id, check_code FROM scan_ignores")}
     rows = []
     for f in findings:
+        if (f.item_id, f.check_code) in ignored:
+            continue  # operator chose "Ignore" for this item+check
+
         detail = json.dumps(f.detail, ensure_ascii=False, sort_keys=True, default=str)
         if redact is not None:
             detail = redact(detail)
         rows.append((scan_id, f.library, f.item_id, f.item_name, f.media_type,
                      f.check_code, f.severity, detail, f.fix_kind))
+    if not rows:
+        return 0
     with _conn(db_path) as conn:
         conn.executemany(
             "INSERT INTO scan_findings (scan_id, library, item_id, item_name,"
@@ -317,6 +331,42 @@ def mark_fixed(db_path: Path, ids: Sequence[int]) -> None:
             "UPDATE scan_findings SET fixed_at = ? WHERE id = ?",
             [(ts, int(i)) for i in ids],
         )
+
+
+def ignore_findings(db_path: Path, scan_id: str, ids: Sequence[int]) -> int:
+    """Hide these findings now and in every later scan (per item + check).
+
+    Library-level findings (no item_id) can't be remembered per item, so
+    they are only dropped from this scan. Returns how many rows were removed.
+    """
+    rows = findings_by_ids(db_path, scan_id, ids)
+    if not rows:
+        return 0
+    ts = _utcnow()
+    with _conn(db_path) as conn:
+        conn.executemany(
+            "INSERT OR IGNORE INTO scan_ignores (item_id, check_code, ignored_at) VALUES (?,?,?)",
+            [(r["item_id"], r["check_code"], ts) for r in rows if r["item_id"]],
+        )
+        conn.executemany("DELETE FROM scan_findings WHERE id = ?", [(r["id"],) for r in rows])
+        conn.execute(
+            "UPDATE scans SET finding_count = MAX(finding_count - ?, 0) WHERE scan_id = ?",
+            (len(rows), scan_id),
+        )
+    return len(rows)
+
+
+def count_ignores(db_path: Path) -> int:
+    init_scan_db(db_path)
+    with _conn(db_path) as conn:
+        return int(conn.execute("SELECT COUNT(*) n FROM scan_ignores").fetchone()["n"])
+
+
+def clear_ignores(db_path: Path) -> int:
+    """Forget every "Ignore"; the next scan reports those findings again."""
+    init_scan_db(db_path)
+    with _conn(db_path) as conn:
+        return conn.execute("DELETE FROM scan_ignores").rowcount
 
 
 def delete_scan(db_path: Path, scan_id: str) -> bool:
