@@ -228,6 +228,16 @@ def fix_findings(scan_id: str, body: FixRequest,
             jf.close()
 
     if pick_rows:
+        # Operator-reported 2026-11-18: a low-res fix whose sources have
+        # nothing wider re-downloaded the same image (written=0) and the
+        # finding came back every scan. Report those as no_better; do not
+        # reshuffle (a later apply would swap in a random, no-wider image),
+        # apply or stamp them fixed.
+        no_better = _pick_better_candidates(ctx, pick_rows)
+        pick_rows = [r for r in pick_rows if r["id"] not in no_better]
+        apply_items = _distinct([r["item_id"] for r in apply_rows] + [r["item_id"] for r in pick_rows])
+
+    if pick_rows:
         # Same operation the manual "Re-pick" button performs (S9d4a/S9d5):
         # bump the reshuffle counter and clear the artwork lock for each
         # (item, kind) pair the findings named, so the apply below actually
@@ -241,7 +251,6 @@ def fix_findings(scan_id: str, body: FixRequest,
             for kind in kinds:
                 ctx.overrides.increment_reshuffle(item_id, kind)
                 ctx.overrides.clear_lock(item_id, kind)
-        no_better = _pick_better_candidates(ctx, pick_rows)
         if kinds_by_item:
             ctx.invalidate_plans()
 
@@ -286,7 +295,7 @@ def _pick_better_candidates(ctx: AppContext, pick_rows: List[dict]) -> List[int]
     random one of the best-ranked ``top_n`` that meet the scan's width floor
     (else simply the widest), and store it as the item's candidate pick --
     the same thing the manual picker does. Returns the finding ids for which
-    the sources have nothing wider; those are still re-applied, best effort.
+    the sources have nothing wider (the caller skips those).
     """
     import random
 
@@ -300,7 +309,9 @@ def _pick_better_candidates(ctx: AppContext, pick_rows: List[dict]) -> List[int]
         by_item.setdefault(r["item_id"], []).append(r)
     lookups = _candidates_by_item(ctx, list(by_item))
     for item_id, rows in by_item.items():
-        by_kind = lookups.get(item_id) or {}  # failed lookup -> "no better"
+        by_kind = lookups.get(item_id)
+        if by_kind is None:   # lookup failed: not "nothing wider" -- reshuffle+apply, best effort
+            continue
         for r in rows:
             detail = r["detail"] or {}
             kind = detail.get("kind")
