@@ -553,6 +553,8 @@ def test_reshuffle_changes_deterministic_pick(client, context):
     picks = [sel(ranked, preset="random_top_n", top_n=3, item_id="item-1",
                  kind="poster", reshuffle_count=c).ref for c in range(3)]
     assert len(set(picks)) > 1
+    # 2026-11-18: every single bump changes the pick (no 1-in-n repeat)
+    assert all(a != b for a, b in zip(picks, picks[1:]))
 
     # endpoint: POST /api/items/{id}/reshuffle bumps per-kind counters
     r = client.post("/api/items/item-1/reshuffle",
