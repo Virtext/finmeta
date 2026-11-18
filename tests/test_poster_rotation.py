@@ -136,6 +136,11 @@ class TestPosterRotationJob:
         assert ctx.overrides.increment_reshuffle.call_args_list == [
             (("a", "poster"),), (("b", "poster"),), (("c", "poster"),),
         ]
+        # 2026-11-18: the lock must go too, or the apply reuses the locked poster
+        assert ctx.overrides.clear_lock.call_args_list == [
+            (("a", "poster"),), (("b", "poster"),), (("c", "poster"),),
+        ]
+        ctx.invalidate_plans.assert_called()
         sub.assert_called_once_with(ctx, "apply", item_id="a")
         assert ctx.queue_webhook_item.call_args_list == [(("b",),), (("c",),)]
         assert result == {"ok": True, "rotated": 3, "run_id": "run-1", "queued": ["b", "c"]}

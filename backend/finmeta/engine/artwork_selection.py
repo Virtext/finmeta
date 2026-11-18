@@ -35,10 +35,16 @@ def rating_of(cand: Candidate) -> tuple[float, float]:
 
 
 def _seed_index(item_id: str, kind: str, reshuffle_count: int, n: int) -> int:
-    """Deterministic index in [0, n) from (item_id, kind, reshuffle_count)."""
-    payload = f"{item_id}|{kind}|{int(reshuffle_count)}".encode("utf-8")
+    """Deterministic index in [0, n) from (item_id, kind, reshuffle_count).
+
+    The hash only picks the starting point; each reshuffle then steps to the
+    next candidate, so a bump always changes the pick when n >= 2 (hashing
+    the count too re-picked the same image 1 time in n -- poster rotation
+    "did nothing" for those items, operator-reported 2026-11-18).
+    """
+    payload = f"{item_id}|{kind}|0".encode("utf-8")
     digest = hashlib.sha256(payload).hexdigest()
-    return int(digest[:12], 16) % max(1, n)
+    return (int(digest[:12], 16) + int(reshuffle_count)) % max(1, n)
 
 
 def select_candidate(

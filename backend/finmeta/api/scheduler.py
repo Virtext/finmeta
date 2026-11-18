@@ -120,6 +120,10 @@ def poster_rotation_job(context: AppContext, library: str) -> dict:
         return {"ok": True, "rotated": 0, "reason": "no rated items found"}
     for item_id in item_ids:
         context.overrides.increment_reshuffle(item_id, "poster")
+        # Same as the manual Re-pick: a locked poster is reused as-is, so
+        # without this the apply below re-wrote the same image ("unchanged").
+        context.overrides.clear_lock(item_id, "poster")
+    context.invalidate_plans()
     first, rest = item_ids[0], item_ids[1:]
     run_id, err = submit_run(context, "apply", item_id=first)
     queued = list(rest)
