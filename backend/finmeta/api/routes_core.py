@@ -165,12 +165,19 @@ def _jellyfin_502_detail(exc: Exception) -> str:
     return f"plan build failed: {exc}"
 
 
+# Library page sort options -> Jellyfin SortBy (Radarr/Sonarr-style sorting).
+_LIGHT_SORT = {"name": "SortName", "year": "ProductionYear", "added": "DateCreated",
+               "rating": "CommunityRating", "released": "PremiereDate"}
+
+
 @router.get("/libraries/{name}/items/light")
 def library_items_light(
     name: str, ctx: AppContext = Depends(get_ctx),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     search: Optional[str] = Query(default=None),
+    sort: str = Query(default="name", pattern="^(name|year|added|rating|released)$"),
+    order: str = Query(default="asc", pattern="^(asc|desc)$"),
 ) -> dict:
     """Jellyfin-only item list: no TMDb/fanart/etc. lookups, no WritePlan.
 
@@ -205,6 +212,9 @@ def library_items_light(
                 parent_id=jf_lib.item_id, recursive=True,
                 include_item_types=["Movie", "Series"], fields="ImageTags",
                 limit=limit, start_index=offset, search_term=search,
+                # SortName,Id tie-breakers keep pages stable (no skip/repeat).
+                sort_by=[_LIGHT_SORT[sort], "SortName", "Id"],
+                sort_order="Descending" if order == "desc" else "Ascending",
             )
             page_items, total = page.items, page.total_record_count
     except Exception as exc:
@@ -225,7 +235,8 @@ def library_items_light(
          # cached poster after a successful apply. The real Jellyfin ImageTag
          # changes whenever the image does, so threading it into the URL
          # fixes the cache key instead of just shortening the window.
-         "poster_tag": it.image_tags.get("Primary")}
+         "poster_tag": it.image_tags.get("Primary"),
+         "year": it.production_year}
         for it in page_items
     ]
     overlay_elements = _profile_overlay_names(lib_cfg, ctx.config)
