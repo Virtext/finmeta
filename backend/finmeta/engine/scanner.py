@@ -803,6 +803,22 @@ def _image_size(path: Path) -> Optional[Tuple[int, int]]:
         return None
 
 
+def _unidentified_artwork_is_external(findings: List[Finding], items: Sequence[Item]) -> List[Finding]:
+    """Artwork findings on an item with no TMDb/IMDb/TVDb id can't be fixed by
+    an apply -- no source can be looked up (operator-reported 2026-11-18:
+    "fix" ran and the finding came back every scan). Point at the real fix."""
+    unidentified = {it.id for it in items
+                    if not any((it.provider_ids or {}).get(k) for k in _USABLE_PROVIDERS)}
+    for f in findings:
+        if (f.item_id in unidentified and f.fix_kind in ("apply_item", "candidate_picker")
+                and f.check_code.startswith(("artwork.", "artwork_quality."))):
+            f.fix_kind = "external"
+            f.detail = {**(f.detail or {}),
+                        "note": "Not identified (no TMDb/IMDb/TVDb id), so no source can be "
+                                "looked up. Identify it in Jellyfin first, then rescan."}
+    return findings
+
+
 def check_artwork_quality(
     mapped: Sequence[Tuple[Item, Path]], *, library: str, kinds: Sequence[str],
     min_width: Optional[Dict[str, int]] = None, min_bytes: int = 0,
@@ -1100,7 +1116,7 @@ def scan_library(
                 [it for it in items if it.type == "Series"], library=library,
                 sonarr_index=sonarr_index,
                 include_specials=cfg.include_specials))
-        _flush(page_findings)
+        _flush(_unidentified_artwork_is_external(page_findings, items))
         result.items_scanned += len(items)
         offset += len(items)
         if progress_cb is not None:

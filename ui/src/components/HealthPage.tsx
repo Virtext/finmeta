@@ -80,6 +80,8 @@ function checkLabel(code: string): string {
 /** What this finding actually says, in a sentence, from its detail payload. */
 function describe(f: ScanFinding): string {
   const d = f.detail || {};
+  // Scanner sets this on artwork findings for unidentified items (no fix here).
+  if (f.fix_kind === 'external' && f.check_code.startsWith('artwork') && d.note) return String(d.note);
   if (f.check_code.startsWith('artwork.missing.')) {
     return `No ${d.kind} on disk or in Jellyfin — Finmeta can download and write it.`;
   }
@@ -330,6 +332,7 @@ export default function HealthPage({ libraries, dryRun, onBack, onPickArtwork }:
       if (queued) parts.push(`${queued} queued`);
       if (refreshed) parts.push(`${refreshed} Jellyfin refresh requested`);
       if (failed) parts.push(`${failed} failed`);
+      if (r.no_source?.length) parts.push(`${r.no_source.length} have no such image at any source`);
       if (r.not_fixable.length) parts.push(`${r.not_fixable.length} not fixable here`);
       setFixMsg(`${parts.join(' · ') || 'Nothing to do'}. Rescan to confirm.`);
       setSelected(new Set());

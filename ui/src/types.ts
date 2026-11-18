@@ -321,6 +321,8 @@ export interface FixResp {
   unknown: number[];
   /** Low-resolution findings where no source has a wider image. */
   no_better?: number[];
+  /** Missing-artwork findings where no source has that image kind at all. */
+  no_source?: number[];
 }
 
 // ---- S11a: Activity Center ----

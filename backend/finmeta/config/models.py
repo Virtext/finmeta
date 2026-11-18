@@ -391,10 +391,11 @@ class PosterRotation(_Strict):
         "of this library's `item_count` highest-rated items on the `cron` schedule. Off by "
         "default -- opt in per library."})
     item_count: int = Field(
-        default=5, ge=1, le=50,
+        default=5, ge=1, le=1000,
         description="How many of the library's highest-rated items get rotated.",
         json_schema_extra={"help": "The N highest-rated items (by Jellyfin's `CommunityRating`) "
-        "in this library whose poster gets reshuffled+reapplied each run. Default 5."})
+        "in this library whose poster gets reshuffled+reapplied each run (1-1000). Default 5. "
+        "Each item is its own apply run, so large values take a while."})
     cron: str = Field(
         default="0 4 * * 0",
         description="Cron expression for when the rotation runs.",
