@@ -625,10 +625,10 @@ export default function ProfilesPanel({ onSaved, onEditInOverlays }: Props) {
                 </td>
                 <td>
                   <input
-                    className="config-input" type="number" min={1} max={50}
+                    className="config-input" type="number" min={1} max={1000}
                     disabled={!l.configured || busy || !pr.enabled}
                     value={pr.item_count ?? 5}
-                    onChange={(e) => void setPosterRotation(l.name, { item_count: Math.max(1, Number(e.target.value) || 1) })}
+                    onChange={(e) => void setPosterRotation(l.name, { item_count: Math.min(1000, Math.max(1, Number(e.target.value) || 1)) })}
                   />
                 </td>
                 <td>

@@ -782,8 +782,8 @@
         "item_count": {
           "default": 5,
           "description": "How many of the library's highest-rated items get rotated.",
-          "help": "The N highest-rated items (by Jellyfin's `CommunityRating`) in this library whose poster gets reshuffled+reapplied each run. Default 5.",
-          "maximum": 50,
+          "help": "The N highest-rated items (by Jellyfin's `CommunityRating`) in this library whose poster gets reshuffled+reapplied each run (1-1000). Default 5. Each item is its own apply run, so large values take a while.",
+          "maximum": 1000,
           "minimum": 1,
           "title": "Item Count",
           "type": "integer"

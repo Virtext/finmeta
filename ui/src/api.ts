@@ -289,13 +289,14 @@ export async function fixFindingsBatched(
   }
   if (current.length > 0) batches.push(current);
 
-  const merged: FixResp = { submitted: [], not_fixable: [], unknown: [], no_better: [] };
+  const merged: FixResp = { submitted: [], not_fixable: [], unknown: [], no_better: [], no_source: [] };
   for (const batch of batches) {
     const r = await fixFindings(scanId, batch);
     merged.submitted.push(...r.submitted);
     merged.not_fixable.push(...r.not_fixable);
     merged.unknown.push(...r.unknown);
     merged.no_better!.push(...(r.no_better ?? []));
+    merged.no_source!.push(...(r.no_source ?? []));
   }
   return merged;
 }

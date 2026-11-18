@@ -101,6 +101,7 @@ export function ArtworkPage({ dryRun }: { dryRun: boolean }): React.ReactElement
         const parts = [];
         if (started) parts.push(`${started} item${started === 1 ? '' : 's'} being re-applied`);
         if (r.no_better?.length) parts.push(`${r.no_better.length} have no larger image at any source`);
+        if (r.no_source?.length) parts.push(`${r.no_source.length} have no such image at any source`);
         if (refreshed) parts.push(`${refreshed} Jellyfin refresh requested`);
         if (failed) parts.push(`${failed} failed`);
         push({ message: `${parts.join(' · ') || 'Nothing to do'}. Rescan to confirm.` });

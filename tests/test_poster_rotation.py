@@ -238,3 +238,12 @@ class TestPosterRotationRunRoute:
                 time.sleep(0.2)
         assert job is not None, "poster-rotation run never appeared in the job table"
         assert job.status_code == 200
+
+
+def test_item_count_allows_large_libraries_but_stays_bounded():
+    import pytest
+    from pydantic import ValidationError
+
+    assert PosterRotation(enabled=True, item_count=1000).item_count == 1000
+    with pytest.raises(ValidationError):
+        PosterRotation(enabled=True, item_count=1001)

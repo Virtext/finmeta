@@ -168,6 +168,22 @@ def fix_findings(scan_id: str, body: FixRequest,
     fixed_ids: List[int] = []
     no_better: List[int] = []
 
+    # Operator-reported 2026-11-18: "missing artwork" fixes ran an apply that
+    # wrote nothing, and the finding came back every scan -- no source has
+    # that image kind for the title. Check first; report those as no_source
+    # instead of starting an apply that cannot help or stamping them fixed.
+    no_source: List[int] = []
+    missing = [r for r in apply_rows
+               if r["check_code"].startswith("artwork.missing.") and (r["detail"] or {}).get("kind")]
+    if missing:
+        lookups = _candidates_by_item(ctx, _distinct([r["item_id"] for r in missing]))
+        for r in missing:
+            by_kind = lookups.get(r["item_id"])
+            if by_kind is not None and not by_kind.get(r["detail"]["kind"]):
+                no_source.append(r["id"])
+        apply_rows = [r for r in apply_rows if r["id"] not in no_source]
+        apply_items = _distinct([r["item_id"] for r in apply_rows] + [r["item_id"] for r in pick_rows])
+
     if refresh_items:
         jf = ctx.make_jellyfin()
         try:
@@ -234,7 +250,7 @@ def fix_findings(scan_id: str, body: FixRequest,
 
     scan_store.mark_fixed(ctx.db_path, fixed_ids)
     return {"submitted": submitted, "not_fixable": not_fixable,
-            "unknown": unknown, "no_better": no_better}
+            "unknown": unknown, "no_better": no_better, "no_source": no_source}
 
 
 def _pick_better_candidates(ctx: AppContext, pick_rows: List[dict]) -> List[int]:
@@ -250,53 +266,67 @@ def _pick_better_candidates(ctx: AppContext, pick_rows: List[dict]) -> List[int]
     """
     import random
 
-    from finmeta.api.routes_candidates import _default_candidates_provider
     from finmeta.engine.candidate_ref import RefNotAllowed
 
     cfg = ctx.config
-    provider = ctx._candidates_provider or _default_candidates_provider
     top_n = max(int(cfg.artwork_selection.top_n), 1)
     no_better: List[int] = []
-    def _opt(make):   # no TMDb key: lookups below then fail per item -> "no better"
+    by_item: dict = {}
+    for r in pick_rows:
+        by_item.setdefault(r["item_id"], []).append(r)
+    lookups = _candidates_by_item(ctx, list(by_item))
+    for item_id, rows in by_item.items():
+        by_kind = lookups.get(item_id) or {}  # failed lookup -> "no better"
+        for r in rows:
+            detail = r["detail"] or {}
+            kind = detail.get("kind")
+            have = int(detail.get("width") or 0)
+            wider = [c for c in by_kind.get(kind, []) if (c.width or 0) > have]
+            good = [c for c in wider if c.width >= int(detail.get("floor") or 0)][:top_n]
+            choice = random.choice(good) if good else max(wider, key=lambda c: c.width, default=None)  # noqa: S311
+            if choice is None:
+                no_better.append(r["id"])
+                continue
+            try:
+                ctx.set_candidate(item_id, kind, choice.ref, choice.source)
+            except RefNotAllowed:
+                no_better.append(r["id"])
+    return no_better
+
+
+def _candidates_by_item(ctx: AppContext, item_ids: List[str]) -> dict:
+    """``{item_id: {kind: [Candidate, ...]} or None}`` -- None when the
+    lookup itself failed (no TMDb key, provider down), which callers must
+    not read as "the sources have nothing"."""
+    from finmeta.api.routes_candidates import _default_candidates_provider
+
+    cfg = ctx.config
+    provider = ctx._candidates_provider or _default_candidates_provider
+
+    def _opt(make):   # no TMDb key: lookups below then fail per item
         try:
             return make(cfg)
         except Exception as exc:
             logger.warning("candidate lookup degraded: %s", exc)
             return None
 
+    out: dict = {}
     jf = ctx.make_jellyfin(cfg)
     tmdb = _opt(ctx.make_tmdb)
     try:
         sources = _opt(ctx.make_sources) or {}
         mapper = _opt(ctx.make_mapper)
-        by_item: dict = {}
-        for r in pick_rows:
-            by_item.setdefault(r["item_id"], []).append(r)
-        for item_id, rows in by_item.items():
+        for item_id in item_ids:
             try:
-                by_kind, _ = provider(jf.get_item(item_id), cfg, jf, tmdb, sources, mapper)
+                out[item_id], _ = provider(jf.get_item(item_id), cfg, jf, tmdb, sources, mapper)
             except Exception as exc:
                 logger.warning("candidate lookup failed for %s: %s", item_id, exc)
-                by_kind = {}
-            for r in rows:
-                detail = r["detail"] or {}
-                kind = detail.get("kind")
-                have = int(detail.get("width") or 0)
-                wider = [c for c in by_kind.get(kind, []) if (c.width or 0) > have]
-                good = [c for c in wider if c.width >= int(detail.get("floor") or 0)][:top_n]
-                choice = random.choice(good) if good else max(wider, key=lambda c: c.width, default=None)  # noqa: S311
-                if choice is None:
-                    no_better.append(r["id"])
-                    continue
-                try:
-                    ctx.set_candidate(item_id, kind, choice.ref, choice.source)
-                except RefNotAllowed:
-                    no_better.append(r["id"])
+                out[item_id] = None
     finally:
         jf.close()
         if tmdb is not None:
             tmdb.close()
-    return no_better
+    return out
 
 
 @router.delete("/scans/{scan_id}")

@@ -140,3 +140,26 @@ def test_a_disabled_library_yields_nothing(tmp_path):
     assert res.skipped_reason == "library disabled"
     assert (res.items_scanned, res.findings, emitted) == (0, 0, [])
     assert jf.calls == []       # not even a page was fetched
+
+
+def test_artwork_findings_on_unidentified_items_are_external():
+    """2026-11-18: an apply can never fetch artwork for an item with no
+    provider id -- don't offer a fix button that cannot work."""
+    from finmeta.engine.scan_store import Finding
+    from finmeta.engine.scanner import _unidentified_artwork_is_external
+
+    known = movie("a", "Known", provider_ids={"Tmdb": "1"})
+    unknown = movie("b", "Unknown", provider_ids={"Other": "x"})
+
+    def f(item, code, fix="apply_item"):
+        return Finding(library="Movies", check_code=code, severity="warning",
+                       item_id=item, fix_kind=fix, detail={"kind": "poster"})
+
+    out = _unidentified_artwork_is_external([
+        f("a", "artwork.missing.poster"), f("b", "artwork.missing.poster"),
+        f("b", "artwork_quality.low_resolution.poster", "candidate_picker"),
+        f("b", "media.no_stream", "refresh_item"),
+    ], [known, unknown])
+    assert [x.fix_kind for x in out] == ["apply_item", "external", "external", "refresh_item"]
+    assert "Identify it in Jellyfin" in out[1].detail["note"]
+    assert out[1].detail["kind"] == "poster"

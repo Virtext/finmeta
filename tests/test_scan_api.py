@@ -538,3 +538,51 @@ def test_unreadable_artwork_fix_drops_the_lock_on_the_bad_candidate(ctx_factory)
                            json={"finding_ids": [rows[0]["id"]]}).status_code == 200
         ctx.release_run("blocking-run")
     assert ctx.overrides.get_lock("item-1", "logo") is None
+
+
+def test_missing_artwork_with_no_source_is_reported_not_applied(ctx_factory):
+    """Operator-reported 2026-11-18: "missing logo" fixes applied, wrote
+    nothing, and came back every scan -- no source has a logo for that
+    title. The fix now says so instead of applying and stamping it fixed."""
+    from finmeta.sources.candidate import Candidate
+
+    poster = Candidate(kind="poster", source="tmdb", width=1000, height=1500,
+                       ref="https://image.tmdb.org/t/p/original/p.jpg")
+    ctx = ctx_factory(dry_run=False)
+    ctx._candidates_provider = lambda item, *a: ({"poster": [poster]}, 1)
+    miss = dict(library="Movies", severity="warning", media_type="movie",
+                fix_kind="apply_item", item_name="A")
+    scan_id, rows = _seed(ctx, [
+        Finding(item_id="item-1", check_code="artwork.missing.logo", detail={"kind": "logo"}, **miss),
+        Finding(item_id="item-2", check_code="artwork.missing.poster", detail={"kind": "poster"}, **miss),
+    ])
+    with _client(ctx) as client:
+        assert ctx.claim_run("blocking-run", action="apply")
+        body = client.post(f"/api/scans/{scan_id}/fix",
+                           json={"finding_ids": [x["id"] for x in rows]}).json()
+        ctx.release_run("blocking-run")
+    by_item = {r["item_id"]: r for r in rows}
+    assert body["no_source"] == [by_item["item-1"]["id"]]
+    assert [s["item_id"] for s in body["submitted"]] == ["item-2"]
+    after = {r["item_id"]: r for r in scan_store.list_findings(ctx.db_path, scan_id)[0]}
+    assert after["item-1"]["fixed_at"] is None
+    assert after["item-2"]["fixed_at"]
+
+
+def test_missing_artwork_still_applies_when_the_lookup_fails(ctx_factory):
+    def boom(*a):
+        raise RuntimeError("no TMDb key")
+
+    ctx = ctx_factory(dry_run=False)
+    ctx._candidates_provider = boom
+    scan_id, rows = _seed(ctx, [Finding(
+        library="Movies", check_code="artwork.missing.logo", severity="warning",
+        item_id="item-1", item_name="A", media_type="movie", fix_kind="apply_item",
+        detail={"kind": "logo"})])
+    with _client(ctx) as client:
+        assert ctx.claim_run("blocking-run", action="apply")
+        body = client.post(f"/api/scans/{scan_id}/fix",
+                           json={"finding_ids": [rows[0]["id"]]}).json()
+        ctx.release_run("blocking-run")
+    assert body["no_source"] == []
+    assert [s["item_id"] for s in body["submitted"]] == ["item-1"]
