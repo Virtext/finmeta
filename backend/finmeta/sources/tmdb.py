@@ -113,18 +113,20 @@ class TmdbClient:
     # -- images ------------------------------------------------------------
     def movie_images(self, tmdb_id, language=None, language_fallback: Optional[Iterable[Optional[str]]] = None,
                      kinds: Iterable[str] = ("poster", "backdrop", "logo")) -> List[Candidate]:
-        data = self._get(f"/movie/{tmdb_id}/images", {"language": language}, self.image_ttl)
+        # Never send `language` to /images: TMDb then returns ONLY that language's images (no
+        # textless/other), so a title with only textless art got 0 candidates. Ranking handles language.
+        data = self._get(f"/movie/{tmdb_id}/images", None, self.image_ttl)
         return self._to_candidates(data, kinds, language, language_fallback)
 
     def tv_images(self, tmdb_id, language=None, language_fallback=None,
                   kinds=("poster", "backdrop", "logo")) -> List[Candidate]:
-        data = self._get(f"/tv/{tmdb_id}/images", {"language": language}, self.image_ttl)
+        data = self._get(f"/tv/{tmdb_id}/images", None, self.image_ttl)
         return self._to_candidates(data, kinds, language, language_fallback)
 
     def season_images(self, series_tmdb_id, season_number, language=None, language_fallback=None,
                       kinds=("poster", "backdrop", "logo")) -> List[Candidate]:
         data = self._get(f"/tv/{series_tmdb_id}/season/{season_number}/images",
-                         {"language": language}, self.image_ttl)
+                         None, self.image_ttl)
         return self._to_candidates(data, kinds, language, language_fallback)
 
     # -- search / find (for matching) --------------------------------------

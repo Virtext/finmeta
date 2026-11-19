@@ -6,6 +6,7 @@ import re
 from typing import Optional, Tuple
 
 import httpx
+from PIL import Image
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel
@@ -13,7 +14,10 @@ from pydantic import BaseModel
 from finmeta.config.models import Config, TvArtwork
 from finmeta.engine.candidate_ref import RefNotAllowed
 from finmeta.engine.matching import match_item
-from finmeta.engine.plan_builder import _resolve_item_library
+from finmeta.engine.paths import existing_artwork, movie_dir, show_dir
+from finmeta.engine.plan_builder import _artwork_langs, _resolve_item_library
+from finmeta.engine.scanner import ARTWORK_FILENAMES
+from finmeta.sources.candidate import Candidate
 from finmeta.engine.resolution import collect_candidates
 from finmeta.jellyfin_client.types import Item
 
@@ -69,10 +73,38 @@ def _default_candidates_provider(
     # at all" for any library that wasn't the one this happened to pick.
     _, lib = _resolve_item_library(item, jf, cfg)
     kinds = _artwork_kinds(lib) if lib is not None else []
+    lang, fallback = _artwork_langs(tmdb, "movie" if mt == "movie" else "tv", match.tmdb_id,
+                                    None, cfg.language, cfg.artwork_language_fallback)
     by_kind = collect_candidates(
-        sources, cfg.sources.precedence, mt, match.tmdb_id, kinds,
-        cfg.language, cfg.artwork_language_fallback)
+        sources, cfg.sources.precedence, mt, match.tmdb_id, kinds, lang, fallback)
+    base = (movie_dir if mt == "movie" else show_dir)(item, mapper) if mapper is not None else None
+    if base is not None:
+        for kind in kinds:
+            by_kind.setdefault(kind, []).extend(_folder_candidates(base, kind))
     return by_kind, match.tmdb_id
+
+
+def _folder_candidates(base, kind: str) -> list:
+    """Artwork already in the media folder (Sonarr/Radarr/Jellyfin files), listed
+    after provider candidates so the automatic pick is unchanged.
+
+    Finmeta's own output file (poster.jpg etc.) is left out: once applied it may
+    carry overlay badges, and picking it as a base would stamp badges twice.
+    """
+    own = ARTWORK_FILENAMES.get(kind)
+    out = []
+    for f in existing_artwork(base, kind):
+        if f.name == own:
+            continue
+        w = h = None
+        try:
+            with Image.open(f) as im:  # header only, no full decode
+                w, h = im.size
+        except Exception:  # noqa: S110 -- dimensions are cosmetic in the picker
+            pass
+        out.append(Candidate(kind=kind, source="folder", ref=str(f), lang=None,
+                             width=w, height=h, score=0.0))
+    return out
 
 
 @router.get("/items/{item_id}/candidates")
@@ -100,7 +132,7 @@ def candidates(item_id: str, ctx: AppContext = Depends(get_ctx)) -> dict:
     locked_kinds = sorted(k for k in by_kind if ctx.overrides.get_lock(item_id, k))
     for kind, lst in by_kind.items():
         ovr = ctx.overrides.get(item_id, kind)
-        sel_ref = ovr["ref"] if ovr else (lst[0].ref if lst else None)
+        sel_ref = ovr["ref"] if ovr else next((c.ref for c in lst if c.source != "folder"), None)
         for c in lst:
             out.append({
                 "kind": c.kind, "source": c.source, "ref": c.ref,

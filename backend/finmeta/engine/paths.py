@@ -11,7 +11,7 @@ Every function returns ``None`` for an item whose Jellyfin path has no
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional, Tuple
 
 from finmeta.jellyfin_client.mappings import PathMapper
 from finmeta.jellyfin_client.types import Item
@@ -65,4 +65,38 @@ def episode_stem(item: Item, mapper: PathMapper) -> Optional[Path]:
     return p.with_suffix("")
 
 
-__all__ = ["movie_dir", "show_dir", "season_dir", "episode_stem"]
+# Basenames Jellyfin itself reads per kind (Sonarr/Radarr/Kodi write these), so artwork
+# already in the folder counts as present. Backdrops may be numbered (fanart2.jpg).
+ARTWORK_ALIASES: Dict[str, Tuple[str, ...]] = {
+    "poster": ("poster", "folder", "cover", "default"),
+    "backdrop": ("backdrop", "fanart", "background", "art"),
+    "logo": ("logo", "clearlogo"),
+    "landscape": ("landscape", "thumb"),
+}
+_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp")
+
+
+# shortcut: ignores "<video-stem>-poster.jpg" style names, add if a library uses them.
+def existing_artwork(base: Path, kind: str) -> List[Path]:
+    """Image files in ``base`` that Jellyfin would use for ``kind``, sorted by name."""
+    names = ARTWORK_ALIASES.get(kind)
+    if not names:
+        return []
+    try:
+        entries = sorted(base.iterdir())
+    except OSError:
+        return []
+    out: List[Path] = []
+    for f in entries:
+        if f.suffix.lower() not in _IMAGE_EXTS:
+            continue
+        stem = f.stem.lower()
+        if kind == "backdrop":
+            stem = stem.rstrip("0123456789-")
+        if stem in names and f.is_file():
+            out.append(f)
+    return out
+
+
+__all__ = ["movie_dir", "show_dir", "season_dir", "episode_stem",
+           "ARTWORK_ALIASES", "existing_artwork"]
