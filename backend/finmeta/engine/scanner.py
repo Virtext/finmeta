@@ -28,7 +28,7 @@ from typing import (
 
 from finmeta.engine.format_rules import video_facts
 from finmeta.engine.matching import match_item
-from finmeta.engine.paths import movie_dir, show_dir
+from finmeta.engine.paths import existing_artwork, movie_dir, show_dir
 from finmeta.engine.scan_store import Finding
 from finmeta.jellyfin_client.mappings import PathMapper
 from finmeta.jellyfin_client.types import Item
@@ -238,7 +238,8 @@ def check_artwork(
                 continue
             target = base / fname
             try:
-                has_file = target.is_file()
+                # Jellyfin also reads folder.jpg/fanart.jpg/clearlogo.png etc. -- present is present.
+                has_file = target.is_file() or bool(existing_artwork(base, kind))
             except OSError as exc:            # unreadable mount, permissions
                 logger.warning("artwork stat failed for %s: %s", target, exc)
                 continue

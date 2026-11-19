@@ -16,7 +16,7 @@ Kind = Literal[
     "season_poster", "episode_thumb", "theme_song", "metadata",
 ]
 # Which source produced the candidate.
-SourceName = Literal["tmdb", "fanart", "local"]
+SourceName = Literal["tmdb", "fanart", "local", "folder"]  # folder: already in the media folder
 
 KINDS = [
     "poster", "backdrop", "logo", "landscape",

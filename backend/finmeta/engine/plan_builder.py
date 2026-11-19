@@ -525,9 +525,11 @@ def _build_movie_plan(
     # TMDb/fanart queries) -- the locked ref is used as-is.
     locked = _locked_candidates(item.id, artwork_kinds, config_dir)
     kinds_to_resolve = [k for k in artwork_kinds if k not in locked]
+    art_lang, art_fallback = (_artwork_langs(tmdb, "movie", match.tmdb_id, details, language, lang_fallback)
+                              if kinds_to_resolve else (language, lang_fallback))
     resolved = _select_artwork(
         sources, cfg.sources.precedence, "movie", match.tmdb_id,
-        kinds_to_resolve, language=language, lang_fallback=lang_fallback,
+        kinds_to_resolve, language=art_lang, lang_fallback=art_fallback,
         warnings=warnings, item_id=item.id, sel=sel, config_dir=config_dir,
     )
     resolved.update(locked)
@@ -669,9 +671,11 @@ def _build_tvshow_plan(
     trending_rank = (trending_index or {}).get(match.tmdb_id)
     locked = _locked_candidates(item.id, artwork_kinds, config_dir)
     kinds_to_resolve = [k for k in artwork_kinds if k not in locked]
+    art_lang, art_fallback = (_artwork_langs(tmdb, "tv", match.tmdb_id, details, language, lang_fallback)
+                              if kinds_to_resolve else (language, lang_fallback))
     resolved = _select_artwork(
         sources, cfg.sources.precedence, "tv", match.tmdb_id,
-        kinds_to_resolve, language=language, lang_fallback=lang_fallback,
+        kinds_to_resolve, language=art_lang, lang_fallback=art_fallback,
         warnings=warnings, item_id=item.id, sel=sel, config_dir=config_dir,
     )
     resolved.update(locked)
@@ -952,6 +956,23 @@ def _effective_selection(cfg: Config, lib_cfg):
     )
 
 
+def _artwork_langs(tmdb, media_type, tmdb_id, details, language, lang_fallback):
+    """(language, fallback) for artwork ranking: the title's own original language
+    first, then the configured language + fallbacks. A Swedish show gets Swedish
+    art before English without the operator configuring anything per title."""
+    if details is None:
+        try:
+            fetch = tmdb.movie_details if media_type == "movie" else tmdb.tv_details
+            details = fetch(tmdb_id, language=language)  # same cache key as the NFO fetch
+        except Exception as exc:
+            logger.debug("original_language lookup failed for tmdb %s: %s", tmdb_id, exc)
+            details = None
+    orig = details.get("original_language") if isinstance(details, dict) else None
+    if not orig:
+        return language, lang_fallback
+    return orig, [language, *(lang_fallback or [])]
+
+
 def _select_artwork(sources, precedence, media_type, tmdb_id, kinds, *,
                     language=None, lang_fallback=None, warnings=None,
                     item_id: str = "", sel: Optional[dict] = None,
@@ -1039,7 +1060,7 @@ def _apply_candidate_overrides(resolved: Dict[str, Any], item_id: str,
                 # just provenance here, never used to decide how to fetch
                 # cand.ref (that's always a plain URL/path read).
                 src = ov.get("source")
-                if src not in ("tmdb", "fanart", "local"):
+                if src not in ("tmdb", "fanart", "local", "folder"):
                     src = "tmdb"
                 resolved[kind] = Candidate(
                     kind=kind, source=src,

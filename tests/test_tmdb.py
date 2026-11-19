@@ -131,6 +131,21 @@ def test_image_language_ranking(tmp_path):
 
 
 @respx.mock
+def test_image_request_not_language_filtered(tmp_path):
+    # TMDb's /images drops textless + other-language art when `language` is sent
+    # ("112 Aina": only textless images -> 0 candidates). Filtering is ranking's job.
+    routes = [respx.get(BASE + p).mock(return_value=httpx.Response(200, json=_IMAGES))
+              for p in ("/movie/155/images", "/tv/1396/images", "/tv/1396/season/1/images")]
+    with _client(tmp_path) as c:
+        c.movie_images(155, language="en-US", language_fallback=["en", None])
+        c.tv_images(1396, language="en-US", language_fallback=["en", None])
+        c.season_images(1396, 1, language="en-US", language_fallback=["en", None])
+    for r in routes:
+        assert r.call_count == 1
+        assert "language" not in r.calls.last.request.url.params
+
+
+@respx.mock
 def test_image_no_pref_prefers_textless_last(tmp_path):
     respx.get(BASE + "/tv/1396/images").mock(
         return_value=httpx.Response(200, json=_IMAGES))
