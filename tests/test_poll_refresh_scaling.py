@@ -134,3 +134,21 @@ class TestBasicSemanticsUnchanged:
             pre_tags={"A": {}},
         )
         assert ok is False
+
+
+def test_backdrop_only_change_settles():
+    """2026-11-20, public server: a run that only wrote backdrop.jpg always
+    hit the poll timeout -- a backdrop changes BackdropImageTags, never
+    ImageTags, so the old ImageTags-only check never saw it settle."""
+    class _BackdropJF:
+        calls = 0
+
+        def get_item(self, item_id):
+            self.calls += 1
+            return SimpleNamespace(image_tags={"Primary": "same"},
+                                   backdrop_image_tags=["old" if self.calls == 1 else "new"])
+
+    jf = _BackdropJF()
+    from finmeta.engine.executor import _image_sig
+    pre = {"a": _image_sig(jf.get_item("a"))}
+    assert _poll_refresh(jf, ["a"], [], poll_interval=0.0, timeout=1.0, pre_tags=pre) is True

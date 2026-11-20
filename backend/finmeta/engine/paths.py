@@ -18,11 +18,17 @@ from finmeta.jellyfin_client.types import Item
 
 
 def movie_dir(item: Item, mapper: PathMapper) -> Optional[Path]:
-    """Local directory containing the movie video file."""
+    """Local directory containing the movie video file.
+
+    A disc-folder movie (BDMV/VIDEO_TS) has the movie FOLDER as its Jellyfin
+    path; its parent is the library root, where every such movie used to
+    write the same poster.jpg/movie.nfo (2026-11-20, public server).
+    """
     local = mapper.translate(item.path)
     if not local:
         return None
-    return Path(local).parent
+    p = Path(local)
+    return p if p.is_dir() else p.parent
 
 
 def show_dir(item: Item, mapper: PathMapper) -> Optional[Path]:

@@ -1025,10 +1025,11 @@ class ScanArtworkWidths(_Strict):
     """Minimum acceptable width per artwork kind, in pixels (SPEC_S10 SC6)."""
 
     poster: int = Field(
-        default=1000, ge=0,
+        default=680, ge=0,
         description="Minimum poster width in pixels (0 = do not check).",
         json_schema_extra={"help": "Posters below this width are reported as low-resolution. "
-        "Default 1000 (TMDb's `w500` is 500x750, which looks soft on a 4K TV). Note that artwork "
+        "Default 680 -- the standard TVDB poster size (680x1000), so TV libraries are not "
+        "flagged wholesale; TMDb's `w500` (500x750) still is. Note that artwork "
         "ranking already prefers higher resolution, so a low-res poster usually means the source "
         "has nothing better -- the fix is to pick a different candidate, not to re-apply. "
         "Set to 0 to disable."})
@@ -1044,10 +1045,10 @@ class ScanArtworkWidths(_Strict):
         "Default 400. Logos are drawn small, so the bar is lower than for posters. "
         "Set to 0 to disable."})
     landscape: int = Field(
-        default=1280, ge=0,
+        default=1000, ge=0,
         description="Minimum landscape width in pixels (0 = do not check).",
         json_schema_extra={"help": "Landscape images below this width are reported as "
-        "low-resolution. Default 1280. Set to 0 to disable."})
+        "low-resolution. Default 1000 -- fanart.tv thumbs are 1000x562. Set to 0 to disable."})
 
 
 class ScanConfig(_Strict):

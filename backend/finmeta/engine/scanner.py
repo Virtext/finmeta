@@ -430,6 +430,10 @@ _HEIGHT_BUCKETS = (
     (2000, "2160p"), (1300, "1440p"), (900, "1080p"),
     (700, "720p"), (500, "576p"), (300, "480p"),
 )
+# Width -> label, for cropped widescreen (3840x1600 is 2160p, 1920x800 is 1080p).
+# Widths below 720p are ambiguous (720 wide is both 480p and 576p).
+_WIDTH_BUCKETS = ((3200, "2160p"), (2200, "1440p"), (1600, "1080p"), (1100, "720p"), (600, "480p"))
+_BUCKET_RANK = ("sd", "480p", "576p", "720p", "1080p", "1440p", "2160p")
 _TOKEN_BUCKETS = {
     "2160p": "2160p", "4k": "2160p", "uhd": "2160p", "1440p": "1440p",
     "1080p": "1080p", "720p": "720p", "576p": "576p", "480p": "480p",
@@ -452,6 +456,15 @@ def _height_bucket(height: Optional[int]) -> Optional[str]:
         if height >= floor:
             return label
     return "sd"
+
+
+def _res_bucket(width: Optional[int], height: Optional[int]) -> Optional[str]:
+    """The larger of the height and width labels: a scope film is cropped in height only."""
+    by_h = _height_bucket(height)
+    by_w = next((label for floor, label in _WIDTH_BUCKETS if (width or 0) >= floor), None)
+    if by_h is None or by_w is None:
+        return by_h
+    return max(by_h, by_w, key=_BUCKET_RANK.index)
 
 
 def _path_tokens(path: Optional[str]) -> Dict[str, Optional[str]]:
@@ -480,7 +493,9 @@ def _hdr_claim_satisfied(token: str, range_type: str, video_range: str) -> bool:
     if norm in _DOVI_TOKENS or norm.replace(" ", "") in ("dolbyvision", "dovi", "dv"):
         return "DOVI" in rt
     if norm in _HDR10PLUS_TOKENS:
-        return "PLUS" in rt or "HDR10+" in rt
+        # Every HDR10+ stream is HDR10 underneath, and Jellyfin often reports
+        # only that (its dynamic metadata is per-frame); a refresh never changes it.
+        return "HDR10" in rt
     # plain HDR / HDR10: any non-SDR dynamic range counts
     return bool(rt and rt != "SDR") or (bool(vr) and vr != "SDR")
 
@@ -556,7 +571,7 @@ def check_media(
             ))
 
         claims = _path_tokens(item.path)
-        actual_bucket = _height_bucket(height)
+        actual_bucket = _res_bucket(facts.get("width"), height)
         if claims["resolution"] and actual_bucket and claims["resolution"] != actual_bucket:
             out.append(Finding(
                 **base, check_code="media.format_mismatch", severity="warning",

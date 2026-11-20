@@ -256,7 +256,7 @@ def _overlay_poster(
     fw = overlay_file_write(
         target_path=fw_target, candidate_bytes=poster_bytes, candidate_ref=cand.ref,
         render_fn=_render, config_dir=config_dir, is_override=is_override,
-        kind=kind,
+        kind=kind, clean_sha256=_lock_sha256(item.id, kind, config_dir),
     )
     if item_fc:
         fw.meta["format_counts"] = item_fc
@@ -1107,6 +1107,19 @@ def _locked_candidates(item_id: str, kinds: List[str], config_dir=None) -> Dict[
         logger.debug("_locked_candidates: overrides.db read failed for item %s, "
                      "proceeding without locks", item_id, exc_info=True)
     return out
+
+
+def _lock_sha256(item_id: str, kind: str, config_dir=None) -> Optional[str]:
+    """SHA-256 of the clean base locked for item+kind, or None (best-effort)."""
+    try:
+        db = Path(config_dir) / "overrides.db" if config_dir is not None else None
+        if db is None or not db.is_file():
+            return None
+        from finmeta.api.overrides import OverrideStore
+        lock = OverrideStore(db).get_lock(item_id, kind)
+        return str(lock["sha256"]) if lock and lock.get("sha256") else None
+    except Exception:
+        return None
 
 
 def _reshuffle_counts(item_id: str, config_dir=None) -> Dict[str, int]:
