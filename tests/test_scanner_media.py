@@ -206,3 +206,18 @@ def test_media_findings_reach_the_emit_callback(tmp_path):
     res, findings = _run(jf, tmp_path)
     assert [f.check_code for f in findings] == ["media.no_stream"]
     assert res.findings == 1
+
+
+def test_cropped_widescreen_is_judged_by_width_too():
+    """2026-11-20, public server: ~1200 false mismatches -- a 2.40:1 film is
+    3840x1600 / 1920x800, cropped in height only, and still 2160p / 1080p."""
+    for claim, w, h in (("2160p", 3840, 1600), ("1080p", 1920, 800), ("720p", 1280, 536)):
+        it = movie("1", "Scope", path=f"/media/Movies/Scope {claim}.mkv")
+        out = check_media([(it, [_video(Width=w, Height=h)])], library="Movies")
+        assert [f for f in out if f.check_code == "media.format_mismatch"] == [], (claim, w, h)
+
+
+def test_hdr10plus_claim_satisfied_by_hdr10():
+    """Jellyfin often reports an HDR10+ stream as plain HDR10; a refresh never changes that."""
+    it = movie("1", "Plus", path="/media/Movies/Plus 2160p HDR10+.mkv")
+    assert check_media([(it, [_video(VideoRangeType="HDR10")])], library="Movies") == []

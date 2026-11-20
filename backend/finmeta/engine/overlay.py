@@ -327,6 +327,7 @@ def overlay_file_write(
     config_dir: Optional[Path] = None,
     is_override: bool = False,
     kind: str = "poster",
+    clean_sha256: Optional[str] = None,
 ) -> FileWrite:
     """Produce the overlaid-poster ``FileWrite`` for an item (SPEC \u00a78, O7).
 
@@ -360,6 +361,11 @@ def overlay_file_write(
     ``candidate_bytes`` themselves ARE the correct original to composite
     onto -- skip the backup/cache lookup entirely.
 
+    ``clean_sha256`` is the artwork lock's SHA-256 of the clean base the
+    first apply rendered from. When given, the oldest backup is only trusted
+    if it has that hash (or the candidate is the target file itself);
+    otherwise the candidate is used.
+
     The returned ``FileWrite`` points ``source_ref`` at that original
     (never at the overlaid bytes -- O7 needs the original for the *next*
     re-render) and carries the SHA-256 of the rendered overlaid bytes.
@@ -378,8 +384,14 @@ def overlay_file_write(
     elif config_dir is not None:
         bk = find_original_backup(Path(target_path), config_dir=config_dir)
         if bk is not None:
-            original_bytes = bk.read_bytes()
-            original_ref = str(bk)
+            bk_bytes = bk.read_bytes()
+            # A backup that isn't the locked clean base is Finmeta's own earlier
+            # output whose "create" manifest was pruned (2026-11-20, 22 Jump
+            # Street): compositing onto it stacks two badge layers.
+            if (clean_sha256 is None or sha256(bk_bytes) == clean_sha256
+                    or str(Path(candidate_ref)) == str(Path(target_path))):
+                original_bytes = bk_bytes
+                original_ref = str(bk)
 
     if render_fn is not None:
         overlaid = render_fn(original_bytes)

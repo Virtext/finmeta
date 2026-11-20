@@ -194,3 +194,38 @@ def test_three_applies_on_a_finmeta_created_poster_never_stack(tmp_path):
     assert fw3.source_ref == "https://tmdb/x.jpg"
     # Same badges as run 2 and the same original -> byte-identical output.
     assert fw3.content_sha256 == fw2.content_sha256
+
+
+def test_pruned_create_manifest_falls_back_to_the_locked_clean_base(tmp_path):
+    """2026-11-20, public server (22 Jump Street): the run that CREATED
+    poster.jpg had its manifest pruned (``prune_runs_dir``), so
+    ``created_by_finmeta`` is blind and the oldest backup -- Finmeta's own
+    overlaid output -- looked like the original. The artwork lock's clean
+    SHA-256 must veto that backup."""
+    config_dir = tmp_path / "config"
+    target = tmp_path / "media" / "poster.jpg"
+    target.parent.mkdir(parents=True)
+    candidate = _poster((10, 20, 30))
+    clean_sha = hashlib.sha256(candidate).hexdigest()
+
+    target.write_bytes(_poster((200, 0, 0)))       # stands in for run 1's overlaid output
+    backup("run-200-bbbbbb", target, config_dir=config_dir)   # no "create" manifest left
+
+    fw = overlay_file_write(
+        target_path=target, candidate_bytes=candidate, candidate_ref="https://tmdb/x.jpg",
+        badges=[TextBadge(text="v2")], style=STYLE, config_dir=config_dir,
+        clean_sha256=clean_sha,
+    )
+    assert fw.source_ref == "https://tmdb/x.jpg"
+    assert fw.meta["lock_sha256"] == clean_sha
+
+    # A backup that IS the clean base is still used (pre-existing original).
+    target.write_bytes(candidate)
+    backup("run-100-aaaaaa", target, config_dir=config_dir)
+    fw2 = overlay_file_write(
+        target_path=target, candidate_bytes=_poster((0, 0, 200)), candidate_ref="https://tmdb/y.jpg",
+        badges=[TextBadge(text="v2")], style=STYLE, config_dir=config_dir,
+        clean_sha256=clean_sha,
+    )
+    assert fw2.meta["lock_sha256"] == clean_sha
+    assert fw2.source_ref.startswith(str(config_dir))

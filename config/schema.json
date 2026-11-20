@@ -805,9 +805,9 @@
           "type": "integer"
         },
         "landscape": {
-          "default": 1280,
+          "default": 1000,
           "description": "Minimum landscape width in pixels (0 = do not check).",
-          "help": "Landscape images below this width are reported as low-resolution. Default 1280. Set to 0 to disable.",
+          "help": "Landscape images below this width are reported as low-resolution. Default 1000 -- fanart.tv thumbs are 1000x562. Set to 0 to disable.",
           "minimum": 0,
           "title": "Landscape",
           "type": "integer"
@@ -821,9 +821,9 @@
           "type": "integer"
         },
         "poster": {
-          "default": 1000,
+          "default": 680,
           "description": "Minimum poster width in pixels (0 = do not check).",
-          "help": "Posters below this width are reported as low-resolution. Default 1000 (TMDb's `w500` is 500x750, which looks soft on a 4K TV). Note that artwork ranking already prefers higher resolution, so a low-res poster usually means the source has nothing better -- the fix is to pick a different candidate, not to re-apply. Set to 0 to disable.",
+          "help": "Posters below this width are reported as low-resolution. Default 680 -- the standard TVDB poster size (680x1000), so TV libraries are not flagged wholesale; TMDb's `w500` (500x750) still is. Note that artwork ranking already prefers higher resolution, so a low-res poster usually means the source has nothing better -- the fix is to pick a different candidate, not to re-apply. Set to 0 to disable.",
           "minimum": 0,
           "title": "Poster",
           "type": "integer"

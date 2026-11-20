@@ -24,7 +24,7 @@ def test_defaults_are_everything_on_and_nothing_dropped():
     s = ScanSettings.from_config(_cfg())
     assert all(s.enabled(g) for g in TIER1_GROUPS)
     assert s.severity_floor == "info"
-    assert s.min_artwork_width["poster"] == 1000
+    assert s.min_artwork_width["poster"] == 680
     assert s.min_artwork_bytes == 20480
     assert s.min_video_height == 0          # off: an old SD film is not a defect
 

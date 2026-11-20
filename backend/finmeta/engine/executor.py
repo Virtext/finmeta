@@ -285,6 +285,18 @@ def _apply_api_action(action: ApiAction, jf: JellyfinClient) -> int:
 
 # -- poll for refresh -------------------------------------------------------
 
+_POLL_SAMPLE = 25
+
+
+def _image_sig(it) -> Dict[str, str]:
+    """ImageTags plus the backdrop tags -- a backdrop-only write changes only
+    BackdropImageTags, so polling ImageTags alone always hit the timeout."""
+    backdrops = getattr(it, "backdrop_image_tags", None)
+    if not backdrops:
+        return it.image_tags
+    return {**(it.image_tags or {}), "Backdrop": ",".join(backdrops)}
+
+
 def _poll_refresh(
     jf: JellyfinClient,
     item_ids: Sequence[str],
@@ -334,7 +346,7 @@ def _poll_refresh(
         for iid in item_ids:
             try:
                 it = jf.get_item(iid)
-                pre_tags[iid] = it.image_tags
+                pre_tags[iid] = _image_sig(it)
             except Exception:
                 pre_tags[iid] = {}
 
@@ -347,7 +359,8 @@ def _poll_refresh(
                 it = jf.get_item(iid)
                 # Empty dict = Jellyfin has no image for the item yet (what
                 # ImageTags=None used to mean before it was typed as a dict).
-                if it.image_tags and it.image_tags != pre_tags.get(iid):
+                sig = _image_sig(it)
+                if sig and sig != pre_tags.get(iid):
                     del remaining_images[iid]
                 else:
                     break  # round already failed -- rest can wait for next round
@@ -545,11 +558,11 @@ def apply_plan(
     pre_image_tags: Dict[str, Dict[str, str]] = {}
     for iid in image_items:
         try:
-            pre_image_tags[iid] = jf.get_item(iid).image_tags
+            pre_image_tags[iid] = _image_sig(jf.get_item(iid))
         except Exception:
             pre_image_tags[iid] = {}
 
-    for iid in set(image_items + theme_items):
+    for iid in dict.fromkeys(image_items + theme_items):  # ordered: poll checks in refresh order
         try:
             jf.refresh_item(iid)
             log(db_path, run_id, "info", f"refresh {iid}")
@@ -557,8 +570,11 @@ def apply_plan(
             logger.warning("refresh failed for %s: %s", iid, exc)
 
     if image_items or theme_items:
+        # Jellyfin works its refresh queue far slower than 120s for thousands
+        # of items; confirming the first ones (refresh order) proves it is
+        # picking the writes up without warning on every big run.
         settled = _poll_refresh(
-            jf, image_items, theme_items, timeout=poll_timeout,
+            jf, image_items[:_POLL_SAMPLE], theme_items[:_POLL_SAMPLE], timeout=poll_timeout,
             pre_tags=pre_image_tags,
         )
         if not settled:
