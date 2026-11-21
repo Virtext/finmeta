@@ -84,6 +84,8 @@ class Item:
     overview: Optional[str] = None
     production_year: Optional[int] = None
     official_rating: Optional[str] = None
+    # Jellyfin's item lock; only serialized when ItemFields "Settings" is asked for.
+    lock_data: bool = False
     genres: List[str] = field(default_factory=list)
     studios: List[str] = field(default_factory=list)
 
@@ -128,6 +130,7 @@ class Item:
             overview=d.get("Overview"),
             production_year=cls._parse_int(d.get("ProductionYear")),
             official_rating=d.get("OfficialRating"),
+            lock_data=bool(d.get("LockData")),
             genres=[g for g in (d.get("Genres") or []) if g],
             studios=[s.get("Name") for s in (d.get("Studios") or [])
                      if isinstance(s, dict) and s.get("Name")],

@@ -28,7 +28,7 @@ from finmeta.engine.jobs import (
 )
 from finmeta.engine.nfo import (
     DEFAULT_MOVIE_FIELDS, DEFAULT_TV_FIELDS,
-    movie_nfo, tvshow_nfo,
+    movie_nfo, nfo_owned_elsewhere, tvshow_nfo,
 )
 from finmeta.engine import trash
 from finmeta.engine.net import fetch_bytes
@@ -422,6 +422,12 @@ def apply_plan(
         # live) via the usual log().
         item_log_entries: List[Tuple[str, str, str]] = []
         for fw in item.files:
+            if fw.kind == "metadata" and nfo_owned_elsewhere(Path(fw.target_path)):
+                # Another tool wrote it after the plan was built -- its NFO now.
+                log(db_path, run_id, "info",
+                    f"skipped {fw.target_path}: NFO owned by another tool")
+                result.files_unchanged += 1
+                continue
             if fw.status == "unchanged":
                 result.files_unchanged += 1
                 # S9d5: the on-disk/Jellyfin content already matches this

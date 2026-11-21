@@ -28,6 +28,8 @@ from typing import (
 
 from finmeta.engine.format_rules import video_facts
 from finmeta.engine.matching import match_item
+from finmeta.engine.nfo import is_finmeta_nfo
+from finmeta.engine.runs import finmeta_ever_wrote
 from finmeta.engine.paths import existing_artwork, movie_dir, show_dir
 from finmeta.engine.scan_store import Finding
 from finmeta.jellyfin_client.mappings import PathMapper
@@ -42,7 +44,8 @@ logger = logging.getLogger("finmeta.engine.scanner")
 # always serialized on BaseItemDto, so asking for them would be invalid.
 # MediaSourceCount rather than MediaSources: SC4 needs the count, and
 # MediaSources drags every MediaStream along with it.
-SCAN_ITEM_FIELDS = "Path,ProviderIds,Overview,Genres,Studios,MediaSourceCount"
+# Settings carries LockData (metadata.locked_by_finmeta).
+SCAN_ITEM_FIELDS = "Path,ProviderIds,Overview,Genres,Studios,MediaSourceCount,Settings"
 
 # One page of a library per Jellyfin request.
 DEFAULT_PAGE_SIZE = 200
@@ -335,6 +338,39 @@ def check_metadata_fields(
                 fix_kind=fix,
                 detail={"fields": empty, "writes_nfo": writes_nfo},
             ))
+    return out
+
+
+def check_locked_series(
+    mapped: Sequence[Tuple[Item, Path]], *, library: str,
+    config_dir: Optional[Path] = None,
+) -> List[Finding]:
+    """A series Jellyfin has locked where Finmeta wrote the tvshow.nfo.
+
+    Before 2026-11-21 Finmeta's tvshow.nfo carried ``<lockdata>true``;
+    Jellyfin locks the series and every episode added after it, and a
+    locked episode never reads its NFO (name = series name, date = file
+    date). Removing the tag does not undo a lock Jellyfin already stored,
+    hence the ``unlock_refresh`` fix. A lock with no Finmeta trace is left
+    alone -- it may be the user's own.
+    """
+    out: List[Finding] = []
+    for item, base in mapped:
+        if item.type != "Series" or not item.lock_data:
+            continue
+        nfo = base / "tvshow.nfo"
+        if not (is_finmeta_nfo(nfo) or
+                (config_dir is not None and finmeta_ever_wrote(nfo, config_dir=config_dir))):
+            continue
+        out.append(Finding(
+            library=library, item_id=item.id, item_name=item.name,
+            media_type=_media_type(item), check_code="metadata.locked_by_finmeta",
+            severity="warning", fix_kind="unlock_refresh",
+            detail={"note": "Locked by an older Finmeta tvshow.nfo. Episodes added "
+                            "since may show only the series name and a date. The fix "
+                            "unlocks the series and its seasons/episodes and re-reads "
+                            "their metadata."},
+        ))
     return out
 
 
@@ -1047,6 +1083,7 @@ def scan_library(
     language: Optional[str] = None,
     page_size: int = DEFAULT_PAGE_SIZE,
     progress_cb: Optional[Callable[[int, int], None]] = None,
+    config_dir: Optional[Path] = None,
 ) -> ScanLibraryResult:
     """Run the tier-1 checks over one library, flushing findings per page.
 
@@ -1124,6 +1161,8 @@ def scan_library(
         if cfg.enabled("metadata"):
             page_findings.extend(check_metadata_fields(
                 items, library=library, writes_nfo=writes_nfo))
+            page_findings.extend(check_locked_series(
+                mapped, library=library, config_dir=config_dir))
             if cfg.deep and tmdb is not None:
                 page_findings.extend(check_metadata_match(
                     items, library=library, tmdb=tmdb, language=language))
@@ -1156,5 +1195,6 @@ __all__ = [
     "enabled_artwork_kinds", "artwork_base_dir", "partition_by_path",
     "check_artwork", "check_artwork_quality", "check_media",
     "check_episodes", "check_metadata_fields", "check_metadata_match",
+    "check_locked_series",
     "check_path_mapping", "scan_library",
 ]

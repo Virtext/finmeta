@@ -29,7 +29,7 @@ router = APIRouter(prefix="/api", tags=["scans"])
 # every other source, so there may genuinely be nothing better. Trying
 # costs nothing but a reshuffle + an apply, so it is still worth doing
 # automatically rather than requiring a manual pick every time.
-_ACTIONABLE = ("apply_item", "refresh_item", "candidate_picker")
+_ACTIONABLE = ("apply_item", "refresh_item", "candidate_picker", "unlock_refresh")
 
 # An apply is one run per item. Fixing a whole library's worth of findings in
 # one click would queue thousands of runs, so a single request is capped and
@@ -136,6 +136,9 @@ def fix_findings(scan_id: str, body: FixRequest,
       because the flag is set would be worse than doing nothing.
     - ``refresh_item`` -> ask Jellyfin to re-read what is already on disk. No
       run, no media write, so this is allowed under ``dry_run``.
+    - ``unlock_refresh`` -> clear the Jellyfin lock on a series and its
+      seasons/episodes, then re-read their metadata (``unlock_series``).
+      Jellyfin-only, no media write, so also allowed under ``dry_run``.
     - ``candidate_picker`` -> same reshuffle+clear-lock the manual "Re-pick"
       button does (``POST /items/{id}/reshuffle``), for the specific kind(s)
       the finding flagged, then folded into the same apply run as any other
@@ -170,11 +173,13 @@ def fix_findings(scan_id: str, body: FixRequest,
     # applies just because it has both kinds of finding.
     apply_items = _distinct([r["item_id"] for r in apply_rows] + [r["item_id"] for r in pick_rows])
     refresh_items = _distinct([r["item_id"] for r in refresh_rows])
+    unlock_rows = [r for r in actionable if r["fix_kind"] == "unlock_refresh"]
+    unlock_items = _distinct([r["item_id"] for r in unlock_rows])
 
     # Distinct items across both kinds: one item with an apply AND a refresh
     # finding is still one item (the UI batches by item -- counting it twice
     # here 422'd a 50-item batch as "51 > 50", operator-reported 2026-11-18).
-    n_items = len(set(apply_items) | set(refresh_items))
+    n_items = len(set(apply_items) | set(refresh_items) | set(unlock_items))
     if n_items > MAX_FIX_ITEMS:
         raise HTTPException(
             status_code=422,
@@ -208,9 +213,20 @@ def fix_findings(scan_id: str, body: FixRequest,
         apply_rows = [r for r in apply_rows if r["id"] not in no_source]
         apply_items = _distinct([r["item_id"] for r in apply_rows] + [r["item_id"] for r in pick_rows])
 
-    if refresh_items:
+    if refresh_items or unlock_items:
         jf = ctx.make_jellyfin()
         try:
+            for item_id in unlock_items:
+                try:
+                    n = jf.unlock_series(item_id)
+                    submitted.append({"item_id": item_id, "action": "unlock_refresh",
+                                      "unlocked": n})
+                    fixed_ids.extend(r["id"] for r in unlock_rows
+                                     if r["item_id"] == item_id)
+                except Exception as exc:
+                    logger.warning("unlock failed for %s: %s", item_id, exc)
+                    submitted.append({"item_id": item_id, "action": "unlock_refresh",
+                                      "error": ctx.redact(str(exc))})
             for item_id in refresh_items:
                 try:
                     jf.refresh_item(

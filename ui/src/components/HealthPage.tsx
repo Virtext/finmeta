@@ -57,6 +57,7 @@ const CHECK_LABELS: Record<string, string> = {
   'metadata.missing_fields': 'Thin metadata',
   'metadata.tmdb_unmatched': 'TMDb has no match',
   'metadata.year_mismatch': 'Probably the wrong title',
+  'metadata.locked_by_finmeta': 'Locked by Finmeta (episodes not updating)',
   'episodes.missing_season': 'Season missing entirely',
   'episodes.missing_episodes': 'Missing episodes',
   'episodes.not_in_sonarr': 'Not managed by Sonarr',
@@ -108,6 +109,9 @@ function describe(f: ScanFinding): string {
   }
   if (f.check_code === 'metadata.tmdb_unmatched') {
     return `TMDb has no match — ${d.reason || 'no reason recorded'}. Set the right provider id on the item in Jellyfin; Finmeta never guesses.`;
+  }
+  if (f.check_code === 'metadata.locked_by_finmeta') {
+    return d.note || 'Locked in Jellyfin by an older Finmeta tvshow.nfo.';
   }
   if (f.check_code === 'metadata.year_mismatch') {
     return `Jellyfin says ${d.jellyfin_year}, TMDb ${d.tmdb_id} says ${d.tmdb_year} (matched by ${d.matched_by}). A year this far out almost always means the wrong title.`;
@@ -187,6 +191,7 @@ const FIX_LABELS: Record<string, string> = {
   // reshuffle+apply via the same endpoint, alongside the still-offered
   // manual "Pick artwork…" link (onPickArtwork) for when it doesn't help.
   candidate_picker: 'Try to upgrade',
+  unlock_refresh: 'Unlock & refresh in Jellyfin',
   external: '',
   none: '',
 };
@@ -302,7 +307,7 @@ export default function HealthPage({ libraries, dryRun, onBack, onPickArtwork }:
 
   const fixable = useCallback(
     (f: ScanFinding) => f.fix_kind === 'apply_item' || f.fix_kind === 'refresh_item'
-      || f.fix_kind === 'candidate_picker',
+      || f.fix_kind === 'candidate_picker' || f.fix_kind === 'unlock_refresh',
     [],
   );
 
@@ -358,11 +363,13 @@ export default function HealthPage({ libraries, dryRun, onBack, onPickArtwork }:
       const started = r.submitted.filter((s) => s.run_id).length;
       const queued = r.submitted.filter((s) => s.queued).length;
       const refreshed = r.submitted.filter((s) => s.action === 'refresh_item' && !s.error).length;
+      const unlocked = r.submitted.filter((s) => s.action === 'unlock_refresh' && !s.error).length;
       const failed = r.submitted.filter((s) => s.error).length;
       const parts: string[] = [];
       if (started) parts.push(`${started} apply run started`);
       if (queued) parts.push(`${queued} queued`);
       if (refreshed) parts.push(`${refreshed} Jellyfin refresh requested`);
+      if (unlocked) parts.push(`${unlocked} series unlocked and refreshing`);
       if (failed) parts.push(`${failed} failed`);
       if (r.no_source?.length) parts.push(`${r.no_source.length} have no such image at any source`);
       if (r.no_better?.length) parts.push(`${r.no_better.length} have no larger image at any source (Ignore them, or lower the floor in Settings)`);

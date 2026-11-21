@@ -305,6 +305,36 @@ class JellyfinClient:
             replaceAllMetadata=replace_all_metadata,
             replaceAllImages=replace_all_images))
 
+    def unlock_item(self, item_id: str) -> None:
+        """Clear Jellyfin's item lock (``LockData``).
+
+        ``POST /Items/{id}`` replaces the item's editable fields with the
+        body, so it gets the item's own full DTO back with only LockData
+        changed -- the same round trip Jellyfin's metadata editor does.
+        """
+        self._ensure_user_id()
+        dto = self._request("GET", f"/Items/{item_id}",
+                            params=self._params(userId=self.user_id)) or {}
+        if not dto.get("LockData"):
+            return
+        dto["LockData"] = False
+        self._request("POST", f"/Items/{item_id}", json=dto)
+
+    def unlock_series(self, series_id: str) -> int:
+        """Unlock a series and every locked season/episode under it, then
+        have Jellyfin re-read their metadata (NFO first). Returns how many
+        items were unlocked."""
+        locked = [it.id for it in self.iter_items(
+            parent_id=series_id, recursive=True,
+            include_item_types=["Season", "Episode"], fields="Settings")
+            if it.lock_data]
+        for item_id in [series_id, *locked]:
+            self.unlock_item(item_id)
+        # Images untouched: only the metadata was stuck behind the lock.
+        self.refresh_item(series_id, image_refresh_mode="Default",
+                          replace_all_metadata=True, replace_all_images=False)
+        return 1 + len(locked)
+
     # -- scheduled tasks / scan --------------------------------------------
     def get_media_streams(self, item_id: str) -> List[MediaStream]:
         """Return the media streams (video/audio/subtitle tracks) for an item."""

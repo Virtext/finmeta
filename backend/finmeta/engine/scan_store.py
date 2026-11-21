@@ -33,7 +33,8 @@ SEVERITIES: Tuple[str, ...] = ("error", "warning", "info")
 #   external         -- fix lives in Jellyfin/Sonarr/config, deep-link only
 #   none             -- reported, never auto-fixed (duplicates)
 FIX_KINDS: Tuple[str, ...] = (
-    "apply_item", "refresh_item", "candidate_picker", "external", "none",
+    "apply_item", "refresh_item", "candidate_picker", "unlock_refresh",
+    "external", "none",
 )
 
 # Kept here (not in config) for S10a; the `scan.keep_scans` config field

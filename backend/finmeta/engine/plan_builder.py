@@ -17,7 +17,7 @@ from finmeta.engine.diff import annotate_status
 from finmeta.engine.matching import MatchResult, match_item
 from finmeta.engine.nfo import (
     DEFAULT_MOVIE_FIELDS, DEFAULT_TV_FIELDS,
-    movie_nfo, nfo_sha256, tvshow_nfo,
+    movie_nfo, nfo_owned_elsewhere, nfo_sha256, tvshow_nfo,
 )
 from finmeta.engine.paths import (
     movie_dir as _movie_dir,
@@ -441,6 +441,23 @@ def compute_ratings(
 
 # -- per-item plan builders -------------------------------------------------
 
+def _should_write_nfo(lib: Any, path: Path, item_name: str) -> bool:
+    """Metadata on, and the NFO is missing or Finmeta's own.
+
+    An NFO Sonarr/Radarr/Jellyfin wrote is theirs: overwriting it only
+    starts a nightly tug-of-war (Sonarr rewrites its tvshow.nfo
+    every day, Finmeta replaced it every night). Checked on disk -- no API
+    call -- and skipping also saves the TMDb details fetch.
+    """
+    if not lib.metadata.enabled:
+        return False
+    if nfo_owned_elsewhere(path):
+        logger.info("metadata for %s owned by another tool (%s) -- skipped",
+                    item_name, path.name)
+        return False
+    return True
+
+
 def _build_movie_plan(
     item: Item, match: MatchResult, cfg: Config, lib: MovieLibrary,
     mapper: PathMapper, tmdb: TmdbClient, jf: JellyfinClient,
@@ -479,7 +496,8 @@ def _build_movie_plan(
     # TMDb details (needed for the NFO and for the "rating" overlay badge).
     details: Optional[Dict[str, Any]] = None
     overlay_names = _profile_overlay_names(lib, cfg)
-    if lib.metadata.enabled or "rating" in overlay_names:
+    write_nfo = _should_write_nfo(lib, base / "movie.nfo", item.name)
+    if write_nfo or "rating" in overlay_names:
         try:
             details = tmdb.movie_details(match.tmdb_id, language=language)
         except Exception as exc:
@@ -496,7 +514,7 @@ def _build_movie_plan(
     }
 
     # NFO
-    if lib.metadata.enabled and details is not None:
+    if write_nfo and details is not None:
         try:
             nfo_bytes = movie_nfo(details, match.tmdb_id, fields)
             files.append(FileWrite(
@@ -622,7 +640,8 @@ def _build_tvshow_plan(
     # "network" badge -- TMDb's own `networks` field, TV shows only).
     details: Optional[Dict[str, Any]] = None
     overlay_names = _profile_overlay_names(lib, cfg)
-    if lib.metadata.enabled or "rating" in overlay_names or "network" in overlay_names:
+    write_nfo = _should_write_nfo(lib, base / "tvshow.nfo", item.name)
+    if write_nfo or "rating" in overlay_names or "network" in overlay_names:
         try:
             details = tmdb.tv_details(match.tmdb_id, language=language)
         except Exception as exc:
@@ -638,7 +657,7 @@ def _build_tvshow_plan(
     }
 
     # NFO
-    if lib.metadata.enabled and details is not None:
+    if write_nfo and details is not None:
         try:
             nfo_bytes = tvshow_nfo(details, match.tmdb_id, fields)
             files.append(FileWrite(

@@ -286,6 +286,7 @@ def _do_scan(context: AppContext, run_id: str, cfg: Config,
                     settings=settings, tmdb=tmdb, sonarr_index=sonarr_index,
                     language=cfg.language,
                     progress_cb=_progress_logger(db, run_id, f"scan {name}", every=1),
+                    config_dir=context.config_dir,
                 )
             except Exception as exc:
                 log(db, run_id, "error", context.redact(f"scan failed for {name}: {exc}"))
