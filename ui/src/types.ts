@@ -319,8 +319,10 @@ export interface FindingsResp {
 }
 export interface FixResp {
   submitted: Array<{
-    item_id: string; action: string; run_id?: string;
+    item_id?: string; action: string; run_id?: string;
     queued?: boolean; detail?: string | null; error?: string;
+    /** unlock_refresh: how many series the one repair run covers. */
+    series?: number;
   }>;
   not_fixable: number[];
   unknown: number[];

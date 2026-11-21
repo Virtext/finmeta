@@ -360,16 +360,19 @@ export default function HealthPage({ libraries, dryRun, onBack, onPickArtwork }:
       // routinely exceeds that (operator hit "153 > 50" on a real
       // deployment, same endpoint this page also calls).
       const r = await fixFindingsBatched(latest.scan.scan_id, targets);
-      const started = r.submitted.filter((s) => s.run_id).length;
+      const started = r.submitted.filter((s) => s.run_id && s.action !== 'unlock_refresh').length;
       const queued = r.submitted.filter((s) => s.queued).length;
       const refreshed = r.submitted.filter((s) => s.action === 'refresh_item' && !s.error).length;
-      const unlocked = r.submitted.filter((s) => s.action === 'unlock_refresh' && !s.error).length;
+      const unlocked = r.submitted.filter((s) => s.action === 'unlock_refresh' && s.run_id)
+        .reduce((n, s) => n + (s.series ?? 0), 0);
+      const unlockBusy = r.submitted.find((s) => s.action === 'unlock_refresh' && s.error);
       const failed = r.submitted.filter((s) => s.error).length;
       const parts: string[] = [];
       if (started) parts.push(`${started} apply run started`);
       if (queued) parts.push(`${queued} queued`);
       if (refreshed) parts.push(`${refreshed} Jellyfin refresh requested`);
-      if (unlocked) parts.push(`${unlocked} series unlocked and refreshing`);
+      if (unlocked) parts.push(`repair started for ${unlocked} series (progress in Activity)`);
+      if (unlockBusy) parts.push(unlockBusy.error!);
       if (failed) parts.push(`${failed} failed`);
       if (r.no_source?.length) parts.push(`${r.no_source.length} have no such image at any source`);
       if (r.no_better?.length) parts.push(`${r.no_better.length} have no larger image at any source (Ignore them, or lower the floor in Settings)`);

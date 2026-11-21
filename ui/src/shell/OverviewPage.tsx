@@ -6,7 +6,7 @@ import {
 import type { BadgeTone } from '../ui';
 import {
   cancelActiveRun, fixFindingsBatched, getActivity, getFindings, getLatestScan, getLibraries,
-  getServicesStatus, startScan,
+  getServicesStatus, startScan, unlockAllLocked,
 } from '../api';
 import type { ServiceStatusEntry } from '../api';
 import type { ActivityResp, ActivityRun, LatestScanResp, LibraryView, ScanFinding } from '../types';
@@ -82,6 +82,8 @@ export function OverviewPage(): React.ReactElement {
   const [scanning, setScanning] = useState(false);
   const [fixingAll, setFixingAll] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [unlocking, setUnlocking] = useState(false);
+  const [unlockStarted, setUnlockStarted] = useState(false);
 
   const load = useCallback(() => {
     setError(null);
@@ -131,6 +133,27 @@ export function OverviewPage(): React.ReactElement {
       .finally(() => setCancelling(false));
   };
 
+  const repairLocked = () => {
+    const scanId = scan?.scan?.scan_id;
+    if (!scanId) return;
+    setUnlocking(true);
+    unlockAllLocked(scanId)
+      .then((r) => {
+        const e = r.submitted[0];
+        if (!e) {
+          push({ message: 'Nothing left to repair in this scan. Run a new scan to confirm.' });
+        } else if (e.error) {
+          push({ message: e.error, tone: 'danger' });
+        } else {
+          setUnlockStarted(true);
+          push({ message: `Repair started for ${r.series} series — progress in Activity.` });
+          load();
+        }
+      })
+      .catch((e: any) => push({ message: e?.message ?? 'Could not start the repair.', tone: 'danger' }))
+      .finally(() => setUnlocking(false));
+  };
+
   const fixAllArtwork = () => {
     const scanId = scan?.scan?.scan_id;
     // candidate_picker (2026-11-10): the backend now reshuffles+applies
@@ -174,6 +197,7 @@ export function OverviewPage(): React.ReactElement {
   const guaranteedFixCount = (artworkFindings ?? []).filter((f) => f.fix_kind === 'apply_item' || f.fix_kind === 'refresh_item').length;
   const upgradeTryCount = (artworkFindings ?? []).filter((f) => f.fix_kind === 'candidate_picker').length;
   const fixableCount = guaranteedFixCount + upgradeTryCount;
+  const lockedCount = scan?.counts.by_check?.['metadata.locked_by_finmeta'] ?? 0;
 
   return (
     <div>
@@ -182,6 +206,29 @@ export function OverviewPage(): React.ReactElement {
         description={libs ? `${libs.length} librar${libs.length === 1 ? 'y' : 'ies'} managed` : undefined}
         actions={<Button variant="primary" loading={scanning} onClick={runScan}>Scan libraries</Button>}
       />
+
+      {lockedCount > 0 && (
+        <Card className="fm-locked-banner" style={{ marginBottom: 16, borderColor: 'var(--warn)' }}>
+          <CardBody>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+              <div style={{ flex: '1 1 320px', minWidth: 0 }}>
+                <strong>{lockedCount} series locked in Jellyfin by an older Finmeta version</strong>
+                <p style={{ margin: '4px 0 0', fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
+                  Finmeta versions before 21 Nov 2026 locked every series they wrote a tvshow.nfo for.
+                  Episodes added since then may show only the series name and a date instead of
+                  their title. The repair removes that lock from Finmeta's own tvshow.nfo, unlocks
+                  the series and its episodes in Jellyfin, and re-reads only the affected episodes —
+                  slowly, so Jellyfin and AniDB are not flooded. It can take a while; progress is in
+                  Activity.
+                </p>
+              </div>
+              <Button variant="primary" loading={unlocking} disabled={unlockStarted} onClick={repairLocked}>
+                {unlockStarted ? 'Repair running' : 'Repair locked series'}
+              </Button>
+            </div>
+          </CardBody>
+        </Card>
+      )}
 
       <div className="fm-overview-grid">
         <Card className="fm-span-2">

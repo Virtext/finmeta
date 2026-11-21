@@ -10,7 +10,7 @@ import logging
 import time
 import uuid
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 from finmeta.config.models import Config
 from finmeta.engine.jobs import finish_run, init_db, log, start_run
@@ -18,6 +18,7 @@ from finmeta.engine import scan_store
 from finmeta.engine.plan_builder import build_sonarr_index
 from finmeta.engine.scanner import ScanSettings, scan_library
 from finmeta.engine.executor import DryRunRefused, apply_plan
+from finmeta.engine.lock_repair import repair_locked_series
 from finmeta.engine.plan import WritePlan
 
 from finmeta.api.state import AppContext
@@ -32,7 +33,7 @@ def _new_run_id() -> str:
 def submit_run(
     context: AppContext, action: str, *,
     library: Optional[str] = None, item_id: Optional[str] = None,
-    tier: int = 1,
+    tier: int = 1, item_ids: Optional[List[str]] = None,
 ) -> Tuple[Optional[str], Optional[str]]:
     """Claim the run slot and start a worker. Returns (run_id, error).
 
@@ -44,7 +45,7 @@ def submit_run(
         return None, "a run is already in progress"
     import threading
     t = threading.Thread(
-        target=_worker, args=(context, run_id, action, library, item_id, tier),
+        target=_worker, args=(context, run_id, action, library, item_id, tier, item_ids),
         daemon=True)
     t.start()
     return run_id, None
@@ -326,9 +327,32 @@ def _do_scan(context: AppContext, run_id: str, cfg: Config,
     finish_run(db, run_id, status)
 
 
+def _do_unlock(context: AppContext, run_id: str, cfg: Config,
+               series_ids: List[str]) -> None:
+    """Repair series an older Finmeta locked in Jellyfin (engine.lock_repair).
+
+    A run like any other (one slot, Activity log) because it can take an
+    hour on a big library: it is paced on purpose, see REFRESH_PAUSE_S.
+    """
+    db = context.db_path
+    init_db(db)
+    start_run(db, run_id, "", action="unlock", scope="all")
+    log(db, run_id, "info", f"unlock started: {len(series_ids)} series")
+    jf = context.make_jellyfin(cfg)
+    try:
+        stats = repair_locked_series(
+            jf, series_ids, mapper=context.make_mapper(cfg), cfg=cfg,
+            config_dir=context.config_dir, run_id=run_id,
+            log=lambda level, msg: log(db, run_id, level, context.redact(msg)))
+    finally:
+        jf.close()
+    log(db, run_id, "info", "unlock done: " + " ".join(f"{k}={v}" for k, v in stats.items()))
+    finish_run(db, run_id, "error" if stats["errors"] else "ok")
+
+
 def _worker(context: AppContext, run_id: str, action: str,
             library: Optional[str], item_id: Optional[str],
-            tier: int = 1) -> None:
+            tier: int = 1, item_ids: Optional[List[str]] = None) -> None:
     cfg = context.config
     try:
         if action == "plan":
@@ -337,6 +361,8 @@ def _worker(context: AppContext, run_id: str, action: str,
             _do_apply(context, run_id, cfg, library, item_id)
         elif action == "scan":
             _do_scan(context, run_id, cfg, library, tier)
+        elif action == "unlock":
+            _do_unlock(context, run_id, cfg, item_ids or [])
         else:
             raise ValueError(f"unknown action {action!r}")
     except Exception as exc:  # last-resort guard

@@ -136,9 +136,10 @@ def fix_findings(scan_id: str, body: FixRequest,
       because the flag is set would be worse than doing nothing.
     - ``refresh_item`` -> ask Jellyfin to re-read what is already on disk. No
       run, no media write, so this is allowed under ``dry_run``.
-    - ``unlock_refresh`` -> clear the Jellyfin lock on a series and its
-      seasons/episodes, then re-read their metadata (``unlock_series``).
-      Jellyfin-only, no media write, so also allowed under ``dry_run``.
+    - ``unlock_refresh`` -> ONE paced background ``unlock`` run for all the
+      selected series (``engine.lock_repair``), not counted against
+      ``MAX_FIX_ITEMS``. Allowed under ``dry_run``; the run itself skips a
+      series whose tvshow.nfo would need a write.
     - ``candidate_picker`` -> same reshuffle+clear-lock the manual "Re-pick"
       button does (``POST /items/{id}/reshuffle``), for the specific kind(s)
       the finding flagged, then folded into the same apply run as any other
@@ -179,7 +180,9 @@ def fix_findings(scan_id: str, body: FixRequest,
     # Distinct items across both kinds: one item with an apply AND a refresh
     # finding is still one item (the UI batches by item -- counting it twice
     # here 422'd a 50-item batch as "51 > 50", operator-reported 2026-11-18).
-    n_items = len(set(apply_items) | set(refresh_items) | set(unlock_items))
+    # unlock_refresh is not counted: all of it goes to ONE paced background
+    # run (_submit_unlock), however many series -- not a run per item.
+    n_items = len(set(apply_items) | set(refresh_items))
     if n_items > MAX_FIX_ITEMS:
         raise HTTPException(
             status_code=422,
@@ -213,20 +216,15 @@ def fix_findings(scan_id: str, body: FixRequest,
         apply_rows = [r for r in apply_rows if r["id"] not in no_source]
         apply_items = _distinct([r["item_id"] for r in apply_rows] + [r["item_id"] for r in pick_rows])
 
-    if refresh_items or unlock_items:
+    if unlock_items:
+        entry = _submit_unlock(ctx, unlock_items)
+        submitted.append(entry)
+        if "run_id" in entry:
+            fixed_ids.extend(r["id"] for r in unlock_rows)
+
+    if refresh_items:
         jf = ctx.make_jellyfin()
         try:
-            for item_id in unlock_items:
-                try:
-                    n = jf.unlock_series(item_id)
-                    submitted.append({"item_id": item_id, "action": "unlock_refresh",
-                                      "unlocked": n})
-                    fixed_ids.extend(r["id"] for r in unlock_rows
-                                     if r["item_id"] == item_id)
-                except Exception as exc:
-                    logger.warning("unlock failed for %s: %s", item_id, exc)
-                    submitted.append({"item_id": item_id, "action": "unlock_refresh",
-                                      "error": ctx.redact(str(exc))})
             for item_id in refresh_items:
                 try:
                     jf.refresh_item(
@@ -378,6 +376,37 @@ def _candidates_by_item(ctx: AppContext, item_ids: List[str]) -> dict:
         if tmdb is not None:
             tmdb.close()
     return out
+
+
+def _submit_unlock(ctx: AppContext, series_ids: List[str]) -> dict:
+    """Start the one paced ``unlock`` run for these series (lock repair)."""
+    run_id, err = submit_run(ctx, "unlock", item_ids=series_ids)
+    entry: dict = {"action": "unlock_refresh", "series": len(series_ids)}
+    if run_id:
+        entry["run_id"] = run_id
+    else:
+        # Not queued: a repair can run for an hour; the user retries once the
+        # current run is done (the findings stay unfixed until then).
+        entry["error"] = f"{err} -- try again when it has finished"
+    return entry
+
+
+@router.post("/scans/{scan_id}/unlock-all")
+def unlock_all(scan_id: str, ctx: AppContext = Depends(get_ctx)) -> dict:
+    """Repair every ``metadata.locked_by_finmeta`` series this scan found, in
+    one background run (Overview banner). Jellyfin-side plus Finmeta's own
+    tvshow.nfo; series whose NFO needs a write are skipped under dry_run."""
+    if scan_store.get_scan(ctx.db_path, scan_id) is None:
+        raise HTTPException(status_code=404, detail=f"unknown scan {scan_id!r}")
+    rows, _ = scan_store.list_findings(ctx.db_path, scan_id,
+                                       check="metadata.locked_by_finmeta", limit=100000)
+    rows = [r for r in rows if r["item_id"] and not r.get("fixed_at")]
+    if not rows:
+        return {"submitted": [], "series": 0}
+    entry = _submit_unlock(ctx, _distinct([r["item_id"] for r in rows]))
+    if "run_id" in entry:
+        scan_store.mark_fixed(ctx.db_path, [r["id"] for r in rows])
+    return {"submitted": [entry], "series": entry["series"]}
 
 
 @router.delete("/scans/{scan_id}")

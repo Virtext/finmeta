@@ -139,30 +139,129 @@ def test_trashed_copy_counts_as_finmeta_trace(tmp_path):
                                    config_dir=cfg_dir)) == 1
 
 
+
 BASE = "http://jf"
 
 
 @respx.mock
-def test_unlock_series_unlocks_locked_children_and_refreshes():
+def test_client_lists_children_with_lock_state_and_unlocks_with_full_dto():
     client = JellyfinClient(BASE, token="t", user_id="u1")
     respx.get(f"{BASE}/Items").mock(return_value=httpx.Response(200, json={
         "Items": [{"Id": "e1", "Type": "Episode", "LockData": False},
                   {"Id": "e2", "Type": "Episode", "LockData": True}],
         "TotalRecordCount": 2}))
-    dtos = {"s1": {"Id": "s1", "Name": "Example Show", "LockData": True},
-            "e2": {"Id": "e2", "Name": "Example Show", "LockData": True}}
-    for item_id, dto in dtos.items():
-        respx.get(f"{BASE}/Items/{item_id}").mock(return_value=httpx.Response(200, json=dto))
-    posts = {i: respx.post(f"{BASE}/Items/{i}").mock(return_value=httpx.Response(204))
-             for i in dtos}
-    refresh = respx.post(f"{BASE}/Items/s1/Refresh").mock(return_value=httpx.Response(204))
+    dto = {"Id": "e2", "Name": "Example Show", "Overview": "x", "LockData": True}
+    respx.get(f"{BASE}/Items/e2").mock(return_value=httpx.Response(200, json=dto))
+    post = respx.post(f"{BASE}/Items/e2").mock(return_value=httpx.Response(204))
+    respx.get(f"{BASE}/Items/e1").mock(return_value=httpx.Response(
+        200, json={"Id": "e1", "LockData": False}))
+    post_e1 = respx.post(f"{BASE}/Items/e1").mock(return_value=httpx.Response(204))
 
-    assert client.unlock_series("s1") == 2
+    assert [(c.id, c.lock_data) for c in client.series_children("s1")] == [
+        ("e1", False), ("e2", True)]
+    client.unlock_item("e2")
+    client.unlock_item("e1")            # not locked: no write at all
 
-    for item_id, route in posts.items():
-        body = json.loads(route.calls.last.request.content)
-        # full DTO sent back, only the lock changed
-        assert body == {**dtos[item_id], "LockData": False}
-    q = refresh.calls.last.request.url.params
-    assert q["replaceAllMetadata"] == "true" and q["replaceAllImages"] == "false"
+    # the full DTO goes back, only the lock changed
+    assert json.loads(post.calls.last.request.content) == {**dto, "LockData": False}
+    assert not post_e1.called
 
+
+# -- the repair run ------------------------------------------------------------
+
+class FakeJf:
+    def __init__(self, series, children, fail=()):
+        self.series, self.children, self.fail = series, children, set(fail)
+        self.unlocked, self.refreshed = [], []
+
+    def get_item(self, item_id):
+        if item_id in self.fail:
+            raise RuntimeError("boom")
+        return self.series[item_id]
+
+    def series_children(self, series_id):
+        return list(self.children.get(series_id, []))
+
+    def unlock_item(self, item_id):
+        self.unlocked.append(item_id)
+
+    def refresh_item(self, item_id, **kw):
+        self.refreshed.append((item_id, kw))
+
+
+def _setup(tmp_path, nfo_text, *, dry_run=False):
+    from finmeta.config.models import PathMapping
+    from finmeta.jellyfin_client.mappings import PathMapper
+    media = tmp_path / "media"
+    show = media / "Example Show (2020)"
+    show.mkdir(parents=True)
+    (show / "tvshow.nfo").write_text(nfo_text)
+    cfg_dir = tmp_path / "config"
+    cfg_dir.mkdir()
+    cfg = SimpleNamespace(dry_run=dry_run,
+                          path_mappings=[PathMapping(jellyfin="/data", local=str(media))])
+    mapper = PathMapper.from_config([{"jellyfin": "/data", "local": str(media)}])
+    series = Item(id="s1", name="Example Show", type="Series",
+                  path="/data/Example Show (2020)")
+    kids = [Item(id="e1", name="Real Title", type="Episode"),              # fine
+            Item(id="e2", name="Pilot", type="Episode", lock_data=True),
+            Item(id="e3", name="Example Show", type="Episode", lock_data=True),
+            Item(id="e4", name="Example Show", type="Episode")]            # frozen
+    jf = FakeJf({"s1": series}, {"s1": kids})
+    return jf, cfg, mapper, cfg_dir, show / "tvshow.nfo"
+
+
+def _run(jf, ids, cfg, mapper, cfg_dir, sleeps=None):
+    from finmeta.engine.lock_repair import repair_locked_series
+    logs = []
+    stats = repair_locked_series(
+        jf, ids, mapper=mapper, cfg=cfg, config_dir=cfg_dir, run_id="run-1-abc",
+        log=lambda lvl, msg: logs.append((lvl, msg)),
+        sleep=(sleeps.append if sleeps is not None else (lambda s: None)))
+    return stats, logs
+
+
+def test_repair_strips_own_nfo_lock_first_then_unlocks_and_refreshes_children(tmp_path):
+    from finmeta.engine.runs import undo
+    jf, cfg, mapper, cfg_dir, nfo = _setup(tmp_path, LEGACY_FINMETA_TVSHOW)
+    sleeps = []
+    stats, _ = _run(jf, ["s1"], cfg, mapper, cfg_dir, sleeps)
+
+    assert b"lockdata" not in nfo.read_bytes()
+    assert is_finmeta_nfo(nfo)                      # still ours afterwards
+    assert jf.unlocked == ["s1", "e2", "e3"]
+    # locked + frozen (unlocked but still named like the series) children are
+    # re-read; the one with its real title and the series itself are not
+    assert [i for i, _ in jf.refreshed] == ["e2", "e3", "e4"]
+    assert all(kw["replace_all_metadata"] and not kw["replace_all_images"]
+               for _, kw in jf.refreshed)
+    assert sleeps == [1.0, 1.0]                      # paced between refreshes
+    assert stats == {"series": 1, "items_unlocked": 3, "nfo_fixed": 1,
+                     "skipped": 0, "errors": 0}
+    # the NFO edit is undoable like any apply write
+    undo("run-1-abc", config_dir=cfg_dir)
+    assert nfo.read_text() == LEGACY_FINMETA_TVSHOW
+
+
+def test_repair_under_dry_run_skips_series_whose_nfo_would_relock(tmp_path):
+    jf, cfg, mapper, cfg_dir, nfo = _setup(tmp_path, LEGACY_FINMETA_TVSHOW, dry_run=True)
+    stats, logs = _run(jf, ["s1"], cfg, mapper, cfg_dir)
+    assert nfo.read_text() == LEGACY_FINMETA_TVSHOW
+    assert jf.unlocked == [] and stats["skipped"] == 1
+    assert logs[0][0] == "warn"
+
+
+def test_repair_leaves_sonarr_nfo_alone_but_still_unlocks(tmp_path):
+    jf, cfg, mapper, cfg_dir, nfo = _setup(tmp_path, SONARR_TVSHOW, dry_run=True)
+    stats, _ = _run(jf, ["s1"], cfg, mapper, cfg_dir)
+    assert nfo.read_text() == SONARR_TVSHOW
+    assert jf.unlocked == ["s1", "e2", "e3"] and stats["nfo_fixed"] == 0
+
+
+def test_one_failing_series_does_not_stop_the_rest(tmp_path):
+    jf, cfg, mapper, cfg_dir, _ = _setup(tmp_path, SONARR_TVSHOW)
+    jf.fail = {"bad"}
+    sleeps = []
+    stats, _ = _run(jf, ["bad", "s1"], cfg, mapper, cfg_dir, sleeps)
+    assert stats["errors"] == 1 and stats["series"] == 1
+    assert 2.0 in sleeps                             # paced between series

@@ -258,6 +258,12 @@ export const fixFindings = (scanId: string, findingIds: number[]) =>
     body: JSON.stringify({ finding_ids: findingIds }),
   });
 
+// One paced background run that repairs every series an older Finmeta
+// locked in Jellyfin (metadata.locked_by_finmeta) -- routes_scans.unlock_all.
+export const unlockAllLocked = (scanId: string) =>
+  j<{ submitted: FixResp['submitted']; series: number }>(
+    `/api/scans/${enc(scanId)}/unlock-all`, { method: 'POST' });
+
 // routes_scans.py's MAX_FIX_ITEMS -- the backend 422s a single request
 // whose DISTINCT items (not finding rows) exceed this. A library with a
 // few thousand items can easily produce >50 fixable findings in one go
@@ -271,12 +277,18 @@ const MAX_FIX_ITEMS = 50;
 // per-item fix isn't split across two requests), then submits each batch
 // in turn and merges the results as if it were one call.
 export async function fixFindingsBatched(
-  scanId: string, findings: { id: number; item_id: string | null }[],
+  scanId: string, findings: { id: number; item_id: string | null; fix_kind?: string }[],
 ): Promise<FixResp> {
   const batches: number[][] = [];
+  // unlock_refresh is exempt from MAX_FIX_ITEMS and becomes ONE background
+  // run -- split across batches, every batch after the first would hit
+  // "a run is already in progress".
+  const unlock = findings.filter((f) => f.fix_kind === 'unlock_refresh').map((f) => f.id);
+  if (unlock.length > 0) batches.push(unlock);
   let current: number[] = [];
   let currentItems = new Set<string>();
   for (const f of findings) {
+    if (f.fix_kind === 'unlock_refresh') continue;
     const itemId = f.item_id ?? `__none__${f.id}`;
     const wouldGrow = !currentItems.has(itemId);
     if (wouldGrow && currentItems.size >= MAX_FIX_ITEMS && current.length > 0) {

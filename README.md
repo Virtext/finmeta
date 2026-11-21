@@ -15,6 +15,41 @@ web UI for configuration, live preview, and plan/apply control.
 > real Jellyfin server. See the open items in the repo's issue tracker
 > for what's still in progress.
 
+## ⚠️ Upgrade notice: episodes showing only a date (November 2026)
+
+**Who is affected:** anyone who ran Finmeta before 21 November 2026 with a
+TV or anime library enabled. Metadata writing is on by default, so this is
+most installs.
+
+**What happened:** older versions wrote `<lockdata>true</lockdata>` into every
+`tvshow.nfo`. Jellyfin then locks the series *and every episode added after
+it*, and a locked episode never reads its own NFO. New episodes show up with
+only the series name and a file date instead of their title. Older versions
+also overwrote `tvshow.nfo`/`movie.nfo` files written by Sonarr, Radarr or
+Jellyfin, so the two tools rewrote each other's file every night.
+
+**What the new version does:**
+- Finmeta writes an NFO only when there is none, or when it is Finmeta's own.
+  Files from Sonarr, Radarr, Jellyfin or a human are left alone.
+- `tvshow.nfo` no longer carries `lockdata` (`movie.nfo` still does).
+- **Health → scan** shows each affected series as *"Locked by Finmeta"*, and
+  **Overview** shows a *"Repair locked series"* button.
+
+**What you need to do:**
+1. Update the container.
+2. Run a scan (Overview → *Scan libraries*).
+3. Click **Repair locked series** on Overview. It removes the lock from
+   Finmeta's own `tvshow.nfo` files (backed up, undoable), unlocks the series
+   and their episodes in Jellyfin, and re-reads only the affected episodes.
+   It runs as one background job and is deliberately slow, so Jellyfin and
+   providers such as AniDB are not flooded. With hundreds of series it can
+   take an hour; progress is in **Activity**.
+4. Run a new scan afterwards. The *"Locked by Finmeta"* findings should be gone.
+
+With `dry_run: true`, series whose `tvshow.nfo` still needs the fix are skipped
+(the repair would otherwise write a file). Turn `dry_run` off for the repair, or
+run a normal apply first.
+
 ## Screenshots
 
 <table>

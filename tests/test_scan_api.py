@@ -362,21 +362,60 @@ def test_non_actionable_findings_come_back_as_not_fixable(ctx_factory):
         assert r.json()["submitted"] == []
 
 
-def test_unlock_refresh_fix_works_under_dry_run(ctx_factory):
-    ctx = ctx_factory(dry_run=True)
-    unlocked: List[str] = []
-    ctx._fake_jf.unlock_series = lambda sid: unlocked.append(sid) or 3
-    scan_id, rows = _seed(ctx, [
-        _f("metadata.locked_by_finmeta", severity="warning", item="s1",
-           fix="unlock_refresh"),
-    ])
+def _capture_unlock(monkeypatch, *, busy=False):
+    import finmeta.api.routes_scans as rs
+    calls: List[Dict[str, Any]] = []
+
+    def fake_submit(ctx, action, **kw):
+        calls.append({"action": action, **kw})
+        return (None, "a run is already in progress") if busy else ("run-x", None)
+
+    monkeypatch.setattr(rs, "submit_run", fake_submit)
+    return calls
+
+
+def _locked(n):
+    return [_f("metadata.locked_by_finmeta", severity="warning", item=f"s{i}",
+               fix="unlock_refresh") for i in range(n)]
+
+
+def test_unlock_fix_is_one_background_run_past_the_item_cap(ctx_factory, monkeypatch):
+    calls = _capture_unlock(monkeypatch)
+    ctx = ctx_factory(dry_run=True)                  # Jellyfin-side: allowed
+    n = MAX_FIX_ITEMS + 10
+    scan_id, rows = _seed(ctx, _locked(n))
     with _client(ctx) as client:
         r = client.post(f"/api/scans/{scan_id}/fix",
-                        json={"finding_ids": [rows[0]["id"]]})
+                        json={"finding_ids": [x["id"] for x in rows]})
     assert r.status_code == 200
     assert r.json()["submitted"] == [
-        {"item_id": "s1", "action": "unlock_refresh", "unlocked": 3}]
-    assert unlocked == ["s1"]
+        {"action": "unlock_refresh", "series": n, "run_id": "run-x"}]
+    assert len(calls) == 1 and calls[0]["action"] == "unlock"
+    assert sorted(calls[0]["item_ids"]) == sorted(f"s{i}" for i in range(n))
+
+
+def test_unlock_fix_while_busy_reports_error_and_stays_unfixed(ctx_factory, monkeypatch):
+    _capture_unlock(monkeypatch, busy=True)
+    ctx = ctx_factory()
+    scan_id, rows = _seed(ctx, _locked(1))
+    with _client(ctx) as client:
+        r = client.post(f"/api/scans/{scan_id}/fix", json={"finding_ids": [rows[0]["id"]]})
+    assert "already in progress" in r.json()["submitted"][0]["error"]
+    rows2, _ = scan_store.list_findings(ctx.db_path, scan_id)
+    assert rows2[0]["fixed_at"] is None
+
+
+def test_unlock_all_takes_every_locked_finding_once(ctx_factory, monkeypatch):
+    calls = _capture_unlock(monkeypatch)
+    ctx = ctx_factory()
+    scan_id, _ = _seed(ctx, _locked(3) + [_f("artwork.missing.poster", item="m1")])
+    with _client(ctx) as client:
+        r = client.post(f"/api/scans/{scan_id}/unlock-all")
+        assert r.json()["series"] == 3
+        again = client.post(f"/api/scans/{scan_id}/unlock-all")
+    assert sorted(calls[0]["item_ids"]) == ["s0", "s1", "s2"]
+    assert again.json() == {"submitted": [], "series": 0}   # already submitted
+    assert len(calls) == 1
 
 
 def test_fix_rejects_empty_unknown_scan_and_oversized_requests(ctx_factory):
