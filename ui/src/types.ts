@@ -268,7 +268,7 @@ export interface ProvidersResp {
 
 export type Severity = 'error' | 'warning' | 'info';
 export type FixKind =
-  | 'apply_item' | 'refresh_item' | 'candidate_picker' | 'external' | 'none';
+  | 'apply_item' | 'refresh_item' | 'candidate_picker' | 'unlock_refresh' | 'external' | 'none';
 
 export interface ScanRow {
   scan_id: string;

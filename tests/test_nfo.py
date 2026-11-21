@@ -115,9 +115,11 @@ class TestTvshowNfo:
         actual = tvshow_nfo(BREAKING_BAD, 1396, TV_FIELDS)
         _compare("tvshow_breaking_bad.xml", actual)
 
-    def test_lockdata_present(self):
+    def test_lockdata_absent(self):
+        # 2026-11-21: a locked series makes Jellyfin lock every new episode
+        # (which then never reads its NFO) -- tvshow.nfo must not lock.
         nfo = tvshow_nfo(BREAKING_BAD, 1396, TV_FIELDS)
-        assert b"<lockdata>true</lockdata>" in nfo
+        assert b"lockdata" not in nfo
 
     def test_status_field(self):
         nfo = tvshow_nfo(BREAKING_BAD, 1396, TV_FIELDS)

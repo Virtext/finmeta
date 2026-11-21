@@ -362,6 +362,23 @@ def test_non_actionable_findings_come_back_as_not_fixable(ctx_factory):
         assert r.json()["submitted"] == []
 
 
+def test_unlock_refresh_fix_works_under_dry_run(ctx_factory):
+    ctx = ctx_factory(dry_run=True)
+    unlocked: List[str] = []
+    ctx._fake_jf.unlock_series = lambda sid: unlocked.append(sid) or 3
+    scan_id, rows = _seed(ctx, [
+        _f("metadata.locked_by_finmeta", severity="warning", item="s1",
+           fix="unlock_refresh"),
+    ])
+    with _client(ctx) as client:
+        r = client.post(f"/api/scans/{scan_id}/fix",
+                        json={"finding_ids": [rows[0]["id"]]})
+    assert r.status_code == 200
+    assert r.json()["submitted"] == [
+        {"item_id": "s1", "action": "unlock_refresh", "unlocked": 3}]
+    assert unlocked == ["s1"]
+
+
 def test_fix_rejects_empty_unknown_scan_and_oversized_requests(ctx_factory):
     ctx = ctx_factory(dry_run=False)
     scan_id, rows = _seed(ctx, [

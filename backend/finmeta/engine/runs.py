@@ -227,6 +227,25 @@ def created_by_finmeta(
     return _first_touch_index(config_dir).get(str(Path(target_path))) == "create"
 
 
+def finmeta_ever_wrote(
+    target_path: Path, *, config_dir: Path = DEFAULT_CONFIG_DIR,
+) -> bool:
+    """Any trace that an apply wrote ``target_path``: a run manifest entry,
+    or a backup/trashed copy (both keyed by the same relpath). Best-effort --
+    the oldest traces age out (runs pruning, trash retention)."""
+    if str(Path(target_path)) in _first_touch_index(config_dir):
+        return True
+    rel = _relpath(Path(target_path), config_dir)
+    for sub in ("backups", "trash"):
+        base = Path(config_dir) / sub
+        try:
+            if base.is_dir() and any((d / rel).is_file() for d in base.iterdir()):
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def find_original_backup(
     target_path: Path, *, config_dir: Path = DEFAULT_CONFIG_DIR,
 ) -> Optional[Path]:
@@ -469,6 +488,6 @@ def prune_runs_dir(config_dir: Path = DEFAULT_CONFIG_DIR, keep: int = 50) -> int
 __all__ = [
     "Manifest", "RunFile", "UndoResult",
     "backup", "record", "load_manifest", "undo",
-    "created_by_finmeta", "find_original_backup", "run_epoch",
+    "created_by_finmeta", "finmeta_ever_wrote", "find_original_backup", "run_epoch",
     "prune_runs_dir", "DEFAULT_CONFIG_DIR",
 ]

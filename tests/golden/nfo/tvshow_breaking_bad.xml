@@ -2,7 +2,6 @@
 <tvshow>
   <uniqueid type="tmdb" default="true">1396</uniqueid>
   <uniqueid type="imdb">tt0903747</uniqueid>
-  <lockdata>true</lockdata>
   <title>Breaking Bad</title>
   <originaltitle>Breaking Bad</originaltitle>
   <sorttitle>Breaking Bad</sorttitle>
