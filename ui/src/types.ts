@@ -8,6 +8,16 @@ export interface FileWrite {
   source_ref: string;
   content_sha256: string;
   status: FileStatus;
+  /** `season`: set on a hand-picked season poster. */
+  meta?: { season?: number };
+}
+
+export interface SeasonView {
+  number: number;
+  name: string;
+  item_id: string;
+  poster_tag: string | null;
+  picked: boolean;
 }
 
 export interface FileEntry {
@@ -136,6 +146,7 @@ export interface Candidate {
   source: string;
   ref: string;
   proxy_url: string;
+  thumb_url: string;
   lang: string | null;
   width: number | null;
   height: number | null;

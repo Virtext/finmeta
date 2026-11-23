@@ -90,6 +90,44 @@ class TestBuildSonarrIndex:
         assert row["id"] == 1
 
     @patch("finmeta.arr.sonarr.SonarrClient")
+    def test_recent_list_reused_only_when_asked_and_refetched_for_new_show(self, mock_cls, monkeypatch):
+        # One opened title used to wait 2-4 s for Sonarr's whole series list.
+        from finmeta.engine import plan_builder
+        monkeypatch.setattr(plan_builder, "_SONARR_ROWS", {})
+        client = mock_cls.return_value
+        client.series.return_value = [{"id": 1, "tvdbId": 111}]
+        cfg, secrets = _sonarr_cfg(), _FakeSecrets({"sonarr_key": "abc"})
+
+        build_sonarr_index(cfg, secrets)
+        assert set(build_sonarr_index(cfg, secrets, max_age=60, need="111")) == {"111"}
+        assert client.series.call_count == 1
+        client.series.return_value = [{"id": 1, "tvdbId": 111}, {"id": 2, "tvdbId": 222}]
+        assert "222" in build_sonarr_index(cfg, secrets, max_age=60, need="222")
+        assert client.series.call_count == 2
+        build_sonarr_index(cfg, secrets)  # library-wide builds always ask
+        assert client.series.call_count == 3
+
+    @patch("finmeta.arr.sonarr.SonarrClient")
+    def test_click_during_warm_up_shares_the_one_fetch(self, mock_cls, monkeypatch):
+        import threading
+        from finmeta.engine import plan_builder
+        monkeypatch.setattr(plan_builder, "_SONARR_ROWS", {})
+        started, release = threading.Event(), threading.Event()
+
+        def _series():
+            started.set()
+            release.wait(5)
+            return [{"id": 1, "tvdbId": 111}]
+
+        mock_cls.return_value.series.side_effect = _series
+        cfg, secrets = _sonarr_cfg(), _FakeSecrets({"sonarr_key": "abc"})
+        plan_builder.warm_sonarr(cfg, secrets)
+        assert started.wait(5)
+        threading.Timer(0.1, release.set).start()
+        assert set(build_sonarr_index(cfg, secrets, max_age=60, need="111")) == {"111"}
+        assert mock_cls.return_value.series.call_count == 1
+
+    @patch("finmeta.arr.sonarr.SonarrClient")
     def test_unreachable_instance_degrades_gracefully(self, mock_cls):
         mock_cls.side_effect = RuntimeError("connection refused")
         cfg = _sonarr_cfg()

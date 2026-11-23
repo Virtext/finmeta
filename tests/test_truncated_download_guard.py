@@ -233,3 +233,29 @@ class TestExecutorHashMismatch:
         assert target.read_bytes() == real
         assert result.files_written == 1
         assert result.errors == []
+
+    def test_wrong_plan_hash_never_rewrites_a_file_that_is_already_right(
+            self, tmp_path: Path, monkeypatch):
+        """2026-11-23: the image CDN had a bad minute while planning, and every
+        correct file planned in it was overwritten with itself."""
+        from finmeta.api.overrides import OverrideStore
+        real = _jpeg((7, 8, 9))
+        real_sha = hashlib.sha256(real).hexdigest()
+        _serve(monkeypatch, _Resp(real, {"content-length": str(len(real))}))
+        cfg_dir = tmp_path / "config"
+        cfg_dir.mkdir()
+        target = tmp_path / "media" / "backdrop.jpg"
+        target.parent.mkdir()
+        target.write_bytes(real)
+        ref = "https://example/b.jpg"
+        plan = _plan(target, "backdrop", ref, "f" * 64)
+        plan.items[0].files[0].meta = {"lock_ref": ref, "lock_sha256": "f" * 64}
+        store = OverrideStore(cfg_dir / "overrides.db")
+        store.set_lock("mov001", "backdrop", ref, "f" * 64)  # a lock from such a minute
+
+        result = apply_plan(plan, "r1", _config(tmp_path), MagicMock(), MagicMock(),
+                            config_dir=cfg_dir, db_path=tmp_path / "jobs.db",
+                            poll_timeout=0.1)
+
+        assert (result.files_written, result.files_unchanged, result.errors) == (0, 1, [])
+        assert store.get_lock("mov001", "backdrop")["sha256"] == real_sha

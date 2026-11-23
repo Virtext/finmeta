@@ -7,17 +7,22 @@ from typing import Optional, Tuple
 
 import httpx
 from PIL import Image
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Path as PathParam
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from finmeta.config.models import Config, TvArtwork
+from finmeta.config.models import Config
 from finmeta.engine.candidate_ref import RefNotAllowed
 from finmeta.engine.matching import match_item
 from finmeta.engine.paths import existing_artwork, movie_dir, show_dir
-from finmeta.engine.plan_builder import _artwork_langs, _resolve_item_library
+from finmeta.engine.plan_builder import (
+    SEASON_KIND_PREFIX, _artwork_langs, _resolve_item_library, jellyfin_seasons,
+    season_poster_stem,
+)
 from finmeta.engine.scanner import ARTWORK_FILENAMES
 from finmeta.sources.candidate import Candidate
+from finmeta.sources.ranking import rank_candidates
+from finmeta.sources.tmdb import TmdbError
 from finmeta.engine.resolution import collect_candidates
 from finmeta.jellyfin_client.types import Item
 
@@ -40,14 +45,12 @@ def _artwork_kinds(lib) -> list:
     for k in ("poster", "backdrop", "logo", "landscape"):
         if getattr(art, k, False):
             kinds.append(k)
-    if isinstance(art, TvArtwork):
-        if art.season_posters:
-            kinds.append("season_poster")
-        # episode_thumbs is Reserved (config/models.py TvArtwork.episode_thumbs'
-        # own help text: "Finmeta does not write episode thumbnails yet") --
-        # plan_builder has no write path for this kind, so offering it here
-        # let an operator pick a candidate that then silently went nowhere.
-        # SPEC_S13.md S13b item 5.
+    # season_posters: one group per season, see season_candidates.
+    # episode_thumbs is Reserved (config/models.py TvArtwork.episode_thumbs'
+    # own help text: "Finmeta does not write episode thumbnails yet") --
+    # plan_builder has no write path for this kind, so offering it here
+    # let an operator pick a candidate that then silently went nowhere.
+    # SPEC_S13.md S13b item 5.
     if lib.theme_song:
         kinds.append("theme_song")
     return kinds
@@ -107,6 +110,17 @@ def _folder_candidates(base, kind: str) -> list:
     return out
 
 
+def _candidate_view(c: Candidate, kind: str, selected: bool) -> dict:
+    return {
+        "kind": kind, "source": c.source, "ref": c.ref,
+        "proxy_url": f"/api/proxy/{proxy_mod.encode_token(c.kind, c.ref)}",
+        "thumb_url": "/api/proxy/" + proxy_mod.encode_token(
+            c.kind, proxy_mod.thumb_ref(c.kind, c.ref)),
+        "lang": c.lang, "width": c.width, "height": c.height,
+        "score": c.score, "selected": selected,
+    }
+
+
 @router.get("/items/{item_id}/candidates")
 def candidates(item_id: str, ctx: AppContext = Depends(get_ctx)) -> dict:
     cfg = ctx.config
@@ -134,13 +148,62 @@ def candidates(item_id: str, ctx: AppContext = Depends(get_ctx)) -> dict:
         ovr = ctx.overrides.get(item_id, kind)
         sel_ref = ovr["ref"] if ovr else next((c.ref for c in lst if c.source != "folder"), None)
         for c in lst:
-            out.append({
-                "kind": c.kind, "source": c.source, "ref": c.ref,
-                "proxy_url": f"/api/proxy/{proxy_mod.encode_token(c.kind, c.ref)}",
-                "lang": c.lang, "width": c.width, "height": c.height,
-                "score": c.score, "selected": (c.ref == sel_ref),
-            })
+            out.append(_candidate_view(c, c.kind, c.ref == sel_ref))
     return {"item_id": item_id, "tmdb_id": tmdb_id, "candidates": out, "locked_kinds": locked_kinds}
+
+
+@router.get("/items/{item_id}/seasons")
+def seasons(item_id: str, ctx: AppContext = Depends(get_ctx)) -> dict:
+    """The seasons this series has in Jellyfin, for picking a poster per season.
+
+    Empty for a movie and for a library with season posters turned off.
+    """
+    jf = ctx.make_jellyfin()
+    try:
+        item = jf.get_item(item_id)
+        if item.type != "Series":
+            return {"seasons": []}
+        _, lib = _resolve_item_library(item, jf, ctx.config)
+        if lib is None or not getattr(lib.artwork, "season_posters", False):
+            return {"seasons": []}
+        rows = jellyfin_seasons(jf, item_id)
+    finally:
+        jf.close()
+    return {"seasons": [{
+        "number": s.index_number, "name": s.name, "item_id": s.id,
+        "poster_tag": s.image_tags.get("Primary"),
+        "picked": ctx.overrides.get(item_id, f"{SEASON_KIND_PREFIX}{s.index_number}") is not None,
+    } for s in rows]}
+
+
+@router.get("/items/{item_id}/seasons/{number}/candidates")
+def season_candidates(item_id: str, number: int = PathParam(ge=0),
+                      ctx: AppContext = Depends(get_ctx)) -> dict:
+    """Posters for one season. Loaded per season: a series can have dozens."""
+    cfg = ctx.config
+    jf, tmdb = ctx.make_jellyfin(cfg), ctx.make_tmdb(cfg)
+    try:
+        match = match_item(jf.get_item(item_id), tmdb, "tvshow", cfg.language)
+        if match.tmdb_id is None:
+            return {"candidates": []}
+        lang, fallback = _artwork_langs(tmdb, "tv", match.tmdb_id, None,
+                                        cfg.language, cfg.artwork_language_fallback)
+        try:
+            found = tmdb.season_images(match.tmdb_id, number, kinds=("poster",))
+        except TmdbError as exc:  # TMDb numbers its seasons differently, or lacks this one
+            logger.info("no TMDb images for tv/%s season %s: %s", match.tmdb_id, number, exc)
+            found = []
+    finally:
+        jf.close()
+        tmdb.close()
+    local = ctx.make_sources(cfg).get("local")
+    if local is not None:
+        found += [c for c in local.candidates_for(match.tmdb_id, ["season_poster"])
+                  if c.ref.endswith(f"/{season_poster_stem(number)}.jpg")]
+    kind = f"{SEASON_KIND_PREFIX}{number}"
+    picked = ctx.overrides.get(item_id, kind) or {}
+    ranked = rank_candidates(found, [lang, *(fallback or [])])
+    return {"candidates": [_candidate_view(c, kind, c.ref == picked.get("ref")) for c in ranked]}
 
 
 class CandidateSelection(BaseModel):

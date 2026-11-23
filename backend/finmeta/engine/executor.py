@@ -31,6 +31,7 @@ from finmeta.engine.nfo import (
     movie_nfo, nfo_owned_elsewhere, tvshow_nfo,
 )
 from finmeta.engine import trash
+from finmeta.engine.diff import _sha256_file
 from finmeta.engine.net import fetch_bytes
 from finmeta.engine.overlay import OVERLAID_KINDS, prune_overlay_cache, read_overlay_cache
 from finmeta.engine.plan import ApiAction, FileWrite, ItemPlan, WritePlan
@@ -193,7 +194,8 @@ def _atomic_write(target: Path, content: bytes) -> None:
         raise
 
 
-def _maybe_lock_artwork(fw: FileWrite, item_id: str, config_dir: Path) -> None:
+def _maybe_lock_artwork(fw: FileWrite, item_id: str, config_dir: Path,
+                        *, heal: bool = False) -> None:
     """S9d5: on an image kind's first successful write/upload, pin the
     candidate it used (``fw.meta["lock_ref"]``/``"lock_sha256"``, set by
     ``engine.plan_builder``/``engine.overlay.overlay_file_write``) so later
@@ -202,10 +204,20 @@ def _maybe_lock_artwork(fw: FileWrite, item_id: str, config_dir: Path) -> None:
     via ``POST /api/items/{id}/reshuffle``) changes it after that.
 
     Never overwrites an existing lock (that is the whole point -- "first
-    run locks it"). Best-effort: any failure is swallowed, same safety
+    run locks it"), except with ``heal``: the same image's lock carries a hash
+    that neither its source nor the file on disk has. Best-effort: any failure is swallowed, same safety
     pattern as the other overrides.db helpers in ``engine.plan_builder``.
     """
-    if fw.kind not in ("poster", "backdrop", "logo", "landscape"):
+    season = fw.meta.get("season")
+    kind = fw.kind if season is None else f"{fw.kind}:{season}"
+    if season is None and fw.kind not in ("poster", "backdrop", "logo", "landscape"):
+        return
+    if fw.meta.get("season_reset"):  # the pick was taken back: nothing left to hold on to
+        try:
+            from finmeta.api.overrides import OverrideStore
+            OverrideStore(Path(config_dir) / "overrides.db").clear_lock(item_id, kind)
+        except Exception:
+            logger.warning("artwork lock clear failed for %s/%s", item_id, kind, exc_info=True)
         return
     ref = fw.meta.get("lock_ref")
     sha = fw.meta.get("lock_sha256")
@@ -214,10 +226,12 @@ def _maybe_lock_artwork(fw: FileWrite, item_id: str, config_dir: Path) -> None:
     try:
         from finmeta.api.overrides import OverrideStore
         store = OverrideStore(Path(config_dir) / "overrides.db")
-        if store.get_lock(item_id, fw.kind) is None:
-            store.set_lock(item_id, fw.kind, str(ref), str(sha))
+        lock = store.get_lock(item_id, kind)
+        if (lock is None or (heal and lock["ref"] == ref)
+                or (season is not None and lock["ref"] != ref)):  # a new pick replaces the old
+            store.set_lock(item_id, kind, str(ref), str(sha))
     except Exception:
-        logger.warning("artwork lock write failed for %s/%s", item_id, fw.kind, exc_info=True)
+        logger.warning("artwork lock write failed for %s/%s", item_id, kind, exc_info=True)
 
 
 # -- API actions (idempotent) -------------------------------------------------
@@ -451,7 +465,8 @@ def apply_plan(
             # Validate hash
             actual_sha = hashlib.sha256(content).hexdigest()
             if actual_sha != fw.content_sha256:
-                if fw.kind in OVERLAID_KINDS or not fw.source_ref.startswith(
+                rendered = fw.kind in OVERLAID_KINDS and "season" not in fw.meta
+                if rendered or not fw.source_ref.startswith(
                         ("http://", "https://")):
                     # An overlaid poster's bytes come from the render cache;
                     # a mismatch here means the cache entry is gone and
@@ -471,6 +486,14 @@ def apply_plan(
                 # were lost to this before fetch_bytes existed) or the source
                 # changed since. Either way the freshly verified bytes are
                 # the better answer than skipping the write.
+                if "lock_sha256" in fw.meta:
+                    fw.meta["lock_sha256"] = actual_sha
+                if _sha256_file(Path(fw.target_path)) == actual_sha:
+                    # Nothing to write: only the plan's hash was wrong.
+                    fw.status = "unchanged"
+                    result.files_unchanged += 1
+                    _maybe_lock_artwork(fw, item.item_id, config_dir, heal=True)
+                    continue
                 msg = (f"source changed since plan for {fw.target_path}: "
                        f"planned={fw.content_sha256[:12]}… actual={actual_sha[:12]}…"
                        f" — writing the verified source bytes")
@@ -557,6 +580,8 @@ def apply_plan(
             image_items.append(item.item_id)
         if has_theme:
             theme_items.append(item.item_id)
+        image_items.extend(fw.meta["refresh_item_id"] for fw in written
+                           if fw.meta.get("refresh_item_id"))
 
     # Baseline ImageTags, captured BEFORE the refresh calls below -- see
     # _poll_refresh's docstring for why this must happen first, not inside

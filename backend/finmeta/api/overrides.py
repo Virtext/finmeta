@@ -30,7 +30,7 @@ _EXPORT_TABLES = {
 
 _FILENAME_FOR_KIND = {
     "poster": "poster.jpg", "backdrop": "backdrop.jpg", "logo": "logo.png",
-    "landscape": "landscape.jpg", "season_poster": "seasonNN-poster.jpg",
+    "landscape": "landscape.jpg",
     "episode_thumb": "seasonNN-episodeNN.jpg", "theme_song": "theme.mp3",
 }
 
@@ -319,7 +319,8 @@ def apply_overrides(plan: WritePlan, overrides_by_item: Dict[str, List[Dict[str,
         by_kind = {fw.kind: fw for fw in item.files}
         for ov in ovs:
             kind, ref = ov["kind"], ov["ref"]
-            if not ref:
+            # season posters: plan_builder._season_posters already did these
+            if not ref or kind.startswith("season_poster"):
                 continue
             existing = by_kind.get(kind)
             if existing is not None and existing.meta.get("overridden"):
@@ -370,6 +371,11 @@ def apply_overrides(plan: WritePlan, overrides_by_item: Dict[str, List[Dict[str,
     return plan
 
 
+def _skip_key(fw: FileWrite) -> str:
+    """One season's poster is skipped on its own, not the whole kind."""
+    return f"{fw.kind}:{fw.meta['season']}" if "season" in fw.meta else fw.kind
+
+
 def apply_skips(plan: WritePlan, skipped_by_item: Dict[str, List[str]]) -> WritePlan:
     """S9d4b: drop FileWrites for kinds the user skipped per row.
 
@@ -384,7 +390,7 @@ def apply_skips(plan: WritePlan, skipped_by_item: Dict[str, List[str]]) -> Write
         if not kinds:
             continue
         before = len(item.files)
-        item.files = [fw for fw in item.files if fw.kind not in kinds]
+        item.files = [fw for fw in item.files if _skip_key(fw) not in kinds]
         if len(item.files) != before:
             changed_items.append(item)
     if changed_items:

@@ -2,7 +2,7 @@ import type {
   ActivityResp, AuthStatus, BundlesResp, CandidatesResp, FindingsResp, FixResp, HealthResp,
   HelpResp, InspectResp, JobResp, LatestScanResp, LibItemsLightResp, LibItemsResp,
   LibrariesResp, PlanResp, ProvidersResp, RestoreResp, RunResp, ScansResp, SecretsResp,
-  ServiceTestResult,
+  ServiceTestResult, Candidate, SeasonView
 } from './types';
 
 // Same-origin API (FastAPI serves both /api/* and the built UI at /).
@@ -75,6 +75,11 @@ export const getItems = (lib: string, page?: { limit: number; offset: number }) 
 export const getPlan = (id: string) => j<PlanResp>(`/api/items/${enc(id)}/plan`);
 export const getCandidates = (id: string) =>
   j<CandidatesResp>(`/api/items/${enc(id)}/candidates`);
+
+export const getSeasons = (id: string) =>
+  j<{ seasons: SeasonView[] }>(`/api/items/${enc(id)}/seasons`);
+export const getSeasonCandidates = (id: string, season: number) =>
+  j<{ candidates: Candidate[] }>(`/api/items/${enc(id)}/seasons/${season}/candidates`);
 
 export const selectCandidate = (id: string, kind: string, ref: string | null) =>
   j(`/api/items/${enc(id)}/candidates`, {

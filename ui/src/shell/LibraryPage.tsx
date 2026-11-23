@@ -101,9 +101,10 @@ interface GridProps {
   /** Bulk selection (S13d) only makes sense browsing the whole library --
    * never in the narrow side-grid next to an already-open item detail. */
   selection?: Selection;
+  onOpen: (item: ItemLightView) => void;
 }
 
-function PosterGrid({ library, selectedId, narrow, selection }: GridProps): React.ReactElement {
+function PosterGrid({ library, selectedId, narrow, selection, onOpen }: GridProps): React.ReactElement {
   const [items, setItems] = useState<ItemLightView[] | null>(null);
   const [total, setTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -227,7 +228,10 @@ function PosterGrid({ library, selectedId, narrow, selection }: GridProps): Reac
               selected={selection ? selection.allLibrary || selection.ids.has(it.item_id) : it.item_id === selectedId}
               selectable={!!selection}
               onToggleSelect={selection ? () => selection.onToggle(it.item_id) : undefined}
-              onClick={() => navigate(`/library/${encodeURIComponent(library)}/item/${encodeURIComponent(it.item_id)}`)}
+              onClick={() => {
+                onOpen(it);
+                navigate(`/library/${encodeURIComponent(library)}/item/${encodeURIComponent(it.item_id)}`);
+              }}
             />
           ))}
         </div>
@@ -340,8 +344,11 @@ function BulkActionBar({
 // Item detail: real plan + candidates + apply, via the shared PreviewPane
 // ---------------------------------------------------------------------------
 
-function ItemDetail({ library, itemId, dryRun }: { library: string; itemId: string; dryRun: boolean }): React.ReactElement {
-  const [item, setItem] = useState<ItemLightView | null>(null);
+function ItemDetail({ library, itemId, initial, dryRun }: {
+  library: string; itemId: string; initial: ItemLightView | null; dryRun: boolean;
+}): React.ReactElement {
+  // `initial` is the clicked grid card: shown at once, the plan takes seconds.
+  const [item, setItem] = useState<ItemLightView | null>(initial);
   const [plan, setPlan] = useState<PlanResp | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -416,11 +423,22 @@ export function LibraryPage({ path, dryRun }: LibraryPageProps): React.ReactElem
   const { library, itemId } = parsePath(path);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [allLibrary, setAllLibrary] = useState<number | null>(null);
+  const [opened, setOpened] = useState<ItemLightView | null>(null);
+  const detailRef = useRef<HTMLDivElement>(null);
   const clearSelection = () => { setSelectedIds(new Set()); setAllLibrary(null); };
 
   // Selection is per-library and makes no sense carried into an item's own
   // detail view -- clear it whenever either changes.
   useEffect(clearSelection, [library, itemId]);
+
+  // The detail pane stays put while the grid scrolls (or sits below it on a
+  // phone): a newly picked title always starts at its top, in view.
+  useEffect(() => {
+    const el = detailRef.current;
+    if (!el) return;
+    el.scrollTop = 0;
+    if (getComputedStyle(el).position !== 'sticky') el.scrollIntoView();
+  }, [itemId]);
 
   if (!library) {
     return (
@@ -460,8 +478,14 @@ export function LibraryPage({ path, dryRun }: LibraryPageProps): React.ReactElem
       />
       {itemId ? (
         <div className="fm-stack-on-mobile" style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 20, alignItems: 'start' }}>
-          <PosterGrid library={library} selectedId={itemId} narrow />
-          <ItemDetail library={library} itemId={itemId} dryRun={dryRun} />
+          <PosterGrid library={library} selectedId={itemId} narrow onOpen={setOpened} />
+          {/* keyed: the previous title's plan must not stay up (or land late) while this one loads */}
+          <div className="fm-detail-pane" ref={detailRef}>
+            <ItemDetail
+              key={itemId} library={library} itemId={itemId} dryRun={dryRun}
+              initial={opened?.item_id === itemId ? opened : null}
+            />
+          </div>
         </div>
       ) : (
         <>
@@ -478,6 +502,7 @@ export function LibraryPage({ path, dryRun }: LibraryPageProps): React.ReactElem
             library={library}
             selectedId={null}
             narrow={false}
+            onOpen={setOpened}
             selection={{
               ids: selectedIds, allLibrary: allLibrary !== null, onToggle: toggleSelect,
               onSetMany: setMany, onSelectAllLibrary: setAllLibrary,

@@ -7,8 +7,12 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import threading
+import time
+from contextlib import nullcontext
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 
 from finmeta.config.models import Config, MovieLibrary, TvLibrary
@@ -34,7 +38,7 @@ from finmeta.engine.resolution import collect_candidates
 from finmeta.engine.artwork_selection import (
     effective_selection, select_candidate,
 )
-from finmeta.engine.runs import DEFAULT_CONFIG_DIR
+from finmeta.engine.runs import DEFAULT_CONFIG_DIR, find_original_backup
 from finmeta.engine.tv_status import TvStatus
 from finmeta.engine.collection_presets import (
     KNOWN_PRESETS, SEASONAL_CALENDAR, is_holiday_active_now,
@@ -124,6 +128,56 @@ def _content_sha256(source_ref: str, *, allowed_roots: Sequence = ()) -> str:
     return hashlib.sha256(b"").hexdigest()
 
 
+_HASH_POOL = ThreadPoolExecutor(max_workers=6, thread_name_prefix="artwork-hash")
+
+
+def _start_hashes(resolved: Dict[str, Candidate], skip: Set[str], locked: Set[str],
+                  item_id: str, config_dir: Optional[Path],
+                  allowed_roots: Sequence) -> Dict[str, "Future[str]"]:
+    """Hash of each of an item's images, downloading side by side.
+
+    A ``locked`` (and not overridden) remote image is not downloaded at all:
+    its URL never changes content, so the lock's hash is the answer. Besides
+    the traffic, that keeps a bad minute at the image CDN out of the plan --
+    it serves other, complete-looking bytes for the same URL now and then,
+    which had correct files rewritten on every run (2026-11-23).
+    """
+    out: Dict[str, "Future[str]"] = {}
+    for kind, cand in resolved.items():
+        if kind in skip:
+            continue
+        sha = (_lock_sha256(item_id, kind, config_dir)
+               if kind in locked and cand.ref.startswith("http") else None)
+        if sha:
+            out[kind] = Future()
+            out[kind].set_result(sha)
+        else:
+            out[kind] = _HASH_POOL.submit(_content_sha256, cand.ref, allowed_roots=allowed_roots)
+    return out
+
+
+# {(item id, kind): (wrong hash, first seen)} -- see _locked_bytes_ok.
+_LOCK_MISMATCH: Dict[Tuple[str, str], Tuple[str, float]] = {}
+_LOCK_MISMATCH_SETTLE = 600.0
+
+
+def _locked_bytes_ok(item_id: str, kind: str, data: bytes, lock_sha: str) -> bool:
+    """False while a locked image's download may just be a bad CDN minute.
+
+    The same wrong hash again ten minutes later means the lock itself was
+    recorded from such a download; then the bytes are fine.
+    """
+    sha = hashlib.sha256(data).hexdigest()
+    if sha == lock_sha:
+        _LOCK_MISMATCH.pop((item_id, kind), None)
+        return True
+    seen = _LOCK_MISMATCH.get((item_id, kind))
+    if seen is None or seen[0] != sha:
+        _LOCK_MISMATCH[(item_id, kind)] = (sha, time.monotonic())
+        return False
+    return time.monotonic() - seen[1] >= _LOCK_MISMATCH_SETTLE
+
+
 def _candidate_bytes(source_ref: str, timeout: float = 30.0, *,
                      allowed_roots: Sequence = ()) -> bytes:
     """Fetch the raw bytes of a candidate (local file or remote URL).
@@ -177,15 +231,9 @@ def _overlay_poster(
     trending_rank: Optional[int] = None,
     is_override: bool = False,
     rating_values: Optional[Dict[str, str]] = None,
-    kind: str = "poster",
     allowed_roots: Sequence = (),
 ) -> Optional[FileWrite]:
     """Build the overlaid-poster FileWrite for one item, or None on failure.
-
-    ``kind`` selects which FileWrite kind comes out: ``"poster"`` (the item's
-    own poster) or ``"season_poster"`` (a TV season's, see
-    ``_season_poster_overlays``) -- everything else about the render, the O7
-    original lookup and the overlay cache is identical.
 
     The poster is always rendered from the original (backup if a prior run
     saved one, else the candidate) so re-runs never stack badges (O7) -- see
@@ -217,6 +265,14 @@ def _overlay_poster(
     if not poster_bytes:
         logger.warning("empty poster bytes for overlay on %s; skipping overlay", item.name)
         return None
+    lock_sha = _lock_sha256(item.id, "poster", config_dir)
+    if (lock_sha and not is_override and cand.ref.startswith("http")
+            and not _locked_bytes_ok(item.id, "poster", poster_bytes, lock_sha)):
+        backup = find_original_backup(target, config_dir=config_dir)
+        if backup is None or hashlib.sha256(backup.read_bytes()).hexdigest() != lock_sha:
+            logger.warning("poster source for %s is not the locked image (starts with %r); "
+                           "leaving the poster as it is this time", item.name, poster_bytes[:12])
+            return None
     try:
         if streams is None:
             streams = _fetch_item_streams(item, jf, media_type)
@@ -256,7 +312,7 @@ def _overlay_poster(
     fw = overlay_file_write(
         target_path=fw_target, candidate_bytes=poster_bytes, candidate_ref=cand.ref,
         render_fn=_render, config_dir=config_dir, is_override=is_override,
-        kind=kind, clean_sha256=_lock_sha256(item.id, kind, config_dir),
+        clean_sha256=lock_sha,
     )
     if item_fc:
         fw.meta["format_counts"] = item_fc
@@ -552,6 +608,9 @@ def _build_movie_plan(
     )
     resolved.update(locked)
     overridden_kinds = _apply_candidate_overrides(resolved, item.id, artwork_kinds, config_dir)
+    overlay_poster = bool(overlay_names) and not _overlay_skipped(item.id, config_dir)
+    hashes = _start_hashes(resolved, {"poster"} if overlay_poster else set(),
+                           set(locked) - overridden_kinds, item.id, config_dir, allowed_roots)
     filename_map = {
         "poster": "poster.jpg", "backdrop": "backdrop.jpg",
         "logo": "logo.png", "landscape": "landscape.jpg",
@@ -559,7 +618,7 @@ def _build_movie_plan(
     }
     for kind, cand in resolved.items():
         fname = filename_map.get(kind, f"{kind}.jpg")
-        if kind == "poster" and overlay_names and not _overlay_skipped(item.id, config_dir):
+        if kind == "poster" and overlay_poster:
             fw = _overlay_poster(
                 item, cand, list(overlay_names), base / fname, jf,
                 details, "movie", config_dir, _apply_style_doc(lib, cfg, overlay_names),
@@ -578,7 +637,7 @@ def _build_movie_plan(
                 files.append(fw)
             continue
         try:
-            sha = _content_sha256(cand.ref, allowed_roots=allowed_roots)
+            sha = hashes[kind].result()
         except Exception as exc:
             logger.warning("content hash failed for %s (%s): %s", item.name, kind, exc)
             continue
@@ -681,8 +740,6 @@ def _build_tvshow_plan(
     for k in ("poster", "backdrop", "logo"):
         if getattr(art, k, False):
             artwork_kinds.append(k)
-    if getattr(art, "season_posters", False):
-        artwork_kinds.append("season_poster")
     if lib.theme_song:
         artwork_kinds.append("theme_song")
 
@@ -699,18 +756,16 @@ def _build_tvshow_plan(
     )
     resolved.update(locked)
     overridden_kinds = _apply_candidate_overrides(resolved, item.id, artwork_kinds, config_dir)
+    overlay_poster = bool(overlay_names) and not _overlay_skipped(item.id, config_dir)
+    hashes = _start_hashes(resolved, {"poster"} if overlay_poster else set(),
+                           set(locked) - overridden_kinds, item.id, config_dir, allowed_roots)
     filename_map = {
         "poster": "poster.jpg", "backdrop": "backdrop.jpg",
         "logo": "logo.png", "theme_song": "theme.mp3",
     }
     for kind, cand in resolved.items():
-        if kind == "season_poster":
-            # Season posters live in the show folder as seasonNN-poster.jpg,
-            # one per season -- a single resolved candidate cannot express
-            # that. Handled after this loop by _season_poster_overlays.
-            continue
         fname = filename_map.get(kind, f"{kind}.jpg")
-        if kind == "poster" and overlay_names and not _overlay_skipped(item.id, config_dir):
+        if kind == "poster" and overlay_poster:
             fw = _overlay_poster(
                 item, cand, list(overlay_names), base / fname, jf,
                 details, "tvshow", config_dir, _apply_style_doc(lib, cfg, overlay_names),
@@ -731,7 +786,7 @@ def _build_tvshow_plan(
                 files.append(fw)
             continue
         try:
-            sha = _content_sha256(cand.ref, allowed_roots=allowed_roots)
+            sha = hashes[kind].result()
         except Exception as exc:
             logger.warning("content hash failed for %s (%s): %s", item.name, kind, exc)
             continue
@@ -747,21 +802,8 @@ def _build_tvshow_plan(
             meta=meta,
         ))
 
-    if (getattr(art, "season_posters", False) and overlay_names
-            and not _overlay_skipped(item.id, config_dir)):
-        files.extend(_season_poster_overlays(
-            item, base, list(overlay_names), jf, details, config_dir,
-            _apply_style_doc(lib, cfg, overlay_names),
-            _profile_format_rules(lib, cfg), streams=streams,
-            packs_profile=_profile_for(lib, cfg),
-            logo_packs=list(getattr(cfg.overlays, "logo_packs", None) or []),
-            assets_root=getattr(getattr(cfg.sources, "local", None), "path", None),
-            status_label=tv_status_obj.label if tv_status_obj else None,
-            status_key=tv_status_obj.status if tv_status_obj else None,
-            trending_rank=trending_rank,
-            rating_values=rating_values,
-            allowed_roots=allowed_roots,
-        ))
+    if getattr(art, "season_posters", False):
+        files.extend(_season_posters(item, base, jf, config_dir, allowed_roots))
 
     format_counts = _aggregate_format_counts(files)
     return ItemPlan(
@@ -774,67 +816,76 @@ def _build_tvshow_plan(
     )
 
 
-#: Jellyfin's own season-poster filenames in a show folder:
-#: ``season01-poster.jpg`` ... plus ``season-specials-poster.jpg``.
-_SEASON_POSTER_GLOBS = ("season*-poster.jpg", "season*-poster.png")
+SEASON_KIND_PREFIX = "season_poster:"
 
 
-def _season_poster_overlays(
-    item: Item, base: Path, overlay_names: List[str], jf: JellyfinClient,
-    details: Optional[Dict[str, Any]], config_dir: Optional[Path],
-    style_doc: dict, format_rules: Optional[Dict[str, list]] = None,
-    **overlay_kwargs: Any,
-) -> List[FileWrite]:
-    """Badge every season poster already present in the show folder.
+def season_of_kind(kind: str) -> Optional[int]:
+    """Season number in an override/lock key such as ``season_poster:3``."""
+    num = kind[len(SEASON_KIND_PREFIX):] if kind.startswith(SEASON_KIND_PREFIX) else ""
+    return int(num) if num.isdecimal() else None
 
-    **Why this exists** (2026-11-06, operator-reported "overlays show up only
-    sometimes on series and anime"): Finmeta only ever overlaid the SERIES
-    poster, but Jellyfin's "Recently Added" row does not necessarily show it.
-    Its card builder asks for ``preferParentPoster`` and prefers an episode's
-    ``ParentPrimaryImageItemId`` -- the SEASON -- over ``SeriesId``, so a
-    single newly added episode is drawn with the season's own poster. Sonarr
-    and Jellyfin write those season files themselves, Finmeta never touched
-    them, so the badges "disappeared" for exactly the newest episode while
-    the library view (which shows the series poster) looked correct.
 
-    Deliberately only overlays season posters that ALREADY EXIST: fetching
-    per-season artwork is a separate feature Finmeta does not have yet, and
-    a season with no poster of its own falls back to the series poster in
-    Jellyfin -- which is overlaid already. Either way the card shows badges.
+def season_poster_stem(number: int) -> str:
+    """Jellyfin's own name for a season's poster in the show folder."""
+    return "season-specials-poster" if number == 0 else f"season{number:02d}-poster"
 
-    Same renderer, same O7 original-lookup and same overlay cache as the
-    series poster (``_overlay_poster``), so a re-run never stacks badges.
-    Never fails the item: a season file that cannot be read is skipped with
-    a warning, like every other best-effort artwork step here.
+
+def jellyfin_seasons(jf: JellyfinClient, series_id: str) -> List[Item]:
+    """The seasons a series actually has in Jellyfin, specials last."""
+    rows = jf.get_items_page(parent_id=series_id, recursive=True,
+                             include_item_types=["Season"]).items
+    by_number = {r.index_number: r for r in reversed(rows) if r.index_number is not None}
+    return sorted(by_number.values(), key=lambda r: (r.index_number == 0, r.index_number))
+
+
+def _season_posters(item: Item, base: Path, jf: JellyfinClient,
+                    config_dir: Optional[Path], allowed_roots: Sequence) -> List[FileWrite]:
+    """The season posters the operator picked by hand, written without badges.
+
+    Nothing is chosen automatically: a season without a pick is left alone.
+    A pick taken back restores what was there before the first one.
     """
+    db = Path(config_dir) / "overrides.db" if config_dir is not None else None
+    if db is None or not db.is_file():
+        return []
+    from finmeta.api.overrides import OverrideStore
+    store = OverrideStore(db)
+    picks = {season_of_kind(o["kind"]): o["ref"] for o in store.all_for(item.id)}
+    locks = {season_of_kind(k): lock for k, lock in store.locks_for_item(item.id).items()}
     out: List[FileWrite] = []
-    seen: set = set()
-    if overlay_kwargs.get("streams") is None:
-        # Resolve once for the whole show instead of once per season file.
+    for number in sorted((picks.keys() | locks.keys()) - {None}):
+        stem = season_poster_stem(number)
+        # Jellyfin prefers .png over .jpg, so an existing one has to be the target.
+        target = base / f"{stem}.png"
+        if not target.is_file():
+            target = base / f"{stem}.jpg"
+        ref, lock = picks.get(number), locks.get(number)
         try:
-            overlay_kwargs["streams"] = _fetch_item_streams(item, jf, "tvshow")
+            if ref:
+                known = lock and lock["ref"] == ref and ref.startswith("http")
+                sha = str(lock["sha256"]) if known else _content_sha256(ref, allowed_roots=allowed_roots)
+                meta = {"season": number, "lock_ref": ref, "lock_sha256": sha}
+            else:
+                backup = find_original_backup(target, config_dir=config_dir)
+                if backup is None:
+                    continue
+                ref = str(backup)
+                sha = hashlib.sha256(backup.read_bytes()).hexdigest()
+                meta = {"season": number, "season_reset": True}
         except Exception as exc:
-            logger.warning("media-stream fetch failed for %s: %s", item.name, exc)
-            overlay_kwargs["streams"] = []
-    for pattern in _SEASON_POSTER_GLOBS:
-        try:
-            matches = sorted(base.glob(pattern))
-        except OSError as exc:
-            logger.warning("season poster scan failed for %s: %s", item.name, exc)
+            logger.warning("season %s poster failed for %s: %s", number, item.name, exc)
             continue
-        for path in matches:
-            if not path.is_file() or path in seen:
-                continue
-            seen.add(path)
-            cand = Candidate(kind="season_poster", source="local",
-                             ref=str(path), lang=None, score=1.0)
-            fw = _overlay_poster(
-                item, cand, overlay_names, path, jf, details, "tvshow",
-                config_dir, style_doc, format_rules, kind="season_poster",
-                **overlay_kwargs,
-            )
-            if fw is not None:
-                out.append(fw)
+        out.append(FileWrite(target_path=str(target), kind="season_poster",
+                             source_ref=ref, content_sha256=sha, meta=meta))
+    if out:
+        try:
+            ids = {s.index_number: s.id for s in jellyfin_seasons(jf, item.id)}
+        except Exception as exc:
+            logger.warning("season lookup failed for %s: %s", item.name, exc)
+            ids = {}
+        for fw in out:
+            if ids.get(fw.meta["season"]):
+                fw.meta["refresh_item_id"] = ids[fw.meta["season"]]
     return out
 
 
@@ -863,7 +914,22 @@ def _tv_status_for_item(
         return None
 
 
-def build_sonarr_index(cfg: Config, secrets) -> Dict[str, Any]:
+# {(url, api key): (time.monotonic(), rows)} -- see build_sonarr_index(max_age=).
+_SONARR_ROWS: Dict[Tuple[str, str], Tuple[float, List[Dict[str, Any]]]] = {}
+SONARR_ROWS_TTL = 300.0
+_SONARR_LOCK = threading.Lock()
+
+
+def _close_sonarr_clients(index: Dict[str, Any]) -> None:
+    for client in {id(c): c for c, _ in index.values()}.values():
+        try:
+            client.close()
+        except Exception:  # noqa: S110 -- best-effort connection close, nothing to act on
+            pass
+
+
+def build_sonarr_index(cfg: Config, secrets, *, max_age: float = 0.0,
+                       need: Optional[str] = None) -> Dict[str, Any]:
     """S9g1: one {tvdbId (str): (SonarrClient, series_row)} index across every
     enabled Sonarr instance with a resolvable API key -- built ONCE per plan
     build (not per item) since GET /api/v3/series returns everything in one
@@ -874,8 +940,14 @@ def build_sonarr_index(cfg: Config, secrets) -> Dict[str, Any]:
 
     The caller is responsible for closing every client in the returned index
     once the build is done (see ``build_plan``).
+
+    ``max_age`` (seconds) lets an interactive caller (one opened title, the
+    overlay preview) reuse a recent series list: that call takes 2-4 s on a
+    large Sonarr and ``?tvdbId=`` is no faster. ``need`` is a tvdbId that must
+    be found; a reused list without it (a show added since) is fetched again.
     """
     index: Dict[str, Any] = {}
+    reused = False
     if secrets is None:
         return index
     from finmeta.arr.sonarr import SonarrClient
@@ -888,13 +960,36 @@ def build_sonarr_index(cfg: Config, secrets) -> Dict[str, Any]:
         try:
             client = SonarrClient(inst.url, api_key=key, timeout=inst.timeout,
                                   verify_ssl=inst.verify_ssl)
-            for row in client.series():
+            # An interactive caller waits for a fetch already under way
+            # (warm_sonarr) instead of starting a second one.
+            with _SONARR_LOCK if max_age else nullcontext():
+                cached = _SONARR_ROWS.get((inst.url, key))
+                if cached is not None and time.monotonic() - cached[0] < max_age:
+                    rows = cached[1]
+                    reused = True
+                else:
+                    rows = client.series()
+                    _SONARR_ROWS[(inst.url, key)] = (time.monotonic(), rows)
+            for row in rows:
                 tvdb_id = row.get("tvdbId")
                 if tvdb_id:
                     index.setdefault(str(tvdb_id), (client, row))
         except Exception as exc:
             logger.warning("Sonarr instance %r unreachable for status lookups: %s", inst.name, exc)
+    if reused and need and need not in index:
+        _close_sonarr_clients(index)
+        return build_sonarr_index(cfg, secrets)
     return index
+
+
+def warm_sonarr(cfg: Config, secrets) -> None:
+    """Fetch Sonarr's series list in the background (opening a TV library), so
+    the first title clicked there does not wait for it."""
+    def _run() -> None:
+        _close_sonarr_clients(build_sonarr_index(cfg, secrets, max_age=SONARR_ROWS_TTL))
+
+    if any(inst.enabled for inst in cfg.media_apps.sonarr):
+        threading.Thread(target=_run, name="warm-sonarr", daemon=True).start()
 
 
 def build_trending_data(cfg: Config, secrets):
@@ -1730,7 +1825,15 @@ def build_plan(
     unmatched: List[UnmatchedItem] = []
 
     # S9g1/K7a: one Sonarr lookup for the whole build, not per show.
-    sonarr_index = build_sonarr_index(cfg, secrets)
+    # Only a Series ever reads it, so a movie must not wait for Sonarr.
+    sonarr_index: Dict[str, Any] = {}
+    if any(it.type == "Series" for it in items):
+        if item_id:
+            sonarr_index = build_sonarr_index(
+                cfg, secrets, max_age=SONARR_ROWS_TTL,
+                need=(items[0].provider_ids or {}).get("Tvdb"))
+        else:
+            sonarr_index = build_sonarr_index(cfg, secrets)
     # S9g2/K7b: one MDBList trending fetch per list for the whole build.
     trending_rank_by_tmdb, trending_fetched = build_trending_data(cfg, secrets)
     # S9f2: Christmas's MDBList source (Adaptive Seasonal Collections).
@@ -1857,11 +1960,7 @@ def build_plan(
 
     # Close every Sonarr client opened for sonarr_index (deduped -- one
     # client instance is shared across every tvdbId from the same server).
-    for client, _ in {id(c): (c, r) for c, r in sonarr_index.values()}.values():
-        try:
-            client.close()
-        except Exception:  # noqa: S110 -- best-effort connection close, nothing to act on
-            pass
+    _close_sonarr_clients(sonarr_index)
 
     api_actions = _build_api_actions(
         cfg, plan_items, tmdb, language,

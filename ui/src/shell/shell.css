@@ -151,6 +151,9 @@
 
 .fm-sidebar__backdrop { display: none; }
 
+/* Library item detail: follows along while the poster strip beside it scrolls. */
+.fm-detail-pane { position: sticky; top: 0; max-height: calc(100vh - 52px); overflow-y: auto; min-width: 0; }
+
 /* Baseline mobile/tablet support (operator-requested, 2026-11-10): below
    900px the sidebar used to just vanish with nothing replacing it -- no
    way to navigate at all. It is now an off-canvas drawer, opened by the
@@ -185,4 +188,5 @@
      LibraryPage's item-detail poster strip) stacks instead of overflowing. */
   .fm-stack-on-mobile { display: block !important; }
   .fm-stack-on-mobile > * { width: 100% !important; }
+  .fm-detail-pane { position: static; max-height: none; overflow-y: visible; }
 }

@@ -251,3 +251,12 @@ def test_real_client_pages_a_library_bigger_than_one_page_no_dupes_no_gaps():
     assert sorted(ids, key=lambda s: int(s[1:])) == [f"m{i}" for i in range(1, n + 1)]
     assert len(ids) == len(set(ids))  # no duplicates
     assert plan.total_items is None  # unbounded (iter_items) scope
+
+
+def test_movie_plan_never_asks_sonarr(monkeypatch):
+    # Opening one movie used to wait for Sonarr's whole series list.
+    from finmeta.engine import plan_builder
+    calls = []
+    monkeypatch.setattr(plan_builder, "build_sonarr_index", lambda *a, **k: calls.append(1) or {})
+    build_plan(_cfg(), _jf(5), None, {}, library="Movies", limit=1, offset=0)
+    assert calls == []

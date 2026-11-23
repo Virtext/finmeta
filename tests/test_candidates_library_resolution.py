@@ -99,4 +99,5 @@ def test_episode_thumbs_never_offered_as_a_candidate_kind():
     lib = TvLibrary(type="tvshows", enabled=True, metadata=Metadata(enabled=False),
                      artwork=TvArtwork(poster=True, season_posters=True, episode_thumbs=True))
     assert "episode_thumb" not in _artwork_kinds(lib)
-    assert set(_artwork_kinds(lib)) == {"poster", "season_poster"}
+    # season posters have their own per-season candidates (test_season_posters.py)
+    assert set(_artwork_kinds(lib)) == {"poster"}

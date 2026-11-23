@@ -76,6 +76,23 @@ def decode_token(token: str) -> Tuple[Optional[str], Optional[str]]:
     return (kind, ref)
 
 
+_TMDB_THUMB = {"poster": "w342", "season_poster": "w342", "backdrop": "w780",
+               "landscape": "w780", "logo": "w500"}
+
+
+def thumb_ref(kind: str, ref: str) -> str:
+    """The provider's own small version of ``ref`` (same host), else ``ref``.
+
+    For showing a candidate in a grid only; what gets applied is always ``ref``.
+    """
+    size = _TMDB_THUMB.get(kind)
+    if size and ref.startswith("https://image.tmdb.org/t/p/original/"):
+        return ref.replace("/t/p/original/", f"/t/p/{size}/", 1)
+    if size and ref.startswith("https://assets.fanart.tv/fanart/"):
+        return ref.replace("/fanart/", "/preview/", 1)
+    return ref
+
+
 def content_type(kind: Optional[str], ref: str) -> str:
     ext = Path(ref).suffix.lower()
     if ext in _EXT_GUESS:

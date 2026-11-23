@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { getCandidates, selectCandidate } from '../api';
-import type { Candidate, CandidatesResp } from '../types';
+import type { Candidate, CandidatesResp, SeasonView } from '../types';
+import SeasonPosters from './SeasonPosters';
 
 const IMAGE_KINDS = new Set([
-  'poster', 'backdrop', 'logo', 'landscape', 'season_poster', 'episode_thumb',
+  'poster', 'backdrop', 'logo', 'landscape', 'episode_thumb',
 ]);
 
 // 2026-10-23 (operator-reported slowness selecting a title): a popular
@@ -12,8 +13,8 @@ const IMAGE_KINDS = new Set([
 // /api/proxy/{token}). Capping how many actually render, per source, keeps
 // the initial set small; "Load more" reveals more of the SAME
 // already-fetched list (no extra request, no backend change needed).
-const INITIAL_VISIBLE_PER_SOURCE = 10;
-const LOAD_MORE_STEP = 10;
+export const INITIAL_VISIBLE_PER_SOURCE = 10;
+export const LOAD_MORE_STEP = 10;
 
 function groupByKind(cands: Candidate[]): Record<string, Candidate[]> {
   const out: Record<string, Candidate[]> = {};
@@ -31,12 +32,26 @@ function groupBySource(cands: Candidate[]): [string, Candidate[]][] {
   return Object.entries(out);
 }
 
+export function CandidateThumb({ c }: { c: Candidate }) {
+  return (
+    <img
+      src={c.thumb_url} alt={c.kind} loading="lazy"
+      // the provider may lack a small version of this one
+      onError={(e) => {
+        if (e.currentTarget.getAttribute('src') !== c.proxy_url) e.currentTarget.src = c.proxy_url;
+      }}
+    />
+  );
+}
+
 interface Props {
   itemId: string;
+  seasons: SeasonView[];
+  onSeasonsChange: React.Dispatch<React.SetStateAction<SeasonView[]>>;
   onSelected: () => void;   // refetch the plan after a selection
 }
 
-export default function CandidatePicker({ itemId, onSelected }: Props) {
+export default function CandidatePicker({ itemId, seasons, onSeasonsChange, onSelected }: Props) {
   const [data, setData] = useState<CandidatesResp | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -123,7 +138,7 @@ export default function CandidatePicker({ itemId, onSelected }: Props) {
                         onClick={() => pick(kind, c.ref)}
                         title={`${c.source}${c.lang ? ' · ' + c.lang : ''} (${c.width}x${c.height})`}
                       >
-                        <img src={c.proxy_url} alt={c.kind} loading="lazy" />
+                        <CandidateThumb c={c} />
                         <span className="cand-src">{c.source}</span>
                       </button>
                     ))}
@@ -154,6 +169,13 @@ export default function CandidatePicker({ itemId, onSelected }: Props) {
           )}
         </div>
       ))}
+
+      {seasons.length > 0 && (
+        <SeasonPosters
+          key={itemId} itemId={itemId} seasons={seasons}
+          onSeasonsChange={onSeasonsChange} onSelected={onSelected}
+        />
+      )}
     </section>
   );
 }

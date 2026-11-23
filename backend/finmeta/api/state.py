@@ -85,6 +85,7 @@ class AppContext:
         self._library_queued_set: set = set()
         self._cache: "OrderedDict[tuple, WritePlan]" = OrderedDict()
         self._cache_lock = threading.Lock()
+        self.preview_inputs: Dict[tuple, tuple] = {}  # routes_settings._preview_inputs
         self.overrides = OverrideStore(self._overrides_path)
         secrets_path = self._config_dir / "secrets.yml"
         self.secrets = SecretsStore(

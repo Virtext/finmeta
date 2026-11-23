@@ -1,6 +1,6 @@
 """Overlay editor API tests (SPEC S9 D step 1): preview endpoint.
 
-Covers POST /api/overlays/preview contract: up to four PNG previews per
+Covers POST /api/overlays/preview contract: up to four JPEG previews per
 request and no new or modified image files on disk after a request completes.
 """
 from __future__ import annotations
@@ -163,7 +163,7 @@ STYLE_DOC = {
                  "audio":{"enabled":True}},
 }
 
-def test_preview_returns_four_pngs(client):
+def test_preview_returns_four_jpegs(client):
     r = client.post("/api/overlays/preview", json={"style": STYLE_DOC,
                                                            "item_ids": ["a","b","c","d"]})
     assert r.status_code == 200, r.text
@@ -172,7 +172,7 @@ def test_preview_returns_four_pngs(client):
     for p in previews:
         b64 = base64.b64decode(p["image"].split(",", 1)[1])
         im = Image.open(io.BytesIO(b64))
-        assert im.format == "PNG" and im.size[0] > 50 and im.size[1] > 50
+        assert im.format == "JPEG" and im.size[0] > 50 and im.size[1] > 50
 
 def test_preview_includes_base_image_matching_the_overlay_source(client):
     """S9d4c: "base_image" must be the EXACT pre-compositing candidate --
@@ -539,3 +539,44 @@ def test_preview_reports_poster_size_and_simulates_trending_rank(client):
     assert p["size"] == [im.width, im.height]
     assert "trending_rank" in p.get("samples", [])
     assert any(entry["key"] == "trending_rank" for entry in p["layout"])
+
+
+def test_preview_reuses_remote_inputs_but_not_local_ones(client, monkeypatch):
+    # Dragging a badge must only re-render; a local poster can change on disk.
+    from finmeta.api import proxy, routes_settings
+    ctx = client.app.state.context
+    poster = _make_poster_bytes()
+    fetched = []
+
+    def _fetch(kind, ref, **kw):
+        fetched.append(ref)
+        return poster, "image/jpeg"
+
+    monkeypatch.setattr(proxy, "fetch", _fetch)
+
+    def _provider(ref):
+        return lambda *a: ({"poster": [Candidate(kind="poster", source="tmdb", ref=ref, lang=None, score=1.0)]}, 1)
+
+    monkeypatch.setattr(ctx, "_candidates_provider", _provider("https://image.tmdb.org/t/p/original/a.jpg"))
+    ctx.preview_inputs.clear()
+    first = routes_settings._overlay_preview_source(ctx, "memo", sonarr_index={})
+    assert routes_settings._overlay_preview_source(ctx, "memo", sonarr_index={}) == first
+    assert len(fetched) == 1
+    monkeypatch.setattr(routes_settings, "_PREVIEW_INPUTS_TTL", 0.0)
+    routes_settings._overlay_preview_source(ctx, "memo", sonarr_index={})
+    assert len(fetched) == 2
+
+    monkeypatch.setattr(routes_settings, "_PREVIEW_INPUTS_TTL", 300.0)
+    monkeypatch.setattr(ctx, "_candidates_provider", _provider("/assets/a.jpg"))
+    for _ in range(2):
+        routes_settings._overlay_preview_source(ctx, "local", sonarr_index={})
+    assert len(fetched) == 4
+
+
+def test_thumb_ref_stays_on_the_same_host_and_leaves_other_refs_alone():
+    from finmeta.api.proxy import thumb_ref
+    assert thumb_ref("poster", "https://image.tmdb.org/t/p/original/a.jpg") == "https://image.tmdb.org/t/p/w342/a.jpg"
+    assert thumb_ref("poster", "https://assets.fanart.tv/fanart/a.jpg") == "https://assets.fanart.tv/preview/a.jpg"
+    for kind, ref in (("poster", "/assets/a.jpg"), ("theme_song", "https://assets.fanart.tv/fanart/a.mp3"),
+                      ("poster", "https://example.com/t/p/original/a.jpg")):
+        assert thumb_ref(kind, ref) == ref

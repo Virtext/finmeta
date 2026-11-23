@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from finmeta import __version__
 from finmeta.engine.diff import diff_file
 from finmeta.engine.plan import ItemPlan, WritePlan
-from finmeta.engine.plan_builder import _profile_overlay_names
+from finmeta.engine.plan_builder import _profile_overlay_names, warm_sonarr
 from finmeta.jellyfin_client.client import JellyfinError
 
 from finmeta.api.deps import get_ctx
@@ -202,6 +202,8 @@ def library_items_light(
     if name not in ctx.config.libraries:
         raise HTTPException(status_code=404, detail=f"unknown library {name!r}")
     lib_cfg = ctx.config.libraries[name]
+    if lib_cfg.type == "tvshows" and lib_cfg.enabled:
+        warm_sonarr(ctx.config, ctx.secrets)
     jf = ctx.make_jellyfin()
     try:
         jf_lib = jf.get_library(name)

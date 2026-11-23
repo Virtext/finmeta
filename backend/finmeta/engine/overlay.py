@@ -386,8 +386,8 @@ def overlay_file_write(
         if bk is not None:
             bk_bytes = bk.read_bytes()
             # A backup that isn't the locked clean base is Finmeta's own earlier
-            # output whose "create" manifest was pruned (2026-11-20, 22 Jump
-            # Street): compositing onto it stacks two badge layers.
+            # output whose "create" manifest was pruned (2026-11-20):
+            # compositing onto it stacks two badge layers.
             if (clean_sha256 is None or sha256(bk_bytes) == clean_sha256
                     or str(Path(candidate_ref)) == str(Path(target_path))):
                 original_bytes = bk_bytes
@@ -426,6 +426,8 @@ _CACHE_PRUNE_GRACE_SECONDS = 3600
 #: FileWrite kinds whose bytes are RENDERED (and therefore cached) by
 #: ``overlay_file_write`` -- the executor can only get these from the cache,
 #: never by re-fetching source_ref (which is the un-overlaid original).
+#: ``season_poster`` only for plans saved before 2026-11-23 -- season posters
+#: are written plain now.
 OVERLAID_KINDS = ("poster", "season_poster")
 
 

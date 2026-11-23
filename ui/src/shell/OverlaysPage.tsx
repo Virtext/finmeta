@@ -723,12 +723,13 @@ export function OverlaysPage(): React.ReactElement {
                               </label>
                             </div>
 
-                            {!previewItem && itemResults.length > 0 && (
+                            {itemResults.length > 0 && (
                               <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 12, maxHeight: 160, overflowY: 'auto' }}>
                                 {itemResults.map((it) => (
                                   <button
                                     key={it.item_id}
-                                    className="fm-navitem"
+                                    className={`fm-navitem ${it.item_id === previewItem?.item_id ? 'fm-navitem--active' : ''}`}
+                                    aria-pressed={it.item_id === previewItem?.item_id}
                                     style={{ width: '100%', textAlign: 'left' }}
                                     onClick={() => setPreviewItem(it)}
                                   >
@@ -741,7 +742,6 @@ export function OverlaysPage(): React.ReactElement {
                             {previewItem ? (
                               <OverlayCanvas
                                 item={previewItem}
-                                onClear={() => setPreviewItem(null)}
                                 draftStyle={draftStyle}
                                 base={draftBase}
                                 livePreview={livePreview}
@@ -825,7 +825,6 @@ export function OverlaysPage(): React.ReactElement {
 
 interface OverlayCanvasProps {
   item: ItemLightView;
-  onClear: () => void;
   draftStyle: Record<string, DocElementState>;
   base: BaseDoc;
   livePreview: OverlayPreviewEntry | null;
@@ -844,7 +843,7 @@ interface OverlayCanvasProps {
 // renderer's exact text/padding/font math (Pillow on the server, not CSS)
 // -- it only needs to be close enough to grab and drag.
 function OverlayCanvas({
-  item, onClear, draftStyle, base, livePreview: livePreviewAny, previewBusy,
+  item, draftStyle, base, livePreview: livePreviewAny, previewBusy,
   naturalSize, onNaturalSize, canvasRef, onChipPointerDown, onChipPointerMove, onChipPointerUp,
 }: OverlayCanvasProps): React.ReactElement {
   // Another item's render (still showing while the new one loads) has the
@@ -941,7 +940,7 @@ function OverlayCanvas({
     <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', alignItems: 'flex-start' }}>
       <div>
         <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-faint)', marginBottom: 6 }}>
-          {item.item_name} <button className="btn btn-ghost" style={{ marginLeft: 6 }} onClick={onClear}>change</button>
+          {item.item_name}
         </div>
         <div
           ref={canvasRef}

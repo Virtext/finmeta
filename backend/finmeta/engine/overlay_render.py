@@ -657,14 +657,8 @@ def render_overlay_png(poster_bytes: bytes, style_doc_json: Mapping,
                        layout: Optional[List[Dict[str, Any]]] = None) -> bytes:
     """Render ``poster_bytes`` with the posted style document; PNG output.
 
-    Thin encoding wrapper around :func:`_render_overlay_image` -- see its
-    docstring for the shared layout engine this and ``render_overlay_jpeg``
-    both use. ``sample_keys`` (preview's "Sample data" toggle only --
-    ``render_overlay_jpeg``/a real apply never has this) names which
-    elements carry a synthetic placeholder value with no real detection to
-    back it; those get a representative pack image by name instead of
-    silently falling to plain text, see ``image_pack_resolve.
-    resolve_profile_pack_sample_image``.
+    Lossless twin of :func:`render_overlay_jpeg`, for checks that compare
+    exact pixels; preview and apply both use the JPEG one.
     """
     work = _render_overlay_image(
         poster_bytes, style_doc_json, values=values, config_dir=config_dir,
@@ -686,10 +680,18 @@ def render_overlay_jpeg(poster_bytes: bytes, style_doc_json: Mapping,
                         k9m: Optional[Mapping[str, Any]] = None,
                         filename: str = "",
                         rating_value: Optional[float] = None,
-                        quality: int = 92) -> bytes:
+                        quality: int = 92,
+                        sample_keys: Optional[Set[str]] = None,
+                        layout: Optional[List[Dict[str, Any]]] = None) -> bytes:
     """Render ``poster_bytes`` with the posted style document; JPEG output.
 
-    Used by the real apply pipeline (``engine.plan_builder._overlay_poster``)
+    ``sample_keys`` (preview's "Sample data" toggle only -- a real apply never
+    has this) names which elements carry a synthetic placeholder value with no
+    real detection to back it; those get a representative pack image by name
+    instead of silently falling to plain text, see ``image_pack_resolve.
+    resolve_profile_pack_sample_image``.
+
+    Used by the editor preview and the real apply pipeline (``engine.plan_builder._overlay_poster``)
     so a saved/uploaded poster gets the exact same per-element layout as the
     editor preview -- see :func:`_render_overlay_image`. Same JPEG quality as
     the legacy ``engine.overlay.render_poster`` it replaces, so output size
@@ -698,7 +700,8 @@ def render_overlay_jpeg(poster_bytes: bytes, style_doc_json: Mapping,
     work = _render_overlay_image(
         poster_bytes, style_doc_json, values=values, config_dir=config_dir,
         assets_root=assets_root, logo_pack=logo_pack, status_key=status_key,
-        packs_profile=packs_profile, k9m=k9m, filename=filename, rating_value=rating_value)
+        packs_profile=packs_profile, k9m=k9m, filename=filename, rating_value=rating_value,
+        sample_keys=sample_keys, layout=layout)
     buf = io.BytesIO()
     work.convert("RGB").save(buf, format="JPEG", quality=quality)
     return buf.getvalue()

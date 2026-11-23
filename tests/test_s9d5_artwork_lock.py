@@ -343,3 +343,38 @@ class TestExecutorLocksOnFirstApply:
 
         store = OverrideStore(cfg_dir / "overrides.db")
         assert store.get_lock("mov001", "metadata") is None
+
+
+class TestLockedRemoteImages:
+    """2026-11-23: the image CDN now and then serves other bytes for a URL."""
+
+    REF = "https://image.tmdb.org/t/p/original/a.jpg"
+
+    def test_locked_hash_is_used_without_downloading(self, tmp_path: Path, monkeypatch):
+        from finmeta.engine import plan_builder as pb
+        from finmeta.sources.candidate import Candidate
+        store = OverrideStore(tmp_path / "overrides.db")
+        store.set_lock("m", "backdrop", self.REF, "a" * 64)
+        fetched = []
+        monkeypatch.setattr(pb, "_content_sha256", lambda ref, **k: fetched.append(ref) or "b" * 64)
+        res = {"backdrop": Candidate(kind="backdrop", source="tmdb", ref=self.REF, lang=None, score=0.0)}
+        assert pb._start_hashes(res, set(), {"backdrop"}, "m", tmp_path, ())["backdrop"].result() == "a" * 64
+        assert fetched == []
+        # an override (not in `locked`) is still downloaded
+        assert pb._start_hashes(res, set(), set(), "m", tmp_path, ())["backdrop"].result() == "b" * 64
+
+    def test_wrong_poster_bytes_wait_until_seen_again_later(self, monkeypatch):
+        from finmeta.engine import plan_builder as pb
+        monkeypatch.setattr(pb, "_LOCK_MISMATCH", {})
+        now = [1000.0]
+        monkeypatch.setattr(pb.time, "monotonic", lambda: now[0])
+        good = hashlib.sha256(b"good").hexdigest()
+        assert pb._locked_bytes_ok("m", "poster", b"good", good)
+        assert not pb._locked_bytes_ok("m", "poster", b"odd", good)
+        now[0] += 60
+        assert not pb._locked_bytes_ok("m", "poster", b"odd", good)
+        now[0] += 600
+        assert pb._locked_bytes_ok("m", "poster", b"odd", good)   # the lock was the odd one
+        assert not pb._locked_bytes_ok("m", "poster", b"odd2", good)
+        assert pb._locked_bytes_ok("m", "poster", b"good", good)
+        assert pb._LOCK_MISMATCH == {}

@@ -1,7 +1,8 @@
+import { useEffect, useState } from 'react';
 import {
-  findFile, overlayProxyUrl, proxyUrl, reshuffleItem, skipItemKind, unskipItemKind,
+  findFile, getSeasons, itemImageUrl, overlayProxyUrl, proxyUrl, reshuffleItem, skipItemKind, unskipItemKind,
 } from '../api';
-import type { FileWrite, ItemLightView, PlanResp } from '../types';
+import type { FileWrite, ItemLightView, PlanResp, SeasonView } from '../types';
 import { FileStatusBadge, StatusBadge } from '../badges';
 import CandidatePicker from './CandidatePicker';
 
@@ -29,6 +30,11 @@ function posterUrl(files: FileWrite[], kind: string): string | null {
   return f ? proxyUrl(f.kind, f.source_ref) : null;
 }
 
+// One season's poster is its own row to skip, not the whole kind.
+function fileKey(f: FileWrite): string {
+  return f.meta?.season === undefined ? f.kind : `${f.kind}:${f.meta.season}`;
+}
+
 // The poster card must show what Apply actually writes (the overlaid
 // render), not the plain candidate proxyUrl() above would fetch --
 // source_ref deliberately stays pointed at the pre-overlay original (O7).
@@ -41,12 +47,24 @@ function posterOverlayUrl(files: FileWrite[]): { src: string; fallback: string }
 }
 
 export default function PreviewPane(p: Props) {
+  const [seasons, setSeasons] = useState<SeasonView[]>([]);
+  const itemId = p.item?.item_id;
+  const isSeries = p.item?.media_type === 'tvshow';
+  useEffect(() => {
+    let alive = true;
+    setSeasons([]);
+    if (itemId && isSeries) {
+      getSeasons(itemId).then((d) => { if (alive) setSeasons(d.seasons); }).catch(() => {});
+    }
+    return () => { alive = false; };
+  }, [itemId, isSeries]);
+
   if (!p.item) {
     return (
       <main className="preview empty">
         <div className="placeholder">
           <img src="/finmeta-icon.svg" alt="" className="placeholder-logo" />
-          <p>Select an item to see its preview.</p>
+          <p>{p.loading ? 'Building plan…' : 'Select an item to see its preview.'}</p>
         </div>
       </main>
     );
@@ -57,6 +75,45 @@ export default function PreviewPane(p: Props) {
   const poster = posterOverlayUrl(files);
   const logo = posterUrl(files, 'logo');
   const themeSong = findFile(files, 'theme_song');
+
+  const fileRow = (f: FileWrite, i: number, season?: SeasonView) => (
+    <tr key={`${f.kind}-${i}`} className={f.status}>
+      <td className="meta-kind">{IMG_KINDS.has(f.kind) || season ? '🖼' : f.kind === 'theme_song' ? '🎵' : '📄'} {season ? `season_poster · ${season.name}` : fileKey(f)}</td>
+      <td><FileStatusBadge status={f.status} /></td>
+      <td className="meta-path" title={f.target_path}>{f.target_path}</td>
+      <td className="meta-src muted" title={f.source_ref}>{f.source_ref}</td>
+      {/* S9d4a: reshuffle — bump the per-kind counter so the
+          deterministic random_top_n preset picks a new candidate.
+          S9d5: also breaks this kind's artwork lock ("re-pick
+          once" — once an item has been applied, plan/apply never
+          re-queries sources for it until this is clicked). */}
+      <td className="meta-actions">
+        {IMG_KINDS.has(f.kind) && (
+          <button
+            className="btn"
+            title="Pick another candidate for this image type and break its artwork lock, if any (works with the random_top_n preset)"
+            onClick={() => {
+              void reshuffleItem(p.item!.item_id, [f.kind])
+                .then(() => p.onCandidateSelected())
+                .catch(() => {});
+            }}>
+            ↻ Re-pick
+          </button>
+        )}
+        {/* S9d4b step 4: skip this file type for the item. */}
+        <button
+          className="btn btn-ghost"
+          title="Skip this file type — it will no longer be written for this item"
+          onClick={() => {
+            void skipItemKind(p.item!.item_id, fileKey(f))
+              .then(() => p.onSkipChanged?.())
+              .catch(() => {});
+          }}>
+          Skip
+        </button>
+      </td>
+    </tr>
+  );
 
   return (
     <main className="preview" style={backdrop ? { backgroundImage: `url(${backdrop})` } : undefined}>
@@ -71,6 +128,8 @@ export default function PreviewPane(p: Props) {
                   if (e.currentTarget.src !== poster.fallback) e.currentTarget.src = poster.fallback;
                 }}
               />
+            ) : !p.plan && p.loading ? (
+              <img className="poster-img" src={itemImageUrl(p.item.item_id, 'poster', 320, p.item.poster_tag)} alt="" />
             ) : (
               <div className="poster-img poster-fallback">no poster</div>
             )}
@@ -141,44 +200,21 @@ export default function PreviewPane(p: Props) {
               <tr><th>File</th><th>Kind</th><th>Status</th><th>Target path</th><th></th></tr>
             </thead>
             <tbody>
-              {files.map((f, i) => (
-                <tr key={`${f.kind}-${i}`} className={f.status}>
-                  <td className="meta-kind">{IMG_KINDS.has(f.kind) ? '🖼' : f.kind === 'theme_song' ? '🎵' : '📄'} {f.kind}</td>
-                  <td><FileStatusBadge status={f.status} /></td>
-                  <td className="meta-path" title={f.target_path}>{f.target_path}</td>
-                  <td className="meta-src muted" title={f.source_ref}>{f.source_ref}</td>
-                  {/* S9d4a: reshuffle — bump the per-kind counter so the
-                      deterministic random_top_n preset picks a new candidate.
-                      S9d5: also breaks this kind's artwork lock ("re-pick
-                      once" — once an item has been applied, plan/apply never
-                      re-queries sources for it until this is clicked). */}
-                  <td className="meta-actions">
-                    {IMG_KINDS.has(f.kind) && (
-                      <button
-                        className="btn"
-                        title="Pick another candidate for this image type and break its artwork lock, if any (works with the random_top_n preset)"
-                        onClick={() => {
-                          void reshuffleItem(p.item!.item_id, [f.kind])
-                            .then(() => p.onCandidateSelected())
-                            .catch(() => {});
-                        }}>
-                        ↻ Re-pick
-                      </button>
-                    )}
-                    {/* S9d4b step 4: skip this file type for the item. */}
-                    <button
-                      className="btn btn-ghost"
-                      title="Skip this file type — it will no longer be written for this item"
-                      onClick={() => {
-                        void skipItemKind(p.item!.item_id, f.kind)
-                          .then(() => p.onSkipChanged?.())
-                          .catch(() => {});
-                      }}>
-                      Skip
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {files.filter((f) => !seasons.some((x) => x.number === f.meta?.season)).map((f, i) => fileRow(f, i))}
+              {/* Every season, so it is clear which ones have a poster of your own. */}
+              {seasons.map((x, i) => {
+                const f = files.find((y) => y.meta?.season === x.number);
+                if (f) return fileRow(f, files.length + i, x);
+                if (p.plan?.skipped?.includes(`season_poster:${x.number}`)) return null; // listed below
+                return (
+                  <tr key={`season-${x.number}`} className="unchanged">
+                    <td className="meta-kind">🖼 season_poster · {x.name}</td>
+                    <td><FileStatusBadge status="unchanged" /></td>
+                    <td className="meta-path muted" colSpan={2}>no poster picked — left as it is</td>
+                    <td />
+                  </tr>
+                );
+              })}
               {/* S9d4b step 4: skipped kinds — dimmed rows with Unskip.
                   Server response carries the `skipped` list (truth source). */}
               {(p.plan.skipped ?? []).map((kind) => (
@@ -204,7 +240,9 @@ export default function PreviewPane(p: Props) {
           </table>
         )}
 
-        <CandidatePicker itemId={p.item.item_id} onSelected={p.onCandidateSelected} />
+        <CandidatePicker
+          itemId={p.item.item_id} seasons={seasons} onSeasonsChange={setSeasons}
+          onSelected={p.onCandidateSelected} />
       </div>
     </main>
   );

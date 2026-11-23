@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import time
-from typing import Dict, Optional
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -320,24 +320,22 @@ class OverlayPreviewIn(BaseModel):
     )
 
 
-def _overlay_preview_source(
-    ctx: AppContext, item_id: str, sample_data: bool = False,
-    profile_rules=None, sonarr_index: Optional[dict] = None,
-) -> tuple[Optional[bytes], dict, set, Optional[str], dict, str]:
-    """Resolve an item\u2019s best poster candidate plus its media-stream-derived
-    overlay values (resolution/HDR/audio; ratings come from per-source fields).
+_PREVIEW_INPUTS_TTL = 300.0
+_PREVIEW_INPUTS_MAX = 8
 
-    ``sonarr_index`` (2026-10-23): pass the caller's already-built index --
-    MAX_PREVIEW_ITEMS calls into this function previously each rebuilt it
-    from scratch (~4s each, found while the operator reported "rendering
-    takes extremely long" testing the new network badge). ``None`` builds it
-    here as a fallback for any other/future caller.
 
-    Reuses the same provider chain as the candidates endpoint so preview
-    posters match what Finmeta would actually apply. Returns ``(None, {})`` when
-    no poster is resolvable — the caller reports a per-item error then.
-    Overlay *values* never write anything either.
+def _preview_inputs(ctx: AppContext, item_id: str, sonarr_index: Optional[dict]) -> Optional[tuple]:
+    """Everything a preview needs that does not depend on the style being edited.
+
+    ``(poster bytes, item, streams, ratings, status key, status label, network)``
+    or ``None`` without a poster. Kept for a few minutes so dragging a badge
+    only re-renders. A local poster or an item without streams is never kept:
+    the file can change, and the stream lookup may just have failed.
     """
+    key = (ctx.gen, item_id, sonarr_index is None or bool(sonarr_index))
+    hit = ctx.preview_inputs.get(key)
+    if hit is not None and time.monotonic() - hit[0] < _PREVIEW_INPUTS_TTL:
+        return hit[1]
     from finmeta.api.routes_candidates import (
         _default_candidates_provider, _media_type,
     )
@@ -413,19 +411,56 @@ def _overlay_preview_source(
 
     posters = [c for c in by_kind.get("poster", []) if getattr(c, "ref", None)]
     if not posters:
-        return None, {}, set(), None, {}, ""
+        return None
     data, _ctype = proxy_mod.fetch("poster", posters[0].ref,
                                    allowed_roots=ctx.proxy_roots(cfg))
-    from finmeta.engine.badges import overlay_values, format_rating_value
+    # K10: rating values come from the SAME field_sources chain as apply
+    # (compute_ratings); no TMDb details are fetched here -- a missing value
+    # means NO badge by default.
     from finmeta.engine.plan_builder import compute_ratings
+    computed = compute_ratings(item, None, sources, cfg)
+    inputs = (data, item, streams, computed, status_key, status_label, network_name)
+    if streams and posters[0].ref.startswith("http"):
+        ctx.preview_inputs[key] = (time.monotonic(), inputs)
+        for old in list(ctx.preview_inputs)[:-_PREVIEW_INPUTS_MAX]:
+            ctx.preview_inputs.pop(old, None)
+    return inputs
+
+
+def _overlay_preview_source(
+    ctx: AppContext, item_id: str, sample_data: bool = False,
+    profile_rules=None, sonarr_index: Optional[dict] = None,
+    extra: Optional[dict] = None,
+) -> tuple[Optional[bytes], dict, set, Optional[str], dict, str]:
+    """Resolve an item\u2019s best poster candidate plus its media-stream-derived
+    overlay values (resolution/HDR/audio; ratings come from per-source fields).
+
+    ``sonarr_index`` (2026-10-23): pass the caller's already-built index --
+    MAX_PREVIEW_ITEMS calls into this function previously each rebuilt it
+    from scratch (~4s each, found while the operator reported "rendering
+    takes extremely long" testing the new network badge). ``None`` builds it
+    here as a fallback for any other/future caller.
+
+    ``extra`` (optional) receives the ``streams`` and ``rating_sources`` this
+    call already worked out, so the endpoint need not fetch them again.
+
+    Reuses the same provider chain as the candidates endpoint so preview
+    posters match what Finmeta would actually apply. Returns ``(None, {})`` when
+    no poster is resolvable — the caller reports a per-item error then.
+    Overlay *values* never write anything either.
+    """
+    cfg = ctx.config
+    inputs = _preview_inputs(ctx, item_id, sonarr_index)
+    if inputs is None:
+        return None, {}, set(), None, {}, ""
+    data, item, streams, computed, status_key, status_label, network_name = inputs
+    from finmeta.engine.badges import overlay_values, format_rating_value
     from finmeta.engine.format_rules import detect_all as _detect_all
     from pathlib import Path as _Path
 
     rules = profile_rules if profile_rules is not None else (getattr(cfg.overlays, "format_rules", None) or None)
-    # K10: rating values come from the SAME field_sources chain as apply
-    # (compute_ratings); no TMDb details are fetched here -- a missing value
-    # means NO badge by default.
-    computed = compute_ratings(item, None, sources, cfg)
+    if extra is not None:
+        extra.update(streams=streams, rating_sources=computed["sources"])
     values = dict(overlay_values(streams, None, categories_rules=rules, status_label=status_label,
                                  network=network_name))
     for key, v in computed["values"].items():
@@ -466,59 +501,16 @@ def _overlay_preview_source(
     return (data or b""), values, sample, status_key, k9m, filename
 
 
-def _preview_streams(ctx: AppContext, item_id: str) -> list:
-    """Raw MediaStreams for one item (same targeting as the preview source path)."""
-    from finmeta.api.routes_candidates import _media_type
-    jf = ctx.make_jellyfin(ctx.config)
-    try:
-        item = jf.get_item(item_id)
-        target_id = item.id
-        if _media_type(item) == "tvshow":
-            first_ep = jf.get_items_page(
-                parent_id=item.id, recursive=True,
-                include_item_types=["Episode"],
-                sort_by=["ParentIndexNumber", "IndexNumber"],
-                sort_order="Ascending", limit=1,
-            ).items
-            if first_ep:
-                target_id = first_ep[0].id
-        try:
-            return list(jf.get_item_media_streams_raw(target_id))
-        except Exception:
-            return []
-    except Exception:
-        return []
-    finally:
-        jf.close()
-
-
-def _preview_rating_sources(ctx: AppContext, item_id: str) -> Dict[str, Optional[str]]:
-    """Re-run the K10 rating chain for one item (cheap: cached providers)."""
-    from finmeta.engine.plan_builder import compute_ratings
-    jf = ctx.make_jellyfin(ctx.config)
-    try:
-        item = jf.get_item(item_id)
-    except Exception:
-        return {}
-    finally:
-        jf.close()
-    sources = ctx.make_sources(ctx.config)
-    try:
-        return compute_ratings(item, None, sources, ctx.config)["sources"]
-    except Exception:
-        return {}
-
-
 @router.post("/overlays/preview")
 def overlays_preview(body: OverlayPreviewIn, ctx: AppContext = Depends(get_ctx)) -> dict:
-    """Render up to MAX_PREVIEW_ITEMS preview PNGs with the posted style; writes nothing.
+    """Render up to MAX_PREVIEW_ITEMS preview JPEGs with the posted style; writes nothing.
 
     The posted ``style`` document (partial OK — missing keys default) drives a
     server-side compositor pass on each chosen item\u2019s best poster candidate.
     Output images are returned inline as data URLs so no files touch disk and
     previews never leak into apply-run backups.
     """
-    from finmeta.engine.overlay_render import render_overlay_png
+    from finmeta.engine.overlay_render import render_overlay_jpeg
     from finmeta.engine.style_presets import OverlayStyleDoc
 
     # S9d2-fix: optional profile — build the preview with that profile's style +
@@ -562,9 +554,9 @@ def overlays_preview(body: OverlayPreviewIn, ctx: AppContext = Depends(get_ctx))
     # rule plan_builder.build_plan already follows for a real apply.
     # Only the TV-status badge reads it; skipping it otherwise saves those
     # seconds on every Overlay Studio drag (operator-reported 2026-11-15).
-    from finmeta.engine.plan_builder import build_sonarr_index
+    from finmeta.engine.plan_builder import SONARR_ROWS_TTL, build_sonarr_index
     _status_el = (doc_json.get("elements") or {}).get("status") or {}
-    sonarr_index = (build_sonarr_index(ctx.config, ctx.secrets)
+    sonarr_index = (build_sonarr_index(ctx.config, ctx.secrets, max_age=SONARR_ROWS_TTL)
                     if _status_el.get("enabled", True) and "status" in (doc_json.get("elements") or {}) else {})
 
     results = []
@@ -572,9 +564,10 @@ def overlays_preview(body: OverlayPreviewIn, ctx: AppContext = Depends(get_ctx))
         entry: dict = {"item_id": item_id}
         try:
             prof_rules = (prof or {}).get("format_rules") if prof else None
+            extra: dict = {}
             poster_bytes, values, sample, status_key, k9m, filename = _overlay_preview_source(
                 ctx, item_id, sample_data=body.sample_data, profile_rules=prof_rules,
-                sonarr_index=sonarr_index)
+                sonarr_index=sonarr_index, extra=extra)
             if not poster_bytes:
                 raise ValueError("no resolvable poster for this item")
             # S9d4c: the UI's "Base image" / "With overlay" comparison must be
@@ -603,13 +596,13 @@ def overlays_preview(body: OverlayPreviewIn, ctx: AppContext = Depends(get_ctx))
             _local_root = _local_src.path if _local_src is not None else None
             _packs = list(getattr(getattr(ctx.config, "overlays", None), "logo_packs", []) or [])
             layout: list = []
-            png = render_overlay_png(
+            jpeg = render_overlay_jpeg(
                 poster_bytes, doc_json, values=values,
                 config_dir=ctx.config_dir, assets_root=_local_root, logo_pack=_packs,
                 status_key=status_key, packs_profile=prof, k9m=k9m, filename=filename,
                 sample_keys=sample, layout=layout)
-            b64 = base64.b64encode(png).decode("ascii")
-            entry["image"] = f"data:image/png;base64,{b64}"
+            b64 = base64.b64encode(jpeg).decode("ascii")
+            entry["image"] = f"data:image/jpeg;base64,{b64}"
             # Where each drawn badge really landed (natural px of `image`), so
             # the Overlay Studio canvas can put its drag handles on the real
             # badges instead of an approximation. `ghost` entries were not
@@ -619,14 +612,14 @@ def overlays_preview(body: OverlayPreviewIn, ctx: AppContext = Depends(get_ctx))
             if sample:
                 entry["samples"] = sorted(sample)
             # K10: which source supplied each rating value, for the UI/report.
-            src_map = {k: v for k, v in _preview_rating_sources(ctx, item_id).items() if v}
+            src_map = {k: v for k, v in extra["rating_sources"].items() if v}
             if src_map:
                 entry["rating_sources"] = src_map
             # K9: which format rule matched per category for THIS item (from the
             # same streams/rules the badges were derived from), else "no match".
             from finmeta.engine.format_rules import detect_all, streams_to_dicts
             _rules = prof_rules if prof_rules is not None else (getattr(ctx.config.overlays, "format_rules", None) or None)
-            det = detect_all(streams_to_dicts(_preview_streams(ctx, item_id)), _rules)
+            det = detect_all(streams_to_dicts(extra["streams"]), _rules)
             matched: dict = {}
             for cat in ("resolution", "dynamic_range", "audio"):
                 d = det.get(cat)

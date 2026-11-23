@@ -246,11 +246,11 @@ button { font: inherit; cursor: pointer; }
   background: var(--bg-3); border: 2px solid var(--border);
 }
 .cand-thumb img { width: 100%; aspect-ratio: 2/3; object-fit: cover; display: block; }
-.cand-thumb.backdrop, .cand-thumb.landscape, .cand-thumb.season_poster { width: 150px; }
+.cand-thumb.backdrop, .cand-thumb.landscape { width: 150px; }
 .cand-thumb.backdrop img, .cand-thumb.landscape img { aspect-ratio: 16/9; }
 .cand-thumb.selected { border-color: var(--accent); }
 .cand-thumb.busy { opacity: 0.6; }
-.cand-src { position: absolute; bottom: 0; left: 0; right: 0; font-size: 0.6rem; padding: 2px 4px; background: rgba(0,0,0,0.7); color: var(--fg); }
+.cand-src { position: absolute; bottom: 0; left: 0; right: 0; font-size: 0.6rem; padding: 2px 4px; background: rgba(0,0,0,0.7); color: #fff; }
 .cand-list { display: flex; flex-direction: column; gap: 4px; }
 .cand-opt {
   display: flex; align-items: center; gap: 8px; padding: 6px 10px; text-align: left;
