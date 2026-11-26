@@ -695,3 +695,16 @@ class TestGetImageBytes:
         with JellyfinClient(BASE, token="tok", user_id="uid") as c:
             with pytest.raises(JellyfinError):
                 c.get_image_bytes("abc", "Primary")
+
+
+class TestRefreshItem:
+    @respx.mock
+    def test_default_refresh_never_replaces_images(self):
+        """A replace-all-images refresh makes Jellyfin delete Finmeta's poster.jpg
+        on unlocked series (it saves a fresh folder.jpg instead), 2026-11-26."""
+        route = respx.post(f"{BASE}/Items/abc/Refresh").mock(return_value=httpx.Response(204))
+        with JellyfinClient(BASE, token="tok", user_id="uid") as c:
+            c.refresh_item("abc")
+        params = route.calls.last.request.url.params
+        assert params["replaceAllImages"] == "false"
+        assert params["replaceAllMetadata"] == "false"

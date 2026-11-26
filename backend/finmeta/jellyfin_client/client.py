@@ -298,7 +298,10 @@ class JellyfinClient:
                      metadata_refresh_mode: str = "FullRefresh",
                      image_refresh_mode: str = "FullRefresh",
                      replace_all_metadata: bool = False,
-                     replace_all_images: bool = True) -> None:
+                     replace_all_images: bool = False) -> None:
+        # Never replace images by default: on an unlocked item with remote image
+        # fetchers on, Jellyfin downloads a fresh poster, saves it as folder.jpg and
+        # deletes the poster.jpg Finmeta just wrote (seen live 2026-11-26 on series).
         self._request("POST", f"/Items/{item_id}/Refresh", params=self._params(
             metadataRefreshMode=metadata_refresh_mode,
             imageRefreshMode=image_refresh_mode,
