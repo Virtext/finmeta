@@ -10,7 +10,7 @@ import hashlib
 import logging
 import sqlite3
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from finmeta.engine import candidate_ref
 from finmeta.engine.plan import FileWrite, ItemPlan, WritePlan
@@ -112,6 +112,17 @@ class OverrideStore:
                     ref       TEXT NOT NULL,
                     sha256    TEXT NOT NULL,
                     locked_at REAL NOT NULL,
+                    PRIMARY KEY (item_id, kind)
+                )"""
+            )
+            # A locked image's download that did not match its lock: kept on
+            # disk so the "seen again 10 minutes later" check survives restarts.
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS lock_mismatch (
+                    item_id    TEXT NOT NULL,
+                    kind       TEXT NOT NULL,
+                    sha256     TEXT NOT NULL,
+                    first_seen REAL NOT NULL,
                     PRIMARY KEY (item_id, kind)
                 )"""
             )
@@ -221,6 +232,23 @@ class OverrideStore:
             cur = conn.execute(
                 "DELETE FROM artwork_locks WHERE item_id=? AND kind=?", (item_id, kind))
         return cur.rowcount > 0
+
+    def get_mismatch(self, item_id: str, kind: str) -> Optional[Tuple[str, float]]:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT sha256, first_seen FROM lock_mismatch WHERE item_id=? AND kind=?",
+                (item_id, kind)).fetchone()
+        return (row["sha256"], row["first_seen"]) if row else None
+
+    def set_mismatch(self, item_id: str, kind: str, sha256: str, first_seen: float) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO lock_mismatch (item_id, kind, sha256, first_seen) "
+                "VALUES (?,?,?,?)", (item_id, kind, sha256, first_seen))
+
+    def clear_mismatch(self, item_id: str, kind: str) -> None:
+        with self._conn() as conn:
+            conn.execute("DELETE FROM lock_mismatch WHERE item_id=? AND kind=?", (item_id, kind))
 
     def locks_for_item(self, item_id: str) -> Dict[str, Dict[str, object]]:
         with self._conn() as conn:

@@ -367,7 +367,7 @@ class TestLockedRemoteImages:
         from finmeta.engine import plan_builder as pb
         monkeypatch.setattr(pb, "_LOCK_MISMATCH", {})
         now = [1000.0]
-        monkeypatch.setattr(pb.time, "monotonic", lambda: now[0])
+        monkeypatch.setattr(pb.time, "time", lambda: now[0])
         good = hashlib.sha256(b"good").hexdigest()
         assert pb._locked_bytes_ok("m", "poster", b"good", good)
         assert not pb._locked_bytes_ok("m", "poster", b"odd", good)
@@ -378,3 +378,27 @@ class TestLockedRemoteImages:
         assert not pb._locked_bytes_ok("m", "poster", b"odd2", good)
         assert pb._locked_bytes_ok("m", "poster", b"good", good)
         assert pb._LOCK_MISMATCH == {}
+
+    def test_wrong_poster_bytes_sighting_survives_restart_and_heals_lock(self, monkeypatch, tmp_path):
+        """A container restart used to forget the first sighting, so every stale
+        lock skipped its overlay again on the first run after it (2026-11-27)."""
+        from finmeta.engine import plan_builder as pb
+        from finmeta.api.overrides import OverrideStore
+        store = OverrideStore(tmp_path / "overrides.db")
+        good = hashlib.sha256(b"good").hexdigest()
+        new = hashlib.sha256(b"new").hexdigest()
+        store.set_lock("m", "poster", "https://image.tmdb.org/t/p/original/x.jpg", good)
+        now = [1000.0]
+        monkeypatch.setattr(pb.time, "time", lambda: now[0])
+        monkeypatch.setattr(pb, "_LOCK_MISMATCH", {})
+        assert not pb._locked_bytes_ok("m", "poster", b"new", good, tmp_path)
+        monkeypatch.setattr(pb, "_LOCK_MISMATCH", {})   # restart: memory is gone
+        now[0] += 601
+        assert pb._locked_bytes_ok("m", "poster", b"new", good, tmp_path)
+        assert store.get_lock("m", "poster")["sha256"] == new
+        assert store.get_lock("m", "poster")["ref"] == "https://image.tmdb.org/t/p/original/x.jpg"
+        assert store.get_mismatch("m", "poster") is None
+        # healed: the new bytes now pass at once, the old ones are the odd ones
+        assert pb._locked_bytes_ok("m", "poster", b"new", new, tmp_path)
+        assert not pb._locked_bytes_ok("m", "poster", b"good", new, tmp_path)
+

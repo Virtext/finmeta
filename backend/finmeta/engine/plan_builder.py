@@ -161,21 +161,42 @@ _LOCK_MISMATCH: Dict[Tuple[str, str], Tuple[str, float]] = {}
 _LOCK_MISMATCH_SETTLE = 600.0
 
 
-def _locked_bytes_ok(item_id: str, kind: str, data: bytes, lock_sha: str) -> bool:
+def _locked_bytes_ok(item_id: str, kind: str, data: bytes, lock_sha: str,
+                     config_dir=None) -> bool:
     """False while a locked image's download may just be a bad CDN minute.
 
     The same wrong hash again ten minutes later means the lock itself was
-    recorded from such a download; then the bytes are fine.
+    recorded from bytes the CDN no longer serves; then the bytes are fine.
+    With an overrides.db the sighting is kept there (an in-memory one was
+    lost on every container restart, so the first run after one skipped the
+    overlay on every stale lock -- 481 of 489 series, seen 2026-11-27) and
+    the lock is healed to the new hash so it stops coming back.
     """
     sha = hashlib.sha256(data).hexdigest()
+    db = Path(config_dir) / "overrides.db" if config_dir is not None else None
+    store = None
+    if db is not None and db.is_file():
+        from finmeta.api.overrides import OverrideStore
+        store = OverrideStore(db)
     if sha == lock_sha:
+        if store:
+            store.clear_mismatch(item_id, kind)
         _LOCK_MISMATCH.pop((item_id, kind), None)
         return True
-    seen = _LOCK_MISMATCH.get((item_id, kind))
+    seen = store.get_mismatch(item_id, kind) if store else _LOCK_MISMATCH.get((item_id, kind))
     if seen is None or seen[0] != sha:
-        _LOCK_MISMATCH[(item_id, kind)] = (sha, time.monotonic())
+        if store:
+            store.set_mismatch(item_id, kind, sha, time.time())
+        else:
+            _LOCK_MISMATCH[(item_id, kind)] = (sha, time.time())
         return False
-    return time.monotonic() - seen[1] >= _LOCK_MISMATCH_SETTLE
+    if time.time() - seen[1] < _LOCK_MISMATCH_SETTLE:
+        return False
+    lock = store.get_lock(item_id, kind) if store else None
+    if lock:
+        store.set_lock(item_id, kind, str(lock["ref"]), sha)
+        store.clear_mismatch(item_id, kind)
+    return True
 
 
 def _candidate_bytes(source_ref: str, timeout: float = 30.0, *,
@@ -267,7 +288,7 @@ def _overlay_poster(
         return None
     lock_sha = _lock_sha256(item.id, "poster", config_dir)
     if (lock_sha and not is_override and cand.ref.startswith("http")
-            and not _locked_bytes_ok(item.id, "poster", poster_bytes, lock_sha)):
+            and not _locked_bytes_ok(item.id, "poster", poster_bytes, lock_sha, config_dir)):
         backup = find_original_backup(target, config_dir=config_dir)
         if backup is None or hashlib.sha256(backup.read_bytes()).hexdigest() != lock_sha:
             logger.warning("poster source for %s is not the locked image (starts with %r); "

@@ -569,7 +569,7 @@ def overlays_preview(body: OverlayPreviewIn, ctx: AppContext = Depends(get_ctx))
                 ctx, item_id, sample_data=body.sample_data, profile_rules=prof_rules,
                 sonarr_index=sonarr_index, extra=extra)
             if not poster_bytes:
-                raise ValueError("no resolvable poster for this item")
+                raise ValueError("no poster for this item -- is Poster turned on for its library?")
             # S9d4c: the UI's "Base image" / "With overlay" comparison must be
             # the SAME candidate -- return the exact pre-compositing bytes
             # this preview is about to render on top of, instead of the UI
